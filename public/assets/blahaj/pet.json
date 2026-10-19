@@ -1,0 +1,7 @@
+{
+  "id": "blahaj",
+  "displayName": "Blåhaj",
+  "description": "A friendly blue plush shark pet with a white belly and floppy fins.",
+  "spritesheetPath": "spritesheet.webp",
+  "kind": "object"
+}
