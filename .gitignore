@@ -1,0 +1,35 @@
+# Dependencies and local package caches
+node_modules/
+node_modules.stale/
+.pnpm-store/
+
+# Build and packaging output
+dist/
+dist-electron/
+release/
+out/
+outputs/
+
+# Local smoke-test and Electron runtime data
+work/
+
+# Tool caches
+.vite/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
