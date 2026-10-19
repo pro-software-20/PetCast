@@ -1,0 +1,31 @@
+{
+  "name": "petcast-stage1",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PetCast Stage 1 desktop companion shell",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "pnpm run build:electron && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "build": "tsc -b && vite build --base=./ --outDir=dist && tsc -p electron/tsconfig.json",
+    "start": "electron .",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/react": "18.3.18",
+    "@types/react-dom": "18.3.5",
+    "@vitejs/plugin-react": "4.7.0",
+    "concurrently": "9.1.2",
+    "cross-env": "7.0.3",
+    "electron": "28.3.3",
+    "typescript": "5.7.3",
+    "vite": "5.4.21",
+    "wait-on": "8.0.1"
+  }
+}
