@@ -16,11 +16,17 @@ import type { AutoFishingReport, MailItem, ResetCompletedNotice } from './types/
 import type { UsageScenarioId, UsageState } from './types/usage'
 import { createMockUsageState, MockUsageProvider } from './usage/MockUsageProvider'
 import { MockResetSignalProvider } from './usage/MockResetSignalProvider'
+import type { UsageProvider } from './usage/UsageProvider'
+import { UsageReader } from './usage/UsageReader'
 
 export default function App() {
   const desktopApi = window.petcast
   const isBrowserFallback = !desktopApi
-  const usageProvider = useMemo(() => new MockUsageProvider('balanced'), [])
+  const mockUsageProvider = useMemo(() => new MockUsageProvider('balanced'), [])
+  // Real providers are connected here by C; mock controls remain separate.
+  const usageProvider: UsageProvider = mockUsageProvider
+  const usageReader = useMemo(() => new UsageReader(usageProvider), [usageProvider])
+  const [usageReadStatus, setUsageReadStatus] = useState('模拟数据')
   const resetSignalProvider = useMemo(() => new MockResetSignalProvider(), [])
   const [expanded, setExpanded] = useState(false)
   const [dragging, setDragging] = useState(false)
@@ -60,7 +66,10 @@ export default function App() {
   const analysis = useMemo(() => analyzeUsage(usage), [usage])
 
   const refreshUsage = async () => {
-    const nextUsage = await usageProvider.getCurrentUsage()
+    const reading = await usageReader.read()
+    setUsageReadStatus(`${reading.source === 'mock' ? '模拟数据' : '真实数据'}${reading.status === 'fresh' ? '' : reading.status === 'stale' ? ' · 已过期' : ' · 读取失败'}`)
+    if (!reading.data) return usageRef.current
+    const nextUsage = reading.data
     usageRef.current = nextUsage
     setUsage(nextUsage)
     return nextUsage
@@ -222,7 +231,7 @@ export default function App() {
       const restored = restoreGameSave(rawSave, usageRef.current)
       if (restored) {
         const { save, usage: restoredUsage } = restored
-        usageProvider.update(restoredUsage)
+        mockUsageProvider.update(restoredUsage)
         usageRef.current = restoredUsage
         codexRef.current = save.codex
         mailItemsRef.current = save.mailItems
@@ -273,9 +282,15 @@ export default function App() {
 
   useEffect(() => {
     if (!saveReady) return
-    const timer = window.setInterval(refreshUsage, 30_000)
-    return () => window.clearInterval(timer)
-  }, [saveReady, usageProvider])
+    let active = true
+    let timer: number | undefined
+    const poll = async () => {
+      await refreshUsage()
+      if (active) timer = window.setTimeout(poll, 30_000)
+    }
+    void poll()
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [saveReady, usageReader])
 
   useEffect(() => {
     if (!saveReady || initialMailSeeded.current) return
@@ -416,7 +431,7 @@ export default function App() {
   }
 
   const selectScenario = async (scenario: UsageScenarioId) => {
-    usageProvider.setScenario(scenario)
+    mockUsageProvider.setScenario(scenario)
     const nextUsage = await refreshUsage()
     const nextAnalysis = analyzeUsage(nextUsage)
     dragDistance.current = 0
@@ -425,7 +440,7 @@ export default function App() {
   }
 
   const patchUsage = async (patch: Partial<UsageState>) => {
-    usageProvider.update(patch)
+    mockUsageProvider.update(patch)
     await refreshUsage()
   }
 
@@ -460,6 +475,7 @@ export default function App() {
         )}
         <div className="grain" />
         <header className="topbar">
+          <small title={usageReadStatus}>{usageReadStatus}</small>
           <div className={`status mood-${analysis.petMood}`}><i /> {analysis.badge}</div>
           {desktopApi && <button className="close" onClick={() => desktopApi.close()} aria-label="关闭">×</button>}
         </header>
@@ -528,7 +544,7 @@ export default function App() {
 
         {dragging && <div className="drag-pill">移动中</div>}
       </section>
-      {expanded && (
+      {expanded && usageProvider.source === 'mock' && (
         <MockUsageControls
           usage={usage}
           onScenario={selectScenario}
@@ -549,3 +565,4 @@ export default function App() {
     </main>
   )
 }
+

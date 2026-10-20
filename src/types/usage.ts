@@ -5,7 +5,9 @@ export interface UsageState {
   weeklyRemaining: number
   shortWindowResetAt: Date
   weeklyResetAt: Date
+  /** Short-window percentage points consumed per hour, never Token/hour. */
   burnRate: number
+  /** Historical baseline in the same unit and scope as burnRate. */
   baselineBurnRate: number
   sampledAt: Date
   recentResetType: RecentResetType
@@ -50,3 +52,4 @@ export interface UsageAnalysis {
   shortResetText: string
   weeklyResetText: string
 }
+

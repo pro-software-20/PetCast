@@ -29,7 +29,8 @@ PetCast 是一个 Windows 桌面宠物与 AI 额度使用情况分析工具。
 - 获取周额度剩余比例。
 - 获取两种额度的重置时间。
 - 定期刷新额度数据。
-- 获取失败时自动退回模拟数据。
+- 获取失败时保留上次真实快照并标记过期；没有缓存时显示不可用。
+- 模拟演示由用户明确选择，不能自动用模拟数字冒充真实额度。
 - 不让真实数据读取失败导致程序崩溃。
 
 主要文件：
@@ -44,15 +45,17 @@ src/usage/MockUsageProvider.ts
 
 ```text
 src/usage/CodexUsageProvider.ts
-src/usage/FallbackUsageProvider.ts
 src/usage/providerFactory.ts
 ```
 
 A 需要实现现有接口：
 
+已有 `src/usage/UsageReader.ts` 统一处理读取校验、超时和旧快照回退，不再新增自动混用真实/模拟数据的 FallbackUsageProvider。
+
 ```ts
 interface UsageProvider {
-  getCurrentUsage(): Promise<UsageState>;
+  readonly source: 'real' | 'mock';
+  getCurrentUsage(signal?: AbortSignal): Promise<UsageState>;
 }
 ```
 
@@ -64,8 +67,8 @@ interface UsageState {
   weeklyRemaining: number;
   shortWindowResetAt: Date;
   weeklyResetAt: Date;
-  burnRate: number;
-  baselineBurnRate: number;
+  burnRate: number; // 短窗口剩余比例消耗的百分点/小时
+  baselineBurnRate: number; // 同口径历史基准，不是 Token/小时
   sampledAt: Date;
   recentResetType: "short" | "weekly" | null;
 }
@@ -73,10 +76,18 @@ interface UsageState {
 
 注意：
 
-- 剩余比例统一使用 `0–100`。
+- 剩余比例统一使用 `0–100`，数字必须有限，时间必须为有效 `Date`。跨 IPC / JSON 使用 UTC ISO 8601 字符串，进入业务层时显式还原。
+- 当前 `UsageState` 是完整快照契约。必填字段缺失、无授权或未知时应拒绝返回，不能填 0 或模拟值。未来支持部分可用窗口时，要同步升级分析、游戏和持久化的空值处理。
+- `burnRate` 使用同一账号、同一短窗口的连续采样，按实际时间差计算消耗百分点/小时。首次采样或跨重置时无法可靠计算，应明确数据不足；不得把额度百分比当 Token 账单。
+- `sampledAt` 是源数据的实际采样时间，读取缓存不能刷新它。`UsageReader` 另记 `checkedAt`，返回 `fresh/stale/unavailable`。
+- `recentResetType` 仅在确认窗口发生重置时产生。真实模式倒计时到点只触发重新查询，不能照搬 Mock 自动补满逻辑。
+- Provider 实现必须响应 AbortSignal。`UsageReader` 负责超时和错误封装，页面按请求完成后再等待 30 秒轮询；不在 Provider 内叠加无界重试。
+- 每个 Provider/账号使用独立 UsageReader。切换来源时重建 Reader、清空旧视图或显示加载状态，不跨来源使用缓存。
 - Provider 不负责修改页面。
 - 不要直接大规模修改 `App.tsx`。
-- A 完成数据模块后，由 C 接入主程序。
+- A 完成数据模块后，由 C 接入主程序。业务只依赖 `UsageProvider`；`setScenario/update` 属于独立 Mock 控制，不加入真实 Provider 接口。
+- C 在真实模式关闭 Mock 控制台，不把游戏存档中的模拟额度写回真实 Provider，也不在首次读取前显示默认模拟数字。
+- Codex 授权读取由主进程封装，preload 只暴露经过校验的额度结果，不能把凭据传给渲染进程。具体读取途径仍需 A 验证，不宣称已经接通。
 - 如果无法稳定读取真实数据，必须保留 Mock Provider 作为演示保底。
 
 验收标准：
@@ -114,35 +125,17 @@ src/components/TaskAnalysisPanel.tsx
 建议接口：
 
 ```ts
+// 唯一类型定义位于 src/types/taskAnalysis.ts，业务模块从该文件导入。
 interface TaskAnalysisInput {
   prompt: string;
-  files: Array<{
-    name: string;
-    type: string;
-    size: number;
-  }>;
+  files: Array<{ name: string; type: string; size: number }>;
 }
-
-interface TaskAnalysisResult {
-  taskType: string;
-  complexity: "low" | "medium" | "high";
-  estimatedInputTokens: {
-    min: number;
-    max: number;
-  };
-  estimatedOutputTokens: {
-    min: number;
-    max: number;
-  };
-  optimizedPrompt: string;
-  canRunInParallel: boolean;
-  parallelPlan: string[];
-  warnings: string[];
-}
-
-interface TaskAnalyzer {
-  analyze(input: TaskAnalysisInput): Promise<TaskAnalysisResult>;
-}
+// type 为 MIME，size 单位为字节；本版仅接收元信息，没有读取文件内容。
+// TaskAnalysisResult 保留复杂度、Token 区间、优化文本、并行建议，
+// 并补充 estimationBasis: 'heuristic-metadata' 与 assumptions: string[]。
+// TaskAnalyzer.analyze 返回 TaskAnalysisOutcome：
+// { ok: true, result } 或 { ok: false, code, message }。
+// 空输入、非法文件大小、超长输入以结构化失败返回，UI 明确提示。
 ```
 
 第一版不必追求精确预测，可以使用规则估算：
@@ -158,7 +151,11 @@ interface TaskAnalyzer {
 - 页面组件不能直接写复杂分析规则。
 - 分析规则放在 `src/task-analysis/`。
 - UI 只负责收集输入和展示结果。
-- 输出中应明确写“估算结果”，不能伪装成精确 Token 账单。
+- 输出中应明确写“基于 Prompt 和文件元信息的粗估”，不能暗示已经阅读附件，不能伪装成精确 Token 账单。
+- 区间必须是非负整数且 min <= max；空 prompt 且无文件为 EMPTY_INPUT。输入上限由 B 配置并在界面说明，缺失文件元信息和非有限/负数字节数为 INVALID_FILE。
+- `parallelPlan: string[]` 只展示建议，不能直接执行。`canRunInParallel=false` 时可以展示串行建议，文字必须解释依赖。
+- 指定分析模型、紧急程度、模型优先级、人工改派、自动执行不是本轮规则分析模块的已实现功能。将来执行任务时再增加任务 ID、dependsOn、模型与授权字段。
+- Prompt 优化不得删除用户约束；建议与原文对照，用户确认后才用于调用。
 - B 不直接修改桌宠和河流页面。
 
 验收标准：
@@ -210,28 +207,15 @@ public/assets/pets/
 public/assets/scenes/
 ```
 
-宠物配置建议：
+宠物与场景配置以 `src/types/appearance.ts` 为唯一类型来源：
 
-```ts
-interface PetDefinition {
-  id: string;
-  name: string;
-  spriteUrl: string;
-  frameWidth: number;
-  frameHeight: number;
-}
-```
-
-场景配置建议：
-
-```ts
-interface SceneDefinition {
-  id: string;
-  name: string;
-  backgroundUrl: string;
-  themeClass: string;
-}
-```
+- PetDefinition 包含 id、name、spriteUrl、frameWidth、frameHeight、columns、rows 和 animations。
+- animations 按 idle、drag-left、drag-right、wave、celebrate、tired、anxious、eat、sleep 等动作配置帧坐标和 frameMs。
+- idle 必须存在且非空；其他动作缺失时退回 idle。坐标不可超过网格，帧间隔必须大于零。
+- C 接入新皮肤时必须同步改造 Pet.tsx 的固定帧表、背景尺寸和人物名称，不能只替换图片 URL。本次仅冻结配置类型，尚未实现换皮渲染器和选择界面。
+- SceneDefinition 包含 id、name、backgroundUrl、themeClass；场景变体要保留钓鱼、邮箱和房间的点击区域。
+- AppearancePreferences 单独保存 version、petId、sceneId，读取时核对注册表，未知 ID 回退默认。由 C 实现独立存储，不覆盖游戏存档。
+- “啃脑子”、睡眠等角色动作可扩展动作表，但分心事件来源与动作呈现分开，缺少动作仍可正常显示。
 
 注意：
 
@@ -279,29 +263,34 @@ src/components/UsageHistoryPanel.tsx
 src/components/WeeklyReportPanel.tsx
 ```
 
-建议的数据结构：
+数据结构统一从 `src/types/usageHistory.ts` 导入，不在各模块重复定义。
+
+UsageSample 除原有字段外，保存 source、scopeId、shortWindowResetAt、weeklyResetAt。scopeId 是非敏感的账号/数据源作用域标识，不得存入 Token、Cookie 或邮箱。所有时间为 UTC ISO 8601。
+
+UsageReport 显式记录 source、scopeId、timeZone、coverageMs、warnings；数据不足时平均和峰值可以为 null，不能用 0 冒充无消耗。
+
+存储边界已经定义为 UsageHistoryStore（目前仅接口，尚无实现）：
 
 ```ts
-interface UsageSample {
-  id: string;
-  sampledAt: string;
-  shortWindowRemaining: number;
-  weeklyRemaining: number;
-  burnRate: number;
-}
-
-interface UsageReport {
-  startAt: string;
-  endAt: string;
-  sampleCount: number;
-  averageBurnRate: number;
-  peakBurnRate: number;
-  activePeriods: string[];
-  shortQuotaPressureCount: number;
-  weeklyQuotaPressureCount: number;
-  suggestions: string[];
-}
+appendUsageSample(sample: UsageSample): Promise<void>;
+queryUsageSamples(query: {
+  startAt: string; endAt: string; source: 'real' | 'mock'; scopeId: string;
+}): Promise<UsageSample[]>;
+clearUsageHistory(scope: { source: 'real' | 'mock'; scopeId: string }): Promise<void>;
 ```
+
+D 负责浏览器存储与纯统计函数，C 负责 Electron 主进程文件存储和 preload 桥接，双方共同验证相同契约。现有 saveGame/loadGameSave 只保存游戏，不能复用来写历史。接口缺失时不能静默切到另一种存储。
+
+统一规则：
+
+- 只追加校验通过的 fresh 数据。真实和 Mock 按 source + scopeId 隔离查询；陈旧缓存不得当作新样本反复写入。
+- 同作用域、同 sampledAt 幂等去重；查询区间为 [startAt, endAt)，按采样时间升序。
+- 每个作用域最多保留 90 天、20,000 条，先剔除过期再保留最新记录。真实周报不合并演示数据；模拟月报标为示意。
+- 独立历史文件使用版本号、字段校验、串行写入和临时文件原子替换。读取失败应与空历史区分，不自动覆盖原文件。
+- 仅同一窗口且相邻间隔 <= 5 分钟的有效片段参与速率统计。额度增加、重置时间变化或长断档均断开片段，不计算跨重置消耗。
+- 平均速度按有效片段时长加权，峰值取有效片段速度最大值。coverageMs 记录有效覆盖时长，断档写入 warnings。
+- 短额度 <= 25%、周额度 <= 22% 为紧张。PressureCount 统计从非紧张进入紧张的次数，不是采样次数；首次样本/重置/断档只建立状态，不虚构进入事件。
+- 活跃时段按明确 timeZone 对有消耗的有效片段分桶，不按样本数量推断。数据不足明确提示，额度百分点不能换算为精确 Token 或金额。
 
 建议第一版周报显示：
 
@@ -626,12 +615,13 @@ pnpm dev
 3. A：真实 Codex 数据模块。
 4. C：统一接入页面并处理冲突。
 
-A 如果尚未完成真实读取，先提交 Provider 结构和模拟回退机制，不能阻塞整个项目。
+A 如果尚未完成真实读取，先提交 Provider 结构、失败状态与显式模拟模式，不能阻塞整个项目。
 
 ### 10 月 26 日：集成与打包
 
 - 检查所有入口。
-- 检查真实数据与 Mock 切换。
+- 检查真实数据与 Mock 切换，失败时不冒充真实数据。
+- 检查冷启动失败、超时、过期缓存、跨重置、重复采样、历史数据隔离和皮肤缺失动作。
 - 检查存档。
 - 检查桌宠模式。
 - 生成 EXE。
@@ -712,3 +702,4 @@ pnpm dev
 - 已推送到个人分支。
 - 已创建 Pull Request。
 - Pull Request 中写明测试方法。
+
