@@ -29,9 +29,10 @@ export const deriveRiverEnvironment = (
       : 'day'
 
   const dayLabel = dayPhase === 'night' ? '夜晚' : dayPhase === 'twilight' ? '晨昏' : '白天'
-  const rateRatio = usage.burnRate / Math.max(usage.baselineBurnRate, 0.5)
+  const hasRate = usage.burnRate !== null && usage.baselineBurnRate !== null
+  const rateRatio = hasRate ? usage.burnRate! / Math.max(usage.baselineBurnRate!, 0.5) : 1
   const flow: RiverFlow = rateRatio >= 1.55 ? 'rapid' : rateRatio <= 0.72 ? 'calm' : 'steady'
-  const flowLabel = flow === 'rapid' ? '湍急' : flow === 'calm' ? '舒缓' : '平稳'
+  const flowLabel = !hasRate ? '速度数据不足' : flow === 'rapid' ? '湍急' : flow === 'calm' ? '舒缓' : '平稳'
   const flowDurationSeconds = clamp(11.8 - rateRatio * 3.2, 3.4, 10.5)
 
   const depth: RiverDepth = usage.weeklyRemaining >= 65

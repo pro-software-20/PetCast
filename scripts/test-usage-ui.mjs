@@ -1,0 +1,122 @@
+/** Fixture-based renderer acceptance. No user credentials or network required. Build first. */
+import assert from 'node:assert/strict'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { spawn } from 'node:child_process'
+const root = fileURLToPath(new URL('..', import.meta.url))
+if (!process.versions.electron) {
+  const { default: electron } = await import('electron')
+  const env = {...process.env}; delete env.ELECTRON_RUN_AS_NODE
+  const child = spawn(electron, [fileURLToPath(import.meta.url)], {cwd: root, env, windowsHide: true, stdio: 'inherit'})
+  const timer = setTimeout(() => child.kill(), 45000)
+  child.on('exit', code => { clearTimeout(timer); process.exitCode = code ?? 1 })
+} else {
+  const { app, BrowserWindow, ipcMain } = await import('electron')
+  app.setPath('userData', await mkdtemp(path.join(tmpdir(), 'petcast-ui-')))
+  void app.whenReady().then(async () => {
+  const scopeId = `codex-${'a'.repeat(64)}`
+  const now = new Date()
+  const usage = { shortWindowRemaining: 37, weeklyRemaining: 61, sampledAt: now.toISOString(),
+    shortWindowResetAt: new Date(+now + 3600000).toISOString(), weeklyResetAt: new Date(+now + 4 * 86400000).toISOString() }
+  const mockUsage = {...usage, shortWindowRemaining: 88, weeklyRemaining: 77, burnRate: 5, baselineBurnRate: 5}
+  const initialSave = {version: 1, usage: mockUsage, aquarium: [], codex: {}, mailItems: [], unreadMailIds: [], autoFishingEnabled: false, resetWatchEnabled: false}
+  let saved = initialSave, mode = 'login', resolvePending
+  ipcMain.handle('storage:load', () => saved)
+  ipcMain.handle('storage:save', (_e, value) => { saved = value })
+  ipcMain.handle('codex:read-usage', async () => {
+    if (mode === 'pending') return new Promise(resolve => { resolvePending = resolve })
+    if (mode === 'login') return {ok: false, code: 'LOGIN_REQUIRED'}
+    if (mode === 'stale') return {ok: false, code: 'UNAVAILABLE', scopeId}
+    return {ok: true, snapshot: {...usage, scopeId}}
+  })
+  const win = new BrowserWindow({width: 338, height: 226, frame: false, show: false, webPreferences: {
+    preload: path.join(root, 'dist-electron/preload.cjs'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false,
+  }})
+  ipcMain.handle('window:toggle-expanded', (_e, expanded) => win.setSize(expanded ? 1008 : 338, expanded ? 526 : 226))
+  const js = code => win.webContents.executeJavaScript(code)
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+  async function wait(code, label) {
+    const deadline = Date.now() + 5000
+    while (Date.now() < deadline) { if (await js(code)) return; await sleep(40) }
+    throw new Error(`UI timeout: ${label}`)
+  }
+  const click = label => js(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(label)}); if(!b)throw Error('missing button'); b.click()})()`)
+  const status = (source, value) => `document.querySelector('main')?.dataset.usageSource === '${source}' && document.querySelector('main')?.dataset.usageStatus === '${value}'`
+  async function shot(name) {
+    if (!process.env.PETCAST_UI_SCREENSHOTS) return
+    await win.webContents.capturePage()
+    await sleep(150)
+    await mkdir(process.env.PETCAST_UI_SCREENSHOTS, {recursive: true})
+    await writeFile(path.join(process.env.PETCAST_UI_SCREENSHOTS, `${name}.png`), (await win.webContents.capturePage()).toPNG())
+  }
+  try {
+    await win.loadFile(path.join(root, 'dist/index.html'))
+    await wait(status('real','unavailable'), 'cold login failure')
+    assert.equal(await js(`document.querySelector('.usage-board').textContent.includes('88%')`), false)
+    assert.equal(await js(`document.querySelector('.usage-board').textContent.includes('额度未知')`), true)
+    await click('额度设置')
+    assert.match(await js(`document.querySelector('.usage-read-feedback').textContent`), /登录/)
+    await shot('01-login-required')
+    mode = 'pending'; await click('重新读取')
+    await wait(`document.querySelector('.usage-refresh').disabled`, 'loading feedback')
+    await shot('02-loading')
+    resolvePending({ok:true, snapshot:{...usage,scopeId}})
+    await wait(status('real','fresh'), 'real quota')
+    assert.equal(await js(`document.querySelector('.usage-settings-values').textContent.includes('37%')`), true)
+    assert.match(await js(`document.querySelector('.usage-settings-values').textContent`), /数据不足/)
+    await js(`document.querySelector('[aria-label="关闭额度设置"]').click()`)
+    await shot('03-compact-real')
+    await click('河边'); await sleep(350)
+    assert.equal(await js(`!!document.querySelector('.mock-controls')`), false)
+    await click('开启自动钓鱼')
+    await sleep(350)
+    const beforeStale = saved.mailItems.length
+    mode = 'stale'; await click('重新读取')
+    await wait(status('real','stale'), 'stale snapshot')
+    assert.equal(await js(`document.querySelector('.fishing-spot').disabled`), true)
+    assert.match(await js(`document.querySelector('.usage-read-feedback').textContent`), /采样：/)
+    assert.equal(await js(`!!document.querySelector('.reset-tide')`), false)
+    assert.equal(await js(`!!document.querySelector('.pet-bubble')`), false)
+    await sleep(350)
+    assert.equal(saved.mailItems.length, beforeStale)
+    assert.equal(saved.usage.shortWindowRemaining, 88, 'real quotas must not overwrite mock save')
+    await shot('04-expanded-stale')
+    await click('模拟演示'); await wait(status('mock','fresh'), 'mock switch')
+    assert.equal(await js(`!!document.querySelector('.mock-controls')`), true)
+    assert.equal(await js(`document.querySelector('.usage-board').textContent.includes('88%')`), true)
+    await shot('05-expanded-mock')
+    await win.reload(); await wait(status('mock','fresh'), 'source preference survives restart')
+    await click('额度设置'); mode = 'pending'; await click('真实额度')
+    await wait(status('real','loading'), 'source switch clears mock immediately')
+    assert.equal(await js(`document.querySelector('.usage-board').textContent.includes('88%')`), false)
+    await click('模拟演示'); await wait(status('mock','fresh'), 'cancel pending real')
+    resolvePending({ok:true,snapshot:{...usage,scopeId}}); await sleep(150)
+    assert.equal(await js(status('mock','fresh')), true)
+    mode = 'live'; await click('真实额度'); await wait(status('real','fresh'), 'real recovers')
+    mode = 'login'; await click('重新读取'); await wait(status('real','unavailable'), 'logout clears old account quota')
+    assert.equal(await js(`document.querySelector('.usage-board').textContent.includes('37%')`), false)
+    await js("localStorage.removeItem('petcast.usage-source.v1')")
+    const browserWin = new BrowserWindow({width: 1024, height: 600, show: false, webPreferences: {contextIsolation: true, nodeIntegration: false}})
+    await browserWin.loadFile(path.join(root, 'dist/index.html'))
+    const browserJs = code => browserWin.webContents.executeJavaScript(code)
+    for (let i = 0; i < 100; i++) {
+      if (await browserJs(status('real', 'unavailable'))) break
+      await sleep(40)
+    }
+    assert.equal(await browserJs(status('real', 'unavailable')), true)
+    await browserJs("document.querySelector('.usage-settings-toggle').click()")
+    assert.match(await browserJs("document.querySelector('.usage-read-feedback').textContent"), /浏览器无法读取本机/)
+    await browserJs("[...document.querySelectorAll('button')].find(b=>b.textContent==='模拟演示').click()")
+    for (let i = 0; i < 100; i++) {
+      if (await browserJs(status('mock', 'fresh'))) break
+      await sleep(40)
+    }
+    assert.equal(await browserJs(status('mock', 'fresh')), true)
+    browserWin.destroy()
+    console.log('Usage UI acceptance passed: browser fallback; loading, login, real, stale, mock, persistence, cancellation, logout')
+    app.exit(0)
+  } catch (error) { console.error(error); app.exit(1) }
+  }).catch(error => { console.error(error); app.exit(1) })
+}

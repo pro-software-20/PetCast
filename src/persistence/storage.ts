@@ -16,6 +16,10 @@ const finiteNumber = (value: unknown, fallback: number) => (
   typeof value === 'number' && Number.isFinite(value) ? value : fallback
 )
 
+// Unknown rate remains unknown when restoring older or incomplete snapshots.
+const rateOrNull = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+
 const validDate = (value: unknown, fallback: Date) => {
   if (typeof value !== 'string') return fallback
   const date = new Date(value)
@@ -63,7 +67,7 @@ const restoreAquarium = (value: unknown): KeptFish[] => {
       usageSnapshot: {
         shortWindowRemaining: finiteNumber(snapshot.shortWindowRemaining, 50),
         weeklyRemaining: finiteNumber(snapshot.weeklyRemaining, 50),
-        burnRate: finiteNumber(snapshot.burnRate, 5),
+        burnRate: rateOrNull(snapshot.burnRate),
         pattern,
       },
     } as KeptFish]
@@ -147,8 +151,8 @@ export const restoreGameSave = (value: unknown, fallbackUsage: UsageState): {
     weeklyRemaining: Math.min(100, Math.max(0, finiteNumber(value.usage.weeklyRemaining, fallbackUsage.weeklyRemaining))),
     shortWindowResetAt: validDate(value.usage.shortWindowResetAt, fallbackUsage.shortWindowResetAt),
     weeklyResetAt: validDate(value.usage.weeklyResetAt, fallbackUsage.weeklyResetAt),
-    burnRate: Math.max(0, finiteNumber(value.usage.burnRate, fallbackUsage.burnRate)),
-    baselineBurnRate: Math.max(0, finiteNumber(value.usage.baselineBurnRate, fallbackUsage.baselineBurnRate)),
+    burnRate: rateOrNull(value.usage.burnRate),
+    baselineBurnRate: rateOrNull(value.usage.baselineBurnRate),
     sampledAt: validDate(value.usage.sampledAt, new Date()),
     recentResetType: null,
   }

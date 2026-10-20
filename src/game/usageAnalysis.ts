@@ -35,7 +35,8 @@ export const analyzeUsage = (usage: UsageState, now = new Date()): UsageAnalysis
   if (usage.weeklyRemaining <= 22) flags.push('weeklyLow')
   if (shortResetMinutes <= 45) flags.push('shortResetSoon')
   if (weeklyResetMinutes <= 12 * 60) flags.push('weeklyResetSoon')
-  if (usage.burnRate > Math.max(8, usage.baselineBurnRate * 1.55)) flags.push('accelerating')
+  if (usage.burnRate !== null && usage.baselineBurnRate !== null
+    && usage.burnRate > Math.max(8, usage.baselineBurnRate * 1.55)) flags.push('accelerating')
   if (usage.shortWindowRemaining >= 55 && usage.weeklyRemaining >= 35) flags.push('capacityAvailable')
   if (!flags.length || (weeklyPace === 'balanced' && !flags.some((flag) => ['freshReset', 'shortLow', 'weeklyLow', 'shortResetSoon', 'weeklyResetSoon', 'accelerating'].includes(flag)))) {
     flags.push('balanced')

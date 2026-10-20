@@ -16,23 +16,19 @@ import type { AutoFishingReport, MailItem, ResetCompletedNotice } from './types/
 import type { UsageScenarioId, UsageState } from './types/usage'
 import { createMockUsageState, MockUsageProvider } from './usage/MockUsageProvider'
 import { MockResetSignalProvider } from './usage/MockResetSignalProvider'
-import type { UsageProvider } from './usage/UsageProvider'
-import { UsageReader } from './usage/UsageReader'
+import { useUsageConnection } from './usage/useUsageConnection'
+import { UsageSettings, usageStatus } from './components/UsageSettings'
 
 export default function App() {
   const desktopApi = window.petcast
   const isBrowserFallback = !desktopApi
   const mockUsageProvider = useMemo(() => new MockUsageProvider('balanced'), [])
-  // Real providers are connected here by C; mock controls remain separate.
-  const usageProvider: UsageProvider = mockUsageProvider
-  const usageReader = useMemo(() => new UsageReader(usageProvider), [usageProvider])
-  const [usageReadStatus, setUsageReadStatus] = useState('模拟数据')
   const resetSignalProvider = useMemo(() => new MockResetSignalProvider(), [])
   const [expanded, setExpanded] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [dragDirection, setDragDirection] = useState<'left' | 'right'>('right')
-  const [usage, setUsage] = useState<UsageState>(() => createMockUsageState('balanced'))
-  const usageRef = useRef(usage)
+  const [mockSaveUsage, setMockSaveUsage] = useState(() => createMockUsageState('balanced'))
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [bubbleVisible, setBubbleVisible] = useState(false)
   const [reaction, setReaction] = useState<'wave' | 'eat' | null>(null)
   const [fishingOpen, setFishingOpen] = useState(false)
@@ -51,6 +47,16 @@ export default function App() {
   const [resetWatchNextAt, setResetWatchNextAt] = useState<number | null>(() => Date.now() + 10 * 60_000)
   const [resetCheckStatus, setResetCheckStatus] = useState<'idle' | 'checking' | 'error'>('idle')
   const [saveReady, setSaveReady] = useState(false)
+  const connection = useUsageConnection(mockUsageProvider, desktopApi, saveReady)
+  const usage = connection.reading?.data ?? null
+  const fresh = connection.reading?.status === 'fresh'
+  const usageRef = useRef<UsageState | null>(usage)
+  const sourceRef = useRef(connection.source)
+  sourceRef.current = connection.source
+  const freshRef = useRef(fresh)
+  usageRef.current = usage
+  freshRef.current = fresh
+  const usageReadStatus = usageStatus(connection)
   const [saveStatus, setSaveStatus] = useState<'loading' | 'saving' | 'saved' | 'error'>('loading')
   const initialMailSeeded = useRef(false)
   const lastProactiveAlert = useRef<string | null>(null)
@@ -63,17 +69,7 @@ export default function App() {
   const petPointerStart = useRef(false)
   const bubbleTimer = useRef<number | null>(null)
   const reactionTimer = useRef<number | null>(null)
-  const analysis = useMemo(() => analyzeUsage(usage), [usage])
-
-  const refreshUsage = async () => {
-    const reading = await usageReader.read()
-    setUsageReadStatus(`${reading.source === 'mock' ? '模拟数据' : '真实数据'}${reading.status === 'fresh' ? '' : reading.status === 'stale' ? ' · 已过期' : ' · 读取失败'}`)
-    if (!reading.data) return usageRef.current
-    const nextUsage = reading.data
-    usageRef.current = nextUsage
-    setUsage(nextUsage)
-    return nextUsage
-  }
+  const analysis = useMemo(() => usage ? analyzeUsage(usage) : null, [usage])
 
   const showPetMessage = (message?: string) => {
     if (dragDistance.current > 5) return
@@ -120,14 +116,16 @@ export default function App() {
   }
 
   const triggerMockResetSignal = async () => {
+    if (connection.source !== 'mock') return
     setResetCheckStatus('checking')
     try {
       const signal = await resetSignalProvider.getLatestSignal()
+      if (sourceRef.current !== 'mock') return
       const isNew = addMailItem(signal)
       if (resetWatchEnabled) setResetWatchNextAt(Date.now() + 10 * 60_000)
       setResetCheckStatus('idle')
       showStageSixNotice(isNew
-        ? `邮箱收到来自 ${signal.handle} 的${signal.resetType === 'short' ? '5h' : '周'}额度重置线索。点击信封查看。`
+        ? `模拟邮箱收到来自 ${signal.handle} 的${signal.resetType === 'short' ? '5h' : '周'}额度重置线索。点击信封查看。`
         : '已经检查到最新动态，目前没有新的重置线索。')
     } catch {
       setResetCheckStatus('error')
@@ -143,6 +141,7 @@ export default function App() {
   }
 
   const runAutoFishing = () => {
+    if (!freshRef.current || !usageRef.current) return
     const currentCodex = codexRef.current
     const { catches, nextCodex, newSpeciesIds } = generateAutoFishingRound(usageRef.current, currentCodex)
     codexRef.current = nextCodex
@@ -159,6 +158,7 @@ export default function App() {
   }
 
   const toggleAutoFishing = () => {
+    if (!autoFishingEnabled && !freshRef.current) return
     const next = !autoFishingEnabled
     setAutoFishingEnabled(next)
     if (next) {
@@ -228,14 +228,13 @@ export default function App() {
     let active = true
     void loadGameSave().then((rawSave) => {
       if (!active) return
-      const restored = restoreGameSave(rawSave, usageRef.current)
+      const restored = restoreGameSave(rawSave, createMockUsageState('balanced'))
       if (restored) {
         const { save, usage: restoredUsage } = restored
         mockUsageProvider.update(restoredUsage)
-        usageRef.current = restoredUsage
+        setMockSaveUsage(restoredUsage)
         codexRef.current = save.codex
         mailItemsRef.current = save.mailItems
-        setUsage(restoredUsage)
         setAquarium(save.aquarium)
         setCodex(save.codex)
         setMailItems(save.mailItems)
@@ -252,7 +251,7 @@ export default function App() {
       if (active) setSaveReady(true)
     })
     return () => { active = false }
-  }, [usageProvider])
+  }, [mockUsageProvider])
 
   useEffect(() => {
     if (!saveReady) return
@@ -266,7 +265,7 @@ export default function App() {
         unreadMailIds,
         autoFishingEnabled,
         resetWatchEnabled,
-        usage,
+        usage: mockSaveUsage,
       })
       void saveGame(snapshot).then(() => {
         if (active) setSaveStatus('saved')
@@ -278,38 +277,38 @@ export default function App() {
       active = false
       window.clearTimeout(timer)
     }
-  }, [aquarium, autoFishingEnabled, codex, mailItems, resetWatchEnabled, saveReady, unreadMailIds, usage])
+  }, [aquarium, autoFishingEnabled, codex, mailItems, resetWatchEnabled, saveReady, unreadMailIds, mockSaveUsage])
 
   useEffect(() => {
-    if (!saveReady) return
+    if (connection.source === 'mock' && fresh && usage) setMockSaveUsage(usage)
+  }, [connection.source, fresh, usage])
+
+  useEffect(() => {
+    setFishingOpen(false)
+    setBubbleVisible(false)
+    lastProactiveAlert.current = null
+  }, [connection.source, fresh, usage?.scopeId])
+
+  useEffect(() => {
+    if (!saveReady || connection.source !== 'mock' || initialMailSeeded.current) return
     let active = true
-    let timer: number | undefined
-    const poll = async () => {
-      await refreshUsage()
-      if (active) timer = window.setTimeout(poll, 30_000)
-    }
-    void poll()
-    return () => { active = false; window.clearTimeout(timer) }
-  }, [saveReady, usageReader])
-
-  useEffect(() => {
-    if (!saveReady || initialMailSeeded.current) return
-    initialMailSeeded.current = true
     void resetSignalProvider.getLatestSignal().then((signal) => {
-      if (mailItemsRef.current.length > 0) return
+      if (!active || mailItemsRef.current.length > 0) return
+      initialMailSeeded.current = true
       mailItemsRef.current = [signal]
       setMailItems([signal])
       setUnreadMailIds([signal.id])
     })
-  }, [resetSignalProvider, saveReady])
+    return () => { active = false }
+  }, [resetSignalProvider, saveReady, connection.source])
 
   useEffect(() => {
-    if (!saveReady || !resetWatchEnabled) return
+    if (!saveReady || connection.source !== 'mock' || !resetWatchEnabled) return
     const timer = window.setInterval(() => {
       void triggerMockResetSignal()
     }, 10 * 60_000)
     return () => window.clearInterval(timer)
-  }, [resetWatchEnabled, resetSignalProvider, saveReady])
+  }, [resetWatchEnabled, resetSignalProvider, saveReady, connection.source])
 
   useEffect(() => {
     codexRef.current = codex
@@ -324,11 +323,12 @@ export default function App() {
   }, [usage])
 
   useEffect(() => {
-    if (!usage.recentResetType) return
+    if (!fresh || !usage?.recentResetType) return
     const resetType = usage.recentResetType
     const notice: ResetCompletedNotice = {
-      id: `reset-completed-${resetType}-${usage.sampledAt.getTime()}`,
+      id: `reset-completed-${connection.source}-${usage.scopeId ?? "demo"}-${resetType}-${usage.sampledAt.getTime()}`,
       type: 'resetCompleted',
+      source: connection.source,
       createdAt: usage.sampledAt.toISOString(),
       resetType,
     }
@@ -336,26 +336,27 @@ export default function App() {
     showStageSixNotice(resetType === 'short'
       ? '5h 额度已经恢复，河流也重新亮起来了。'
       : '周额度已经恢复，可以重新安排这一周了。')
-  }, [usage.recentResetType, usage.sampledAt])
+  }, [fresh, connection.source, usage?.recentResetType, usage?.sampledAt])
 
   useEffect(() => {
-    if (!isProactiveUsageFlag(analysis.primary)) {
+    if (!fresh || !analysis || !isProactiveUsageFlag(analysis.primary)) {
       lastProactiveAlert.current = null
       return
     }
     if (lastProactiveAlert.current === analysis.primary) return
     lastProactiveAlert.current = analysis.primary
     showStageSixNotice(analysis.message)
-  }, [analysis.primary, analysis.message])
+  }, [fresh, analysis?.primary, analysis?.message])
 
   useEffect(() => {
-    if (!saveReady || !autoFishingEnabled) return
+    if (!saveReady || !autoFishingEnabled || !fresh) { setAutoFishingNextAt(null); return }
+    setAutoFishingNextAt(Date.now() + 5 * 60_000)
     const timer = window.setInterval(() => {
       runAutoFishing()
       setAutoFishingNextAt(Date.now() + 5 * 60_000)
     }, 5 * 60_000)
     return () => window.clearInterval(timer)
-  }, [autoFishingEnabled, saveReady])
+  }, [autoFishingEnabled, saveReady, fresh, connection.source, usage?.scopeId])
 
   useEffect(() => () => {
     if (bubbleTimer.current) window.clearTimeout(bubbleTimer.current)
@@ -431,8 +432,10 @@ export default function App() {
   }
 
   const selectScenario = async (scenario: UsageScenarioId) => {
+    if (connection.source !== 'mock') return
     mockUsageProvider.setScenario(scenario)
-    const nextUsage = await refreshUsage()
+    const nextUsage = (await connection.refresh())?.data
+    if (!nextUsage) return
     const nextAnalysis = analyzeUsage(nextUsage)
     dragDistance.current = 0
     lastProactiveAlert.current = isProactiveUsageFlag(nextAnalysis.primary) ? nextAnalysis.primary : null
@@ -440,14 +443,17 @@ export default function App() {
   }
 
   const patchUsage = async (patch: Partial<UsageState>) => {
+    if (connection.source !== 'mock') return
     mockUsageProvider.update(patch)
-    await refreshUsage()
+    await connection.refresh()
   }
 
   return (
     <main
       className={`app ${isBrowserFallback ? 'browser-mode' : 'desktop-mode'} ${expanded ? 'expanded' : 'compact'} ${dragging ? 'dragging' : ''}`}
       data-drag-direction={dragDirection}
+      data-usage-source={connection.source}
+      data-usage-status={connection.reading?.status ?? 'loading'}
     >
       <section
         className="card"
@@ -455,14 +461,15 @@ export default function App() {
         onPointerDown={startDrag}
         onPointerMove={moveDrag}
       >
-        {expanded && (
+        {expanded && usage && analysis && (
           <RiverScene
             usage={usage}
             analysis={analysis}
+            stale={!fresh}
             onStartFishing={() => {
               setHomeOpen(false)
               setMailboxOpen(false)
-              setFishingOpen(true)
+              if (fresh) setFishingOpen(true)
             }}
             onOpenHome={() => {
               setFishingOpen(false)
@@ -476,7 +483,7 @@ export default function App() {
         <div className="grain" />
         <header className="topbar">
           <small title={usageReadStatus}>{usageReadStatus}</small>
-          <div className={`status mood-${analysis.petMood}`}><i /> {analysis.badge}</div>
+          <div className={`status mood-${fresh ? analysis?.petMood : 'normal'}`}><i /> {fresh ? analysis?.badge : connection.reading?.status === 'stale' ? '旧数据' : connection.reading?.status === 'unavailable' ? '读取失败' : '等待读取'}</div>
           {desktopApi && <button className="close" onClick={() => desktopApi.close()} aria-label="关闭">×</button>}
         </header>
 
@@ -484,7 +491,7 @@ export default function App() {
           dragging={dragging}
           expanded={expanded}
           dragDirection={dragDirection}
-          mood={analysis.petMood}
+          mood={fresh ? analysis?.petMood ?? 'normal' : 'normal'}
           reaction={reaction}
         />
 
@@ -494,7 +501,7 @@ export default function App() {
           </button>
         )}
 
-        {expanded && fishingOpen && (
+        {expanded && fishingOpen && fresh && usage && (
           <FishingGame
             usage={usage}
             aquarium={aquarium}
@@ -520,16 +527,19 @@ export default function App() {
         )}
 
         {expanded && mailboxOpen && (
-          <MailboxPanel items={mailItems} usage={usage} onClose={() => setMailboxOpen(false)} />
+          <MailboxPanel items={mailItems} usage={fresh ? usage : null} onClose={() => setMailboxOpen(false)} />
         )}
 
-        {!expanded && <UsageBoard usage={usage} analysis={analysis} compact />}
+        {(!expanded || !usage) && <UsageBoard usage={usage} analysis={analysis} compact={!expanded} stale={!fresh} status={usageReadStatus} />}
+        {expanded && !usage && <div className="empty-scene-actions"><button onClick={() => setHomeOpen(true)}>进入小屋</button><button onClick={openMailbox}>打开邮箱</button></div>}
+        {!expanded && <button className="usage-settings-toggle" onClick={() => setSettingsOpen(true)}>额度设置</button>}
+        {!expanded && settingsOpen && <UsageSettings state={connection} desktop={!isBrowserFallback} onSelect={connection.select} onRefresh={() => void connection.refresh()} onClose={() => setSettingsOpen(false)} />}
 
         {bubbleVisible && (
           <div className={`pet-bubble ${expanded ? 'bubble-expanded' : ''}`} role="status">
             <button aria-label="关闭提醒" onClick={() => setBubbleVisible(false)}>×</button>
             <strong>布罗艾提醒</strong>
-            <span>{bubbleMessage ?? analysis.message}</span>
+            <span>{bubbleMessage ?? (fresh ? analysis?.message : '额度暂未更新，请打开额度设置查看状态。')}</span>
           </div>
         )}
 
@@ -544,8 +554,10 @@ export default function App() {
 
         {dragging && <div className="drag-pill">移动中</div>}
       </section>
-      {expanded && usageProvider.source === 'mock' && (
-        <MockUsageControls
+      {expanded && <aside className="usage-sidecar">
+        <UsageSettings state={connection} desktop={!isBrowserFallback} onSelect={connection.select} onRefresh={() => void connection.refresh()} />
+        {connection.source === 'real' && <button className="auto-fishing-toggle" disabled={!fresh && !autoFishingEnabled} onClick={toggleAutoFishing}>{autoFishingEnabled ? '关闭自动钓鱼' : '开启自动钓鱼'}</button>}
+        {connection.source === 'mock' && usage && fresh && <MockUsageControls
           usage={usage}
           onScenario={selectScenario}
           onPatch={patchUsage}
@@ -560,8 +572,8 @@ export default function App() {
           onRunAutoFishing={runAutoFishingNow}
           onClearCodexHistory={clearCodexHistory}
           saveStatus={saveStatus}
-        />
-      )}
+        />}
+      </aside>}
     </main>
   )
 }

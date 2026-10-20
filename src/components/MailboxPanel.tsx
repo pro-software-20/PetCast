@@ -6,7 +6,7 @@ import type { UsageState } from '../types/usage'
 
 type MailboxPanelProps = {
   items: MailItem[]
-  usage: UsageState
+  usage: UsageState | null
   onClose: () => void
 }
 
@@ -14,7 +14,8 @@ const timeLabel = (iso: string) => new Date(iso).toLocaleString('zh-CN', {
   month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
 })
 
-const signalUsageContext = (item: Extract<MailItem, { type: 'resetSignal' }>, usage: UsageState, now: Date) => {
+const signalUsageContext = (item: Extract<MailItem, { type: 'resetSignal' }>, usage: UsageState | null, now: Date) => {
+  if (!usage) return { label: '当前额度', remaining: '未知', resetText: '待确认', verdict: '当前无有效额度，无法核对这条历史线索。' }
   const isShortWindow = item.resetType === 'short'
   const remaining = isShortWindow ? usage.shortWindowRemaining : usage.weeklyRemaining
   const resetAt = isShortWindow ? usage.shortWindowResetAt : usage.weeklyResetAt
@@ -28,7 +29,7 @@ const signalUsageContext = (item: Extract<MailItem, { type: 'resetSignal' }>, us
 
   return {
     label: isShortWindow ? '5h 额度' : '周额度',
-    remaining,
+    remaining: `${remaining}%`,
     resetText: `${formatTimeUntil(resetAt, now)}后`,
     verdict,
   }
@@ -62,7 +63,7 @@ export function MailboxPanel({ items, usage, onClose }: MailboxPanelProps) {
         <div><span>RIVERSIDE MAIL</span><strong>布罗艾的邮箱</strong></div>
         <button autoFocus onClick={onClose} aria-label="关闭邮箱">×</button>
       </header>
-      <div className="mailbox-disclaimer">重置线索仅供参考，请以实际额度页面为准。</div>
+      <div className="mailbox-disclaimer">邮箱保留历史记录，模拟线索仅供演示；当前额度以最新读取为准。</div>
       <nav className="mail-filters" aria-label="邮箱分类">
         <button className={filter === 'all' ? 'is-active' : ''} onClick={() => setFilter('all')}>全部 {items.length}</button>
         <button className={filter === 'reset' ? 'is-active' : ''} onClick={() => setFilter('reset')}>重置消息 {resetCount}</button>
@@ -82,7 +83,7 @@ export function MailboxPanel({ items, usage, onClose }: MailboxPanelProps) {
                 <strong>{item.resetType === 'short' ? '5h 额度可能正在重置' : '周额度可能正在重置'}</strong>
                 <p>{item.text}</p>
                 <div className="signal-check" aria-label="当前额度核对">
-                  <div><span>{context.label}剩余</span><b>{context.remaining}%</b></div>
+                  <div><span>{context.label}剩余</span><b>{context.remaining}</b></div>
                   <div><span>预计恢复</span><b>{context.resetText}</b></div>
                   <p>{context.verdict}</p>
                 </div>
@@ -98,12 +99,12 @@ export function MailboxPanel({ items, usage, onClose }: MailboxPanelProps) {
           <article className="mail-card completed-mail" key={item.id}>
             <div className="mail-icon">✓</div>
             <div className="mail-content">
-              <span>额度状态确认<time>{timeLabel(item.createdAt)}</time></span>
+              <span>{item.source === 'mock' ? '模拟重置记录' : item.source === 'real' ? '真实额度历史记录' : '历史记录（来源未标记）'}<time>{timeLabel(item.createdAt)}</time></span>
               <strong>{item.resetType === 'short' ? '5h 额度已经恢复' : '周额度已经恢复'}</strong>
               <p>{item.resetType === 'short'
-                ? '新的 5h 使用周期已经开始，当前额度已恢复，可以重新安排任务。'
-                : '新的周额度周期已经开始，当前额度已恢复，可以重新规划本周节奏。'}</p>
-              <footer><b>已确认</b><em>来自当前额度状态</em></footer>
+                ? '新的 5h 使用周期已经开始，当时观测到额度恢复，可以重新安排任务。'
+                : '新的周额度周期已经开始，当时观测到额度恢复，可以重新规划本周节奏。'}</p>
+              <footer><b>历史事件</b><em>不代表当前余额</em></footer>
             </div>
           </article>
         ) : (

@@ -1,14 +1,16 @@
 export type RecentResetType = 'short' | 'weekly' | null
 
 export interface UsageState {
+  /** Non-sensitive local account scope; real providers always supply it. */
+  scopeId?: string
   shortWindowRemaining: number
   weeklyRemaining: number
   shortWindowResetAt: Date
   weeklyResetAt: Date
   /** Short-window percentage points consumed per hour, never Token/hour. */
-  burnRate: number
+  burnRate: number | null
   /** Historical baseline in the same unit and scope as burnRate. */
-  baselineBurnRate: number
+  baselineBurnRate: number | null
   sampledAt: Date
   recentResetType: RecentResetType
 }
