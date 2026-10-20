@@ -1,6 +1,7 @@
 import type {
   TaskAnalysisFile,
   TaskAnalysisInput,
+  TaskAnalysisOutcome,
   TaskAnalysisResult,
   TaskComplexity,
   TokenRange,
@@ -90,14 +91,6 @@ const addFileCategoryHints = (categories: Set<TaskCategory>, kind: FileKind) => 
   if (kind === 'text' || kind === 'pdf' || kind === 'image') categories.add('analysis')
 }
 
-const getSafeFileSize = (file: TaskAnalysisFile, warnings: Set<string>) => {
-  if (!Number.isFinite(file.size) || file.size < 0) {
-    warnings.add('存在文件大小无效，已按 0 字节处理。')
-    return 0
-  }
-  return file.size
-}
-
 const addRange = (left: TokenRange, right: TokenRange): TokenRange => ({
   min: left.min + right.min,
   max: left.max + right.max,
@@ -142,83 +135,144 @@ const outputTokensByComplexity: Record<TaskComplexity, TokenRange> = {
 
 const normalizePrompt = (prompt: string) => prompt.trim().replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n')
 
+export const MAX_TASK_ANALYSIS_PROMPT_LENGTH = 8_000
+
+const isValidFileMetadata = (file: unknown): file is TaskAnalysisFile => {
+  if (!file || typeof file !== 'object') return false
+  const candidate = file as Partial<TaskAnalysisFile>
+  return typeof candidate.name === 'string'
+    && candidate.name.trim().length > 0
+    && typeof candidate.type === 'string'
+    && candidate.type.trim().length > 0
+    && typeof candidate.size === 'number'
+    && Number.isFinite(candidate.size)
+    && candidate.size >= 0
+}
+
+const createAssumptions = (hasUncertainFile: boolean) => [
+  '结果基于 Prompt 和文件元信息进行启发式估算。',
+  '未读取或解析附件内容。',
+  'Token 区间不是精确账单。',
+  ...(hasUncertainFile ? ['图片、PDF 或其他二进制文件的结果包含额外不确定性。'] : []),
+]
+
 export class HeuristicTaskAnalyzer implements TaskAnalyzer {
-  async analyze(input: TaskAnalysisInput): Promise<TaskAnalysisResult> {
-    const prompt = typeof input.prompt === 'string' ? input.prompt : ''
-    const normalizedPrompt = normalizePrompt(prompt)
-    const files = Array.isArray(input.files) ? input.files : []
-    const warnings = new Set<string>(['Token 结果为估算值，不是精确账单。'])
-    const categories = matchedCategories(normalizedPrompt)
-    const complexitySignals = new Set<string>()
+  async analyze(input: TaskAnalysisInput): Promise<TaskAnalysisOutcome> {
+    try {
+      const prompt = typeof input?.prompt === 'string' ? input.prompt : ''
+      const normalizedPrompt = normalizePrompt(prompt)
+      const files = Array.isArray(input?.files) ? input.files : null
 
-    if (normalizedPrompt.length === 0) {
-      warnings.add('Prompt 为空，当前分析仅使用默认结果。')
-    }
-    if (normalizedPrompt.length > 8_000) {
-      warnings.add('Prompt 较长，Token 估算不确定性较高。')
-    }
-    if (files.length === 0) {
-      warnings.add('未提供文件，本次估算仅基于 Prompt。')
-    }
-
-    for (const category of categories) complexitySignals.add(category)
-
-    const fileEstimates: TokenRange[] = []
-    let hasUncertainFile = false
-    let hasLargeFile = false
-
-    for (const file of files) {
-      const kind = getFileKind(file)
-      const size = getSafeFileSize(file, warnings)
-      addFileCategoryHints(categories, kind)
-      fileEstimates.push(estimateFileTokens(size, kind))
-
-      if (kind === 'code') complexitySignals.add('code')
-      if (kind === 'pdf') {
-        complexitySignals.add('pdf')
-        hasUncertainFile = true
+      if (!files) {
+        return {
+          ok: false,
+          code: 'INVALID_FILE',
+          message: '文件信息必须是文件元信息数组。',
+        }
       }
-      if (kind === 'image') {
-        complexitySignals.add('image')
-        hasUncertainFile = true
+
+      if (normalizedPrompt.length === 0 && files.length === 0) {
+        return {
+          ok: false,
+          code: 'EMPTY_INPUT',
+          message: '请输入 Prompt 或添加至少一个文件后再分析。',
+        }
       }
-      if (kind === 'binary') hasUncertainFile = true
-      if (size > 1_000_000) hasLargeFile = true
-    }
 
-    if (hasUncertainFile) {
-      warnings.add('包含图片、PDF 或其他二进制文件，Token 结果为粗略估算。')
-    }
+      if (normalizedPrompt.length > MAX_TASK_ANALYSIS_PROMPT_LENGTH) {
+        return {
+          ok: false,
+          code: 'INPUT_TOO_LARGE',
+          message: `Prompt 超过 ${MAX_TASK_ANALYSIS_PROMPT_LENGTH} 个字符，请压缩内容后再分析。`,
+        }
+      }
 
-    const parallelResult = planParallelTasks({ prompt: normalizedPrompt, files })
-    const complexityScore = (normalizedPrompt.length > 400 ? 1 : 0)
-      + (normalizedPrompt.length > 1_200 ? 1 : 0)
-      + (files.length > 0 && files.length <= 2 ? 1 : 0)
-      + (files.length >= 3 ? 2 : 0)
-      + (hasLargeFile ? 1 : 0)
-      + complexitySignals.size
-      + (parallelResult.canRunInParallel ? 2 : 0)
-    const complexity = complexityFromScore(complexityScore)
+      const invalidFileIndex = files.findIndex((file) => !isValidFileMetadata(file))
+      if (invalidFileIndex >= 0) {
+        return {
+          ok: false,
+          code: 'INVALID_FILE',
+          message: `第 ${invalidFileIndex + 1} 个文件的名称、MIME 类型或大小无效。`,
+        }
+      }
 
-    let inputTokens: TokenRange = {
-      min: Math.ceil(normalizedPrompt.length / 4),
-      max: Math.ceil(normalizedPrompt.length / 2),
-    }
-    for (const estimate of fileEstimates) inputTokens = addRange(inputTokens, estimate)
+      const warnings = new Set<string>(['结果基于 Prompt 和文件元信息，是粗略估算，不是精确账单。'])
+      const categories = matchedCategories(normalizedPrompt)
+      const complexitySignals = new Set<string>()
+      const hasPrompt = normalizedPrompt.length > 0
 
-    let taskType = 'general'
-    if (categories.size === 1) taskType = [...categories][0]
-    else if (categories.size > 1) taskType = 'mixed'
+      if (!hasPrompt) warnings.add('Prompt 为空，本次估算主要基于文件元信息。')
+      if (files.length === 0) warnings.add('未提供文件，本次估算仅基于 Prompt。')
 
-    return {
-      taskType,
-      complexity,
-      estimatedInputTokens: inputTokens,
-      estimatedOutputTokens: outputTokensByComplexity[complexity],
-      optimizedPrompt: optimizePrompt(normalizedPrompt, { taskType, files }),
-      canRunInParallel: parallelResult.canRunInParallel,
-      parallelPlan: parallelResult.parallelPlan,
-      warnings: [...warnings],
+      for (const category of categories) complexitySignals.add(category)
+
+      const fileEstimates: TokenRange[] = []
+      let hasUncertainFile = false
+      let hasLargeFile = false
+
+      for (const file of files) {
+        const kind = getFileKind(file)
+        const size = file.size
+        addFileCategoryHints(categories, kind)
+        fileEstimates.push(estimateFileTokens(size, kind))
+
+        if (kind === 'code') complexitySignals.add('code')
+        if (kind === 'pdf') {
+          complexitySignals.add('pdf')
+          hasUncertainFile = true
+        }
+        if (kind === 'image') {
+          complexitySignals.add('image')
+          hasUncertainFile = true
+        }
+        if (kind === 'binary') hasUncertainFile = true
+        if (size > 1_000_000) hasLargeFile = true
+      }
+
+      if (hasUncertainFile) {
+        warnings.add('包含图片、PDF 或其他二进制文件，结果存在额外不确定性。')
+      }
+
+      const parallelResult = planParallelTasks({ prompt: normalizedPrompt, files })
+      const complexityScore = (normalizedPrompt.length > 400 ? 1 : 0)
+        + (normalizedPrompt.length > 1_200 ? 1 : 0)
+        + (files.length > 0 && files.length <= 2 ? 1 : 0)
+        + (files.length >= 3 ? 2 : 0)
+        + (hasLargeFile ? 1 : 0)
+        + complexitySignals.size
+        + (parallelResult.canRunInParallel ? 2 : 0)
+      const complexity = complexityFromScore(complexityScore)
+
+      let inputTokens: TokenRange = {
+        min: Math.ceil(normalizedPrompt.length / 4),
+        max: Math.ceil(normalizedPrompt.length / 2),
+      }
+      for (const estimate of fileEstimates) inputTokens = addRange(inputTokens, estimate)
+
+      let taskType = 'general'
+      if (categories.size === 1) taskType = [...categories][0]
+      else if (categories.size > 1) taskType = 'mixed'
+
+      const result: TaskAnalysisResult = {
+        taskType,
+        complexity,
+        estimatedInputTokens: inputTokens,
+        estimatedOutputTokens: outputTokensByComplexity[complexity],
+        estimationBasis: 'heuristic-metadata',
+        assumptions: createAssumptions(hasUncertainFile),
+        optimizedPrompt: optimizePrompt(normalizedPrompt, { taskType, files }),
+        canRunInParallel: parallelResult.canRunInParallel,
+        parallelPlan: parallelResult.parallelPlan,
+        warnings: [...warnings],
+      }
+
+      return { ok: true, result }
+    } catch {
+      return {
+        ok: false,
+        code: 'ANALYSIS_FAILED',
+        message: '任务分析失败，请稍后重试。',
+      }
     }
   }
 }
