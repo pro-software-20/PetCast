@@ -1,7 +1,8 @@
 import { app, BrowserWindow, ipcMain, screen, shell } from 'electron'
-import { fileURLToPath } from 'node:url'
-import { promises as fs } from 'node:fs'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { promises as fs, mkdtempSync } from 'node:fs'
 import path from 'node:path'
+import { registerCodexUsageIpc } from './codexIpc.js'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
 const COMPACT = { width: 338, height: 226 }
@@ -13,6 +14,7 @@ let compactBounds: Electron.Rectangle | null = null
 let dragOffset: { x: number; y: number } | null = null
 let animationToken = 0
 const isSmokeTest = process.env.PETCAST_SMOKE_TEST === '1'
+if (isSmokeTest) app.setPath('userData', mkdtempSync(path.join(app.getPath('temp'), 'petcast-smoke-')))
 
 const animateBounds = async (target: Electron.Rectangle) => {
   if (!mainWindow || mainWindow.isDestroyed()) return
@@ -60,7 +62,7 @@ const createWindow = () => {
     show: false,
     hasShadow: true,
     webPreferences: {
-      preload: path.join(currentDir, 'preload.js'),
+      preload: path.join(currentDir, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -73,7 +75,32 @@ const createWindow = () => {
   })
   mainWindow.webContents.once('did-finish-load', () => {
     console.log('PETCAST_RENDERER_READY')
-    if (isSmokeTest) setTimeout(() => app.quit(), 500)
+    if (isSmokeTest) {
+      void mainWindow?.webContents.executeJavaScript(
+        `typeof window.petcast?.readCodexUsage === 'function'
+          && typeof window.petcast?.cancelCodexUsage === 'function'
+          && typeof window.petcast?.loadGameSave === 'function'`,
+      ).then(async ready => {
+        if (!ready) { console.error('PETCAST_PRELOAD_FAILED'); app.exit(1); return }
+        console.log('PETCAST_PRELOAD_READY')
+        if (process.env.PETCAST_SMOKE_CODEX === '1') {
+          const result = await mainWindow?.webContents.executeJavaScript(
+            `new Promise(resolve => {
+              const deadline = Date.now() + 20000;
+              const check = () => {
+                const node = document.querySelector('main[data-usage-source="real"]');
+                if (node?.dataset.usageStatus === 'fresh') return resolve(true);
+                if (Date.now() >= deadline) return resolve(false);
+                setTimeout(check, 100);
+              }; check();
+            })`,
+          )
+          if (!result) { console.error('PETCAST_CODEX_IPC_FAILED'); app.exit(1); return }
+          console.log('PETCAST_CODEX_IPC_READY')
+        }
+        app.quit()
+      }).catch(() => { console.error('PETCAST_PRELOAD_FAILED'); app.exit(1) })
+    }
   })
   mainWindow.webContents.once('did-fail-load', (_event, errorCode, errorDescription) => {
     console.error(`PETCAST_RENDERER_FAILED ${errorCode}: ${errorDescription}`)
@@ -92,6 +119,8 @@ const createWindow = () => {
 }
 
 app.whenReady().then(() => {
+  registerCodexUsageIpc(() => mainWindow, app.getPath('userData'),
+    process.env.VITE_DEV_SERVER_URL ?? pathToFileURL(path.join(currentDir, '../dist/index.html')).href)
   const savePath = path.join(app.getPath('userData'), 'petcast-save.json')
 
   ipcMain.handle('storage:load', async () => {

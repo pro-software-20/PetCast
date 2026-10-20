@@ -2,6 +2,8 @@
 
 interface Window {
   petcast?: {
+    readCodexUsage: (requestId: string) => Promise<import('../electron/codexProtocol').CodexQuotaResult>
+    cancelCodexUsage: (requestId: string) => void
     beginDrag: () => void
     moveDrag: () => void
     endDrag: () => void

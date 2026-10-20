@@ -28,6 +28,7 @@ export interface AutoFishingReport {
 export interface ResetCompletedNotice {
   id: string
   type: 'resetCompleted'
+  source?: 'real' | 'mock'
   createdAt: string
   resetType: 'short' | 'weekly'
 }

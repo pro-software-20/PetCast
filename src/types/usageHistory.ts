@@ -9,7 +9,7 @@ export interface UsageSample {
   weeklyRemaining: number
   shortWindowResetAt: string
   weeklyResetAt: string
-  burnRate: number
+  burnRate: number | null
 }
 
 export interface UsageReport {

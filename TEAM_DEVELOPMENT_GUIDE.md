@@ -41,7 +41,7 @@ src/usage/UsageProvider.ts
 src/usage/MockUsageProvider.ts
 ```
 
-建议新增：
+本轮已新增（接入说明见 `docs/A_CODEX_USAGE.md`）：
 
 ```text
 src/usage/CodexUsageProvider.ts
@@ -63,12 +63,13 @@ interface UsageProvider {
 
 ```ts
 interface UsageState {
+  scopeId?: string; // 真实 Provider 必定提供；本地匿名账号作用域
   shortWindowRemaining: number;
   weeklyRemaining: number;
   shortWindowResetAt: Date;
   weeklyResetAt: Date;
-  burnRate: number; // 短窗口剩余比例消耗的百分点/小时
-  baselineBurnRate: number; // 同口径历史基准，不是 Token/小时
+  burnRate: number | null; // 百分点/小时；null 表示数据不足
+  baselineBurnRate: number | null; // 同口径历史基准，不是 Token/小时
   sampledAt: Date;
   recentResetType: "short" | "weekly" | null;
 }
@@ -77,7 +78,7 @@ interface UsageState {
 注意：
 
 - 剩余比例统一使用 `0–100`，数字必须有限，时间必须为有效 `Date`。跨 IPC / JSON 使用 UTC ISO 8601 字符串，进入业务层时显式还原。
-- 当前 `UsageState` 是完整快照契约。必填字段缺失、无授权或未知时应拒绝返回，不能填 0 或模拟值。未来支持部分可用窗口时，要同步升级分析、游戏和持久化的空值处理。
+- 两个额度窗口仍要求完整可用；缺失或无授权时拒绝返回，不能填 0 或模拟值。速度字段允许 `null`，首次采样、重置、额度上调或间隔超过 5 分钟均表示数据不足。现有分析、游戏和存档已同步处理空速度。
 - `burnRate` 使用同一账号、同一短窗口的连续采样，按实际时间差计算消耗百分点/小时。首次采样或跨重置时无法可靠计算，应明确数据不足；不得把额度百分比当 Token 账单。
 - `sampledAt` 是源数据的实际采样时间，读取缓存不能刷新它。`UsageReader` 另记 `checkedAt`，返回 `fresh/stale/unavailable`。
 - `recentResetType` 仅在确认窗口发生重置时产生。真实模式倒计时到点只触发重新查询，不能照搬 Mock 自动补满逻辑。
@@ -87,14 +88,14 @@ interface UsageState {
 - 不要直接大规模修改 `App.tsx`。
 - A 完成数据模块后，由 C 接入主程序。业务只依赖 `UsageProvider`；`setScenario/update` 属于独立 Mock 控制，不加入真实 Provider 接口。
 - C 在真实模式关闭 Mock 控制台，不把游戏存档中的模拟额度写回真实 Provider，也不在首次读取前显示默认模拟数字。
-- Codex 授权读取由主进程封装，preload 只暴露经过校验的额度结果，不能把凭据传给渲染进程。具体读取途径仍需 A 验证，不宣称已经接通。
-- 如果无法稳定读取真实数据，必须保留 Mock Provider 作为演示保底。
+- A 已通过 Codex App Server 验证本机真实读取，并封装主进程与 preload 通道；只暴露经过校验的额度结果，不传凭据。用户安装 PetCast 后读取自己的本地 Codex 登录。本轮按用户要求同步完成主页面接入、来源设置、失败与旧数据展示；请 C 合并时保留这些逻辑，安装包和异机验收仍未完成。
+- 如果无法稳定读取真实数据，保留 Mock Provider 供用户明确选择演示；不得静默回退为模拟额度。
 
 验收标准：
 
 - 能返回合法的 `UsageState`。
 - 数据读取失败时不会白屏或崩溃。
-- 可以切换“真实数据”和“模拟数据”。
+- 可以切换“真实数据”和“模拟数据”。页面已提供来源选择、读取中、失败与旧数据状态，本机页面验收通过；跨用户设备验收仍待完成。
 - `pnpm typecheck` 和 `pnpm build` 通过。
 
 ### B：任务分析与 Prompt 优化

@@ -6,8 +6,8 @@ export interface PersistedUsageState {
   weeklyRemaining: number
   shortWindowResetAt: string
   weeklyResetAt: string
-  burnRate: number
-  baselineBurnRate: number
+  burnRate: number | null
+  baselineBurnRate: number | null
   sampledAt: string
 }
 

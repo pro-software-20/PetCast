@@ -15,7 +15,8 @@ export const classifyFishingPattern = (
   const resetMinutes = minutesUntil(usage.shortWindowResetAt, now)
 
   if (hour >= 22 || hour <= 4) tags.push('night')
-  if (usage.burnRate >= Math.max(8, usage.baselineBurnRate * 1.55)) tags.push('burst')
+  if (usage.burnRate !== null && usage.baselineBurnRate !== null
+    && usage.burnRate >= Math.max(8, usage.baselineBurnRate * 1.55)) tags.push('burst')
   if (resetMinutes >= 0 && resetMinutes <= 45) tags.push('resetRush')
   if (!tags.length) tags.push('balanced')
 

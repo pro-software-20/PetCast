@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('petcast', {
+  readCodexUsage: (requestId: string) => ipcRenderer.invoke('codex:read-usage', requestId),
+  cancelCodexUsage: (requestId: string) => ipcRenderer.send('codex:cancel-usage', requestId),
   beginDrag: () => ipcRenderer.send('window:drag-start'),
   moveDrag: () => ipcRenderer.send('window:drag-move'),
   endDrag: () => ipcRenderer.send('window:drag-end'),

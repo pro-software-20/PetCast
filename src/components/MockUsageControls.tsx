@@ -74,8 +74,8 @@ export function MockUsageControls({ usage, onScenario, onPatch, onMockResetSigna
         <input type="range" min="0" max="100" value={usage.weeklyRemaining} onChange={(event) => onPatch({ weeklyRemaining: Number(event.target.value) })} />
       </label>
       <label>
-        <span>消耗速度 <b>{usage.burnRate.toFixed(1)}%/h</b></span>
-        <input type="range" min="0" max="25" step="0.5" value={usage.burnRate} onChange={(event) => onPatch({ burnRate: Number(event.target.value) })} />
+        <span>消耗速度 <b>{usage.burnRate === null ? '数据不足' : `${usage.burnRate.toFixed(1)} 百分点/小时`}</b></span>
+        <input type="range" min="0" max="25" step="0.5" value={usage.burnRate ?? 0} onChange={(event) => onPatch({ burnRate: Number(event.target.value) })} />
       </label>
       <label>
         <span>5h 距重置 <b>{resetMinutes} 分</b></span>

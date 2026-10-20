@@ -10,9 +10,10 @@ type RiverSceneProps = {
   onOpenHome: () => void
   onOpenMailbox: () => void
   unreadMailCount: number
+  stale?: boolean
 }
 
-export function RiverScene({ usage, analysis, onStartFishing, onOpenHome, onOpenMailbox, unreadMailCount }: RiverSceneProps) {
+export function RiverScene({ usage, analysis, onStartFishing, onOpenHome, onOpenMailbox, unreadMailCount, stale = false }: RiverSceneProps) {
   const environment = deriveRiverEnvironment(usage)
   const sceneStyle = {
     '--flow-duration': `${environment.flowDurationSeconds}s`,
@@ -21,7 +22,7 @@ export function RiverScene({ usage, analysis, onStartFishing, onOpenHome, onOpen
 
   return (
     <div
-      className={`river-scene phase-${environment.dayPhase} flow-${environment.flow} depth-${environment.depth} ${analysis.primary === 'freshReset' ? 'fresh-reset-river' : ''}`}
+      className={`river-scene phase-${environment.dayPhase} flow-${environment.flow} depth-${environment.depth} ${!stale && analysis.primary === 'freshReset' ? 'fresh-reset-river' : ''}`}
       style={sceneStyle}
       aria-label={`像素河边场景，流速${environment.flowLabel}，周额度水位${usage.weeklyRemaining}%`}
     >
@@ -70,9 +71,9 @@ export function RiverScene({ usage, analysis, onStartFishing, onOpenHome, onOpen
         {unreadMailCount > 0 && <b>{unreadMailCount}</b>}
         <span>{unreadMailCount > 0 ? '有新消息' : '邮箱'}</span>
       </button>
-      <button className="fishing-spot" onClick={onStartFishing} aria-label="点击河面开始钓鱼">
+      <button className="fishing-spot" disabled={stale} onClick={onStartFishing} aria-label="点击河面开始钓鱼">
         <i className="spot-ripple" />
-        <span>🎣 点击河面钓鱼</span>
+        <span>{stale ? '等待额度更新' : '🎣 点击河面钓鱼'}</span>
       </button>
       <div className="front-bank" aria-hidden="true">
         <i className="grass grass-a" /><i className="grass grass-b" /><i className="grass grass-c" />
@@ -86,9 +87,9 @@ export function RiverScene({ usage, analysis, onStartFishing, onOpenHome, onOpen
         <div><span>周水位</span><strong>{usage.weeklyRemaining}%</strong></div>
         <div><span>时间</span><strong>{environment.dayLabel}</strong></div>
       </div>
-      <div className="environment-key">流速＝当前消耗速度 · 水位＝周额度剩余</div>
-      {analysis.primary === 'freshReset' && <div className="reset-tide">额度潮汐恢复</div>}
-      <UsageBoard usage={usage} analysis={analysis} />
+      <div className="environment-key">{stale ? '旧数据场景 · 暂停钓鱼与额度提醒' : '流速＝当前消耗速度 · 水位＝周额度剩余'}</div>
+      {!stale && analysis.primary === 'freshReset' && <div className="reset-tide">额度潮汐恢复</div>}
+      <UsageBoard usage={usage} analysis={analysis} stale={stale} />
     </div>
   )
 }
