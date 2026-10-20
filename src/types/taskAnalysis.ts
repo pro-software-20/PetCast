@@ -1,5 +1,6 @@
 export type TaskComplexity = 'low' | 'medium' | 'high'
 
+/** Metadata only: size is bytes, type is MIME. No file content is read by this contract. */
 export interface TaskAnalysisFile {
   name: string
   type: string
@@ -21,8 +22,19 @@ export interface TaskAnalysisResult {
   complexity: TaskComplexity
   estimatedInputTokens: TokenRange
   estimatedOutputTokens: TokenRange
+  estimationBasis: 'heuristic-metadata'
+  assumptions: string[]
   optimizedPrompt: string
   canRunInParallel: boolean
+  /** Display-only advice, never an executable task graph. */
   parallelPlan: string[]
   warnings: string[]
+}
+
+export type TaskAnalysisOutcome =
+  | { ok: true; result: TaskAnalysisResult }
+  | { ok: false; code: 'EMPTY_INPUT' | 'INPUT_TOO_LARGE' | 'INVALID_FILE' | 'ANALYSIS_FAILED'; message: string }
+
+export interface TaskAnalyzer {
+  analyze(input: TaskAnalysisInput): Promise<TaskAnalysisOutcome>
 }

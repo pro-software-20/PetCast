@@ -66,7 +66,16 @@ node .\node_modules\vite\bin\vite.js preview --host 127.0.0.1 --port 4173
 - 存档经过版本和字段校验；损坏存档会被隔离并安全回到默认状态
 - 控制台显示“读取 / 保存 / 已保存 / 失败”状态
 
+## 团队接口与开发状态
+
+- 团队接口约定见 `TEAM_DEVELOPMENT_GUIDE.md`；任务分析、历史报告与外观配置类型已集中到 `src/types/`，相应功能仍由各模块继续实现。
+- 已增加额度读取校验、超时与同次请求合并；失败区分过期缓存和不可用，不自动切换模拟值。当前页面仍使用 Mock，并显示来源。
+- 独立历史存储（包括 Electron IPC）、周报算法、皮肤选择及通用动画渲染器尚未实现，不能把类型定义当作完成的功能。
+
+接口回归检查：`npm run test:contracts`（或 `pnpm test:contracts`）。
+
 ## 尚未实现
 
 - 真实 Codex 数据读取
 - 真实 X/Tibo 数据读取与 Windows 系统通知
+

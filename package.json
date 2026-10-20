@@ -10,7 +10,8 @@
     "build:electron": "tsc -p electron/tsconfig.json",
     "build": "tsc -b && vite build --base=./ --outDir=dist && tsc -p electron/tsconfig.json",
     "start": "electron .",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "test:contracts": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "react": "18.3.1",
@@ -29,3 +30,4 @@
     "wait-on": "8.0.1"
   }
 }
+

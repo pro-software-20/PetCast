@@ -71,6 +71,7 @@ export const createMockUsageState = (
 }
 
 export class MockUsageProvider implements UsageProvider {
+  readonly source = 'mock' as const
   private state: UsageState
 
   constructor(scenario: UsageScenarioId = 'balanced') {
@@ -115,3 +116,4 @@ export class MockUsageProvider implements UsageProvider {
     this.state = { ...this.state, ...patch, sampledAt: new Date(), recentResetType: null }
   }
 }
+
