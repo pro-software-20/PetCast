@@ -80,9 +80,9 @@ const getFileKind = (file: TaskAnalysisFile): FileKind => {
 
   if (type === 'application/pdf' || extension === 'pdf') return 'pdf'
   if (type.startsWith('image/') || IMAGE_EXTENSIONS.has(extension)) return 'image'
-  if (type.startsWith('text/') || TEXT_EXTENSIONS.has(extension)) return 'text'
   if (type.includes('javascript') || type.includes('typescript') || type.includes('json')) return 'code'
   if (CODE_EXTENSIONS.has(extension)) return 'code'
+  if (type.startsWith('text/') || TEXT_EXTENSIONS.has(extension)) return 'text'
   return 'binary'
 }
 
