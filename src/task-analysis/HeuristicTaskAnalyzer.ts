@@ -6,6 +6,8 @@ import type {
   TokenRange,
 } from '../types/taskAnalysis'
 import type { TaskAnalyzer } from './TaskAnalyzer'
+import { optimizePrompt } from './promptOptimizer'
+import { planParallelTasks } from './parallelPlanner'
 
 type TaskCategory = 'coding' | 'analysis' | 'writing' | 'research' | 'testing'
 type FileKind = 'code' | 'text' | 'pdf' | 'image' | 'binary'
@@ -126,18 +128,6 @@ const estimateFileTokens = (size: number, kind: FileKind): TokenRange => {
   })
 }
 
-const detectIndependentTasks = (prompt: string, categoryCount: number) => {
-  const numberedItems = prompt.match(/(?:^|\n)\s*(?:\d+[.)]|[一二三四五六七八九十]+[、.)])/g)?.length ?? 0
-  const independentMarker = /并行|分别|各自|互不依赖|独立任务|parallel|independent|separately/i.test(prompt)
-  return numberedItems >= 2 || (independentMarker && categoryCount >= 2)
-}
-
-const createParallelPlan = (canRunInParallel: boolean): string[] => (
-  canRunInParallel
-    ? ['将识别到的独立子任务分别处理。', '最后汇总结果并统一校验。']
-    : []
-)
-
 const complexityFromScore = (score: number): TaskComplexity => {
   if (score >= 6) return 'high'
   if (score >= 3) return 'medium'
@@ -200,14 +190,14 @@ export class HeuristicTaskAnalyzer implements TaskAnalyzer {
       warnings.add('包含图片、PDF 或其他二进制文件，Token 结果为粗略估算。')
     }
 
-    const canRunInParallel = detectIndependentTasks(normalizedPrompt, categories.size)
+    const parallelResult = planParallelTasks({ prompt: normalizedPrompt, files })
     const complexityScore = (normalizedPrompt.length > 400 ? 1 : 0)
       + (normalizedPrompt.length > 1_200 ? 1 : 0)
       + (files.length > 0 && files.length <= 2 ? 1 : 0)
       + (files.length >= 3 ? 2 : 0)
       + (hasLargeFile ? 1 : 0)
       + complexitySignals.size
-      + (canRunInParallel ? 2 : 0)
+      + (parallelResult.canRunInParallel ? 2 : 0)
     const complexity = complexityFromScore(complexityScore)
 
     let inputTokens: TokenRange = {
@@ -225,9 +215,9 @@ export class HeuristicTaskAnalyzer implements TaskAnalyzer {
       complexity,
       estimatedInputTokens: inputTokens,
       estimatedOutputTokens: outputTokensByComplexity[complexity],
-      optimizedPrompt: normalizedPrompt,
-      canRunInParallel,
-      parallelPlan: createParallelPlan(canRunInParallel),
+      optimizedPrompt: optimizePrompt(normalizedPrompt, { taskType, files }),
+      canRunInParallel: parallelResult.canRunInParallel,
+      parallelPlan: parallelResult.parallelPlan,
       warnings: [...warnings],
     }
   }
