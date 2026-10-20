@@ -11,6 +11,7 @@ export interface TaskAnalysisPanelProps {
   analyzer?: TaskAnalyzer
   initialPrompt?: string
   initialFiles?: TaskAnalysisFile[]
+  onClose?: () => void
 }
 
 const defaultAnalyzer = new HeuristicTaskAnalyzer()
@@ -38,7 +39,7 @@ const toFileMetadata = (file: File): TaskAnalysisFile => ({
   size: file.size,
 })
 
-export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles = [] }: TaskAnalysisPanelProps) {
+export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles = [], onClose }: TaskAnalysisPanelProps) {
   const [prompt, setPrompt] = useState(initialPrompt)
   const [files, setFiles] = useState<TaskAnalysisFile[]>(initialFiles)
   const [result, setResult] = useState<TaskAnalysisResult | null>(null)
@@ -79,12 +80,20 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
   }
 
   return (
-    <section className="task-analysis-panel" aria-labelledby="task-analysis-title">
+    <section
+      className="task-analysis-panel"
+      aria-labelledby="task-analysis-title"
+      onPointerDown={(event) => event.stopPropagation()}
+    >
       <header className="task-analysis-header">
         <span> TASK ANALYSIS </span>
         <h2 id="task-analysis-title">任务分析</h2>
         <p>只使用 Prompt 和文件元信息进行粗估，不会读取或上传文件内容。</p>
       </header>
+
+      {onClose && (
+        <button type="button" className="task-analysis-close" onClick={onClose} aria-label="关闭任务分析">×</button>
+      )}
 
       <div className="task-analysis-inputs">
         <label htmlFor="task-analysis-prompt">Prompt</label>
