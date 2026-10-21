@@ -180,7 +180,7 @@ export function FishingGame({ usage, aquarium, capacity, onCatch, onKeep, onFeed
             <b>捕获快照</b>
             <em>5h {Math.round(candidate.usageSnapshot.shortWindowRemaining)}%</em>
             <em>周 {Math.round(candidate.usageSnapshot.weeklyRemaining)}%</em>
-            <em>{candidate.usageSnapshot.burnRate.toFixed(1)}%/h</em>
+            <em>{candidate.usageSnapshot.burnRate === null ? '速度数据不足' : `${candidate.usageSnapshot.burnRate.toFixed(1)} 百分点/小时`}</em>
           </div>
           <div className="catch-actions" aria-label="处理这条鱼">
             <button className="keep-action" onClick={keep}>保留</button>

@@ -7,11 +7,14 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "pnpm run build:electron && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
-    "build:electron": "tsc -p electron/tsconfig.json",
-    "build": "tsc -b && vite build --base=./ --outDir=dist && tsc -p electron/tsconfig.json",
+    "build:electron": "tsc -p electron/tsconfig.json && node scripts/build-preload.mjs",
+    "build": "tsc -b && vite build --base=./ --outDir=dist && npm run build:electron",
     "start": "electron .",
     "typecheck": "tsc -b",
-    "test:contracts": "node --test tests/*.test.mjs"
+    "test:contracts": "node --test tests/*.test.mjs",
+    "check:codex": "npm run build:electron && node scripts/check-codex-usage.mjs",
+    "test:desktop": "npm run build && node scripts/smoke-desktop.mjs",
+    "test:ui": "npm run build && node scripts/test-usage-ui.mjs"
   },
   "dependencies": {
     "react": "18.3.1",
@@ -30,4 +33,3 @@
     "wait-on": "8.0.1"
   }
 }
-
