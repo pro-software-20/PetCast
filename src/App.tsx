@@ -6,6 +6,7 @@ import { UsageBoard } from './components/UsageBoard'
 import { FishingGame } from './components/FishingGame'
 import { HomeScene } from './components/HomeScene'
 import { MailboxPanel } from './components/MailboxPanel'
+import { TaskAnalysisPanel } from './components/TaskAnalysisPanel'
 import { AQUARIUM_CAPACITY, createEmptyCodex, recordCatch, recordDisposition, replaceAquariumFish, toKeptFish } from './game/collection'
 import { generateAutoFishingRound } from './game/autoFishing'
 import { analyzeUsage, isProactiveUsageFlag } from './game/usageAnalysis'
@@ -34,6 +35,7 @@ export default function App() {
   const [fishingOpen, setFishingOpen] = useState(false)
   const [homeOpen, setHomeOpen] = useState(false)
   const [mailboxOpen, setMailboxOpen] = useState(false)
+  const [taskAnalysisOpen, setTaskAnalysisOpen] = useState(false)
   const mailboxOpenRef = useRef(mailboxOpen)
   const [aquarium, setAquarium] = useState<KeptFish[]>([])
   const [codex, setCodex] = useState(createEmptyCodex)
@@ -189,8 +191,25 @@ export default function App() {
     }
     setFishingOpen(false)
     setHomeOpen(false)
+    setTaskAnalysisOpen(false)
     setMailboxOpen(true)
     setUnreadMailIds([])
+  }
+
+  const openTaskAnalysis = async () => {
+    if (!expanded) {
+      setExpanded(true)
+      await desktopApi?.toggleExpanded(true)
+    }
+
+    setFishingOpen(false)
+    setHomeOpen(false)
+    setMailboxOpen(false)
+    setTaskAnalysisOpen(true)
+  }
+
+  const closeTaskAnalysis = () => {
+    setTaskAnalysisOpen(false)
   }
 
   const handleCatch = (fish: FishCatch) => setCodex((current) => recordCatch(current, fish))
@@ -426,6 +445,7 @@ export default function App() {
       setFishingOpen(false)
       setHomeOpen(false)
       setMailboxOpen(false)
+      setTaskAnalysisOpen(false)
     }
     setExpanded(next)
     await desktopApi?.toggleExpanded(next)
@@ -469,11 +489,13 @@ export default function App() {
             onStartFishing={() => {
               setHomeOpen(false)
               setMailboxOpen(false)
+              setTaskAnalysisOpen(false)
               if (fresh) setFishingOpen(true)
             }}
             onOpenHome={() => {
               setFishingOpen(false)
               setMailboxOpen(false)
+              setTaskAnalysisOpen(false)
               setHomeOpen(true)
             }}
             onOpenMailbox={openMailbox}
@@ -483,6 +505,14 @@ export default function App() {
         <div className="grain" />
         <header className="topbar">
           <small title={usageReadStatus}>{usageReadStatus}</small>
+          <button
+            type="button"
+            className="task-analysis-launch"
+            onClick={openTaskAnalysis}
+            aria-label="打开任务分析"
+          >
+            任务分析
+          </button>
           <div className={`status mood-${fresh ? analysis?.petMood : 'normal'}`}><i /> {fresh ? analysis?.badge : connection.reading?.status === 'stale' ? '旧数据' : connection.reading?.status === 'unavailable' ? '读取失败' : '等待读取'}</div>
           {desktopApi && <button className="close" onClick={() => desktopApi.close()} aria-label="关闭">×</button>}
         </header>
@@ -528,6 +558,10 @@ export default function App() {
 
         {expanded && mailboxOpen && (
           <MailboxPanel items={mailItems} usage={fresh ? usage : null} onClose={() => setMailboxOpen(false)} />
+        )}
+
+        {expanded && taskAnalysisOpen && (
+          <TaskAnalysisPanel onClose={closeTaskAnalysis} />
         )}
 
         {(!expanded || !usage) && <UsageBoard usage={usage} analysis={analysis} compact={!expanded} stale={!fresh} status={usageReadStatus} />}
@@ -577,4 +611,5 @@ export default function App() {
     </main>
   )
 }
+
 

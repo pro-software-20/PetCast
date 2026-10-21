@@ -1,2 +1,3 @@
-onlyBuiltDependencies:
-  - electron
+allowBuilds:
+  electron: true
+  esbuild: true

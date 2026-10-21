@@ -540,6 +540,46 @@ Pull Request 模板：
 -
 ```
 
+## B 模块完成记录
+
+### 完成内容
+
+- 完成任务分析输入、输出和错误处理接口设计。
+- 实现 `HeuristicTaskAnalyzer`，根据 Prompt、文件数量、文件类型和操作类型判断任务类别、复杂度和 Token 区间。
+- 实现 `promptOptimizer` 和 `parallelPlanner`，生成结构化 Prompt 以及串行/并行执行建议。
+- 实现 `TaskAnalysisPanel`，支持 Prompt 输入、多个文件元信息录入、文件删除、结果展示和异常提示。
+- 在 `App.tsx` 中接入任务分析入口，并实现与钓鱼、小屋和邮箱面板的互斥显示。
+
+### 修改的模块
+
+- `src/types/taskAnalysis.ts`
+- `src/task-analysis/`
+- `src/components/TaskAnalysisPanel.tsx`
+- `src/App.tsx`
+- `src/styles.css`
+
+### 测试方法
+
+1. 测试空 Prompt、无文件、超长 Prompt 和非法文件元信息，确认返回结构化错误且页面不会崩溃。
+2. 测试单文件、多文件以及代码文件、PDF、图片文件，确认任务类别、复杂度和 Token 区间会受到影响。
+3. 测试多个编号任务和存在前后依赖的 Prompt，确认分别生成并行或串行建议。
+4. 手动打开任务分析入口，验证面板自动展开、文件选择、结果展示、关闭和拖拽隔离。
+
+### 检查结果
+
+- [x] `pnpm typecheck` 通过
+- [x] `pnpm build` 通过
+- [x] `pnpm dev` 可以正常运行
+- [x] 契约测试通过（10/10）
+- [x] 没有提交账号、Token 或其他敏感信息
+- [x] 原有功能没有明显损坏
+
+### 尚未解决的问题
+
+- 当前 Token 估算是基于 Prompt 和文件元信息的启发式结果，不是真实 Tokenizer 计数。
+- 当前版本不读取附件内容，图片、PDF 和二进制文件的估算存在额外不确定性。
+- 后续可以增加更完整的任务依赖分析、真实文件解析以及单元测试和组件测试。
+
 ## 10. 文件修改范围
 
 为了避免四个人同时修改同一文件：

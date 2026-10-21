@@ -1,14 +1,27 @@
+export type TaskComplexity = 'low' | 'medium' | 'high'
+
+/** Metadata only: size is bytes, type is MIME. No file content is read by this contract. */
+export interface TaskAnalysisFile {
+  name: string
+  type: string
+  size: number
+}
+
+export interface TokenRange {
+  min: number
+  max: number
+}
+
 export interface TaskAnalysisInput {
   prompt: string
-  /** Metadata only: size is bytes, type is MIME. No file content is read by this contract. */
-  files: Array<{ name: string; type: string; size: number }>
+  files: TaskAnalysisFile[]
 }
 
 export interface TaskAnalysisResult {
   taskType: string
-  complexity: 'low' | 'medium' | 'high'
-  estimatedInputTokens: { min: number; max: number }
-  estimatedOutputTokens: { min: number; max: number }
+  complexity: TaskComplexity
+  estimatedInputTokens: TokenRange
+  estimatedOutputTokens: TokenRange
   estimationBasis: 'heuristic-metadata'
   assumptions: string[]
   optimizedPrompt: string
