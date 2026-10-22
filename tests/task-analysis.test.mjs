@@ -8,6 +8,12 @@ const {
 } = await loadTs('../src/task-analysis/HeuristicTaskAnalyzer.ts')
 const { optimizePrompt } = await loadTs('../src/task-analysis/promptOptimizer.ts')
 const { planParallelTasks } = await loadTs('../src/task-analysis/parallelPlanner.ts')
+const {
+  MAX_TASK_ANALYSIS_FILES,
+  MAX_TASK_ANALYSIS_FILE_SIZE,
+  MAX_TASK_ANALYSIS_TOTAL_SIZE,
+  mergeTaskAnalysisFiles,
+} = await loadTs('../src/task-analysis/fileSelection.ts')
 
 const analyzer = new HeuristicTaskAnalyzer()
 
@@ -183,4 +189,100 @@ test('unexpected analyzer exceptions return ANALYSIS_FAILED', async () => {
   })
   const outcome = await analyzer.analyze(throwingInput)
   assert.deepEqual(outcome.ok ? null : outcome.code, 'ANALYSIS_FAILED')
+})
+
+const metadataFile = (name, size = 1, type = 'text/plain') => ({ name, type, size })
+
+test('file selection accepts 20 files and rejects the 21st', () => {
+  const files = Array.from(
+    { length: MAX_TASK_ANALYSIS_FILES + 1 },
+    (_, index) => metadataFile(`file-${index}.txt`),
+  )
+  const selection = mergeTaskAnalysisFiles([], files)
+
+  assert.equal(selection.files.length, MAX_TASK_ANALYSIS_FILES)
+  assert.equal(selection.addedCount, MAX_TASK_ANALYSIS_FILES)
+  assert.equal(selection.rejected.fileCount, 1)
+})
+
+test('file selection accepts exactly 100 MiB and rejects larger files', () => {
+  const selection = mergeTaskAnalysisFiles([], [
+    metadataFile('boundary.bin', MAX_TASK_ANALYSIS_FILE_SIZE, 'application/octet-stream'),
+    metadataFile('too-large.bin', MAX_TASK_ANALYSIS_FILE_SIZE + 1, 'application/octet-stream'),
+  ])
+
+  assert.deepEqual(selection.files.map((file) => file.name), ['boundary.bin'])
+  assert.equal(selection.rejected.tooLarge, 1)
+  assert.match(selection.notice, /超过 100 MiB/)
+})
+
+test('file selection accepts exactly 500 MiB total and rejects overflow', () => {
+  const boundaryFiles = Array.from(
+    { length: MAX_TASK_ANALYSIS_TOTAL_SIZE / MAX_TASK_ANALYSIS_FILE_SIZE },
+    (_, index) => metadataFile(`part-${index}.bin`, MAX_TASK_ANALYSIS_FILE_SIZE, 'application/octet-stream'),
+  )
+  const selection = mergeTaskAnalysisFiles([], [
+    ...boundaryFiles,
+    metadataFile('overflow.txt'),
+  ])
+
+  assert.equal(selection.files.length, boundaryFiles.length)
+  assert.equal(selection.rejected.totalSize, 1)
+  assert.match(selection.notice, /超过 500 MiB/)
+})
+
+test('file selection detects duplicates against current files', () => {
+  const current = [metadataFile('existing.txt', 10)]
+  const selection = mergeTaskAnalysisFiles(current, [
+    metadataFile('existing.txt', 10),
+    metadataFile('new.txt', 10),
+  ])
+
+  assert.deepEqual(selection.files.map((file) => file.name), ['existing.txt', 'new.txt'])
+  assert.equal(selection.rejected.duplicate, 1)
+})
+
+test('file selection detects duplicates inside one incoming batch', () => {
+  const duplicate = metadataFile('duplicate.txt', 10)
+  const selection = mergeTaskAnalysisFiles([], [duplicate, duplicate])
+
+  assert.equal(selection.files.length, 1)
+  assert.equal(selection.rejected.duplicate, 1)
+})
+
+test('file selection reports multiple rejection reasons while keeping valid files', () => {
+  const current = Array.from(
+    { length: MAX_TASK_ANALYSIS_FILES - 1 },
+    (_, index) => metadataFile(`current-${index}.txt`),
+  )
+  const selection = mergeTaskAnalysisFiles(current, [
+    metadataFile('current-0.txt'),
+    metadataFile('too-large.bin', MAX_TASK_ANALYSIS_FILE_SIZE + 1, 'application/octet-stream'),
+    metadataFile('last-valid.txt'),
+    metadataFile('over-count.txt'),
+  ])
+
+  assert.equal(selection.addedCount, 1)
+  assert.equal(selection.rejected.duplicate, 1)
+  assert.equal(selection.rejected.tooLarge, 1)
+  assert.equal(selection.rejected.fileCount, 1)
+  assert.match(selection.notice, /重复文件/)
+  assert.match(selection.notice, /数量限制/)
+})
+
+test('file selection preserves current and accepted file order', () => {
+  const selection = mergeTaskAnalysisFiles(
+    [metadataFile('a.txt')],
+    [metadataFile('b.txt'), metadataFile('c.txt'), metadataFile('d.txt')],
+  )
+
+  assert.deepEqual(selection.files.map((file) => file.name), ['a.txt', 'b.txt', 'c.txt', 'd.txt'])
+})
+
+test('file selection preserves an empty MIME type for analyzer validation', () => {
+  const selection = mergeTaskAnalysisFiles([], [metadataFile('unknown.data', 10, '')])
+
+  assert.equal(selection.files.length, 1)
+  assert.equal(selection.files[0].type, '')
+  assert.equal(selection.addedCount, 1)
 })

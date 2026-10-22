@@ -549,6 +549,7 @@ Pull Request 模板：
 - 实现 `promptOptimizer` 和 `parallelPlanner`，生成结构化 Prompt 以及串行/并行执行建议。
 - 实现 `TaskAnalysisPanel`，支持 Prompt 输入、多个文件元信息录入、文件删除、结果展示和异常提示。
 - 在 `App.tsx` 中接入任务分析入口，并实现与钓鱼、小屋和邮箱面板的互斥显示。
+- 完成 P1 第一阶段体验优化：限制文件数量与大小、提示重复或超限文件、复制优化 Prompt，并提供双确认清空。
 
 ### 修改的模块
 
@@ -557,6 +558,7 @@ Pull Request 模板：
 - `src/components/TaskAnalysisPanel.tsx`
 - `src/App.tsx`
 - `src/styles.css`
+- `tests/task-analysis.test.mjs`
 
 ### 测试方法
 
@@ -565,6 +567,8 @@ Pull Request 模板：
 3. 测试多个编号任务和存在前后依赖的 Prompt，确认分别生成并行或串行建议。
 4. 测试 Prompt 优化的空白清理、文件列表和空 Prompt 模板，并检查所有 Token 区间均为非负有序整数。
 5. 手动打开任务分析入口，验证面板自动展开、文件选择、MIME 缺失错误、旧结果清理、关闭和拖拽隔离。
+6. 测试 20 个文件、100 MiB 单文件和 500 MiB 总大小边界，并覆盖重复文件及多种拒绝原因。
+7. 手动验证复制反馈、复制兼容回退、双确认清空和分析中清空不会恢复旧结果。
 
 ### 检查结果
 

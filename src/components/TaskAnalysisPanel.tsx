@@ -1,6 +1,12 @@
 import { useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { HeuristicTaskAnalyzer, MAX_TASK_ANALYSIS_PROMPT_LENGTH } from '../task-analysis/HeuristicTaskAnalyzer'
+import {
+  MAX_TASK_ANALYSIS_FILES,
+  MAX_TASK_ANALYSIS_FILE_SIZE,
+  MAX_TASK_ANALYSIS_TOTAL_SIZE,
+  mergeTaskAnalysisFiles,
+} from '../task-analysis/fileSelection'
 import type {
   TaskAnalysisFile,
   TaskAnalysisResult,
@@ -27,8 +33,8 @@ const fileKey = (file: TaskAnalysisFile) => `${file.name}\u0000${file.type}\u000
 
 const formatBytes = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
 }
 
 const formatRange = (range: { min: number; max: number }) => `${range.min.toLocaleString()}–${range.max.toLocaleString()}`
@@ -39,12 +45,46 @@ const toFileMetadata = (file: File): TaskAnalysisFile => ({
   size: file.size,
 })
 
+const copyText = async (text: string) => {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    // Fall through to the compatibility copy path.
+  }
+
+  const textarea = document.createElement('textarea')
+  const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  textarea.value = text
+  textarea.readOnly = true
+  textarea.tabIndex = -1
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+
+  try {
+    return document.execCommand('copy')
+  } catch {
+    return false
+  } finally {
+    textarea.remove()
+    activeElement?.focus()
+  }
+}
+
 export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles = [], onClose }: TaskAnalysisPanelProps) {
+  const initialFileSelection = mergeTaskAnalysisFiles([], initialFiles)
   const [prompt, setPrompt] = useState(initialPrompt)
-  const [files, setFiles] = useState<TaskAnalysisFile[]>(initialFiles)
+  const [files, setFiles] = useState<TaskAnalysisFile[]>(() => initialFileSelection.files)
+  const [fileNotice, setFileNotice] = useState<string | null>(() => initialFileSelection.notice)
   const [result, setResult] = useState<TaskAnalysisResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const [clearArmed, setClearArmed] = useState(false)
   const analysisRequestId = useRef(0)
 
   const invalidateAnalysis = () => {
@@ -52,21 +92,23 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
     setResult(null)
     setError(null)
     setIsAnalyzing(false)
+    setCopyStatus('idle')
+    setClearArmed(false)
   }
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(event.currentTarget.files ?? []).map(toFileMetadata)
-    invalidateAnalysis()
-    setFiles((current) => {
-      const combined = [...current, ...selectedFiles]
-      return combined.filter((file, index) => combined.findIndex((candidate) => fileKey(candidate) === fileKey(file)) === index)
-    })
+    const selection = mergeTaskAnalysisFiles(files, selectedFiles)
+    if (selection.addedCount > 0) invalidateAnalysis()
+    setFiles(selection.files)
+    setFileNotice(selection.notice)
     event.currentTarget.value = ''
   }
 
   const removeFile = (fileToRemove: TaskAnalysisFile) => {
     invalidateAnalysis()
     setFiles((current) => current.filter((file) => fileKey(file) !== fileKey(fileToRemove)))
+    setFileNotice(null)
   }
 
   const handleAnalyze = async () => {
@@ -75,6 +117,8 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
     setError(null)
     setResult(null)
     setIsAnalyzing(true)
+    setCopyStatus('idle')
+    setClearArmed(false)
 
     try {
       const outcome = await (analyzer ?? defaultAnalyzer).analyze({ prompt, files })
@@ -91,6 +135,35 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
       if (requestId === analysisRequestId.current) setIsAnalyzing(false)
     }
   }
+
+  const handleCopyPrompt = async () => {
+    if (!result) return
+    setCopyStatus(await copyText(result.optimizedPrompt) ? 'success' : 'error')
+  }
+
+  const handleClear = () => {
+    if (!clearArmed) {
+      setClearArmed(true)
+      return
+    }
+
+    analysisRequestId.current += 1
+    setPrompt('')
+    setFiles([])
+    setFileNotice(null)
+    setResult(null)
+    setError(null)
+    setIsAnalyzing(false)
+    setCopyStatus('idle')
+    setClearArmed(false)
+  }
+
+  const canClear = prompt.length > 0
+    || files.length > 0
+    || Boolean(result)
+    || Boolean(error)
+    || Boolean(fileNotice)
+    || isAnalyzing
 
   return (
     <section
@@ -127,6 +200,12 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
 
         <label htmlFor="task-analysis-files">相关文件</label>
         <input id="task-analysis-files" type="file" multiple onChange={handleFileChange} />
+        <p className="task-analysis-file-limits">
+          最多 {MAX_TASK_ANALYSIS_FILES} 个文件；单个不超过 {formatBytes(MAX_TASK_ANALYSIS_FILE_SIZE)}；总计不超过 {formatBytes(MAX_TASK_ANALYSIS_TOTAL_SIZE)}。
+        </p>
+        {fileNotice && (
+          <p className="task-analysis-file-notice" role="status">{fileNotice}</p>
+        )}
         {files.length > 0 ? (
           <ul className="task-analysis-file-list" aria-label="已选择文件">
             {files.map((file) => (
@@ -143,9 +222,20 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
           <p className="task-analysis-empty-files">尚未添加文件；可以只分析 Prompt。</p>
         )}
 
-        <button type="button" onClick={handleAnalyze} disabled={isAnalyzing}>
-          {isAnalyzing ? '分析中…' : '开始分析'}
-        </button>
+        <div className="task-analysis-actions">
+          <button type="button" onClick={handleAnalyze} disabled={isAnalyzing}>
+            {isAnalyzing ? '分析中…' : '开始分析'}
+          </button>
+          <button
+            type="button"
+            className={clearArmed ? 'task-analysis-clear is-armed' : 'task-analysis-clear'}
+            onClick={handleClear}
+            disabled={!canClear}
+            aria-pressed={clearArmed}
+          >
+            {clearArmed ? '再次点击确认清空' : '清空输入'}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -174,8 +264,21 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
           </section>
 
           <section>
-            <h3>优化后的 Prompt</h3>
+            <div className="task-analysis-section-heading">
+              <h3>优化后的 Prompt</h3>
+              <button type="button" className="task-analysis-copy" onClick={handleCopyPrompt}>
+                {copyStatus === 'success' ? '已复制' : '复制 Prompt'}
+              </button>
+            </div>
             <pre className="task-analysis-optimized-prompt">{result.optimizedPrompt}</pre>
+            {copyStatus !== 'idle' && (
+              <p
+                className={`task-analysis-copy-status is-${copyStatus}`}
+                role={copyStatus === 'error' ? 'alert' : 'status'}
+              >
+                {copyStatus === 'success' ? '优化后的 Prompt 已复制到剪贴板。' : '复制失败，请手动选择 Prompt 文本。'}
+              </p>
+            )}
           </section>
 
           <section>
