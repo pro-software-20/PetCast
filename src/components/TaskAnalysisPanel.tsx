@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { HeuristicTaskAnalyzer, MAX_TASK_ANALYSIS_PROMPT_LENGTH } from '../task-analysis/HeuristicTaskAnalyzer'
 import type {
@@ -35,7 +35,7 @@ const formatRange = (range: { min: number; max: number }) => `${range.min.toLoca
 
 const toFileMetadata = (file: File): TaskAnalysisFile => ({
   name: file.name,
-  type: file.type || 'application/octet-stream',
+  type: file.type,
   size: file.size,
 })
 
@@ -45,37 +45,50 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
   const [result, setResult] = useState<TaskAnalysisResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const analysisRequestId = useRef(0)
+
+  const invalidateAnalysis = () => {
+    analysisRequestId.current += 1
+    setResult(null)
+    setError(null)
+    setIsAnalyzing(false)
+  }
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(event.currentTarget.files ?? []).map(toFileMetadata)
+    invalidateAnalysis()
     setFiles((current) => {
       const combined = [...current, ...selectedFiles]
       return combined.filter((file, index) => combined.findIndex((candidate) => fileKey(candidate) === fileKey(file)) === index)
     })
-    setError(null)
     event.currentTarget.value = ''
   }
 
   const removeFile = (fileToRemove: TaskAnalysisFile) => {
+    invalidateAnalysis()
     setFiles((current) => current.filter((file) => fileKey(file) !== fileKey(fileToRemove)))
   }
 
   const handleAnalyze = async () => {
+    const requestId = analysisRequestId.current + 1
+    analysisRequestId.current = requestId
     setError(null)
     setResult(null)
     setIsAnalyzing(true)
 
     try {
       const outcome = await (analyzer ?? defaultAnalyzer).analyze({ prompt, files })
+      if (requestId !== analysisRequestId.current) return
       if (outcome.ok) {
         setResult(outcome.result)
       } else {
         setError(`${errorLabels[outcome.code]}：${outcome.message}（${outcome.code}）`)
       }
     } catch {
+      if (requestId !== analysisRequestId.current) return
       setError('分析请求失败，请稍后重试。')
     } finally {
-      setIsAnalyzing(false)
+      if (requestId === analysisRequestId.current) setIsAnalyzing(false)
     }
   }
 
@@ -101,8 +114,8 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
           id="task-analysis-prompt"
           value={prompt}
           onChange={(event) => {
+            invalidateAnalysis()
             setPrompt(event.target.value)
-            setError(null)
           }}
           placeholder="描述需要完成的任务、约束和期望输出……"
           rows={7}
