@@ -15,12 +15,18 @@ if (!process.versions.electron) {
 } else {
   const { app, BrowserWindow, ipcMain } = await import('electron')
   const { registerUsageHistoryIpc } = await import('../dist-electron/historyIpc.js')
+  const { createCodexDiagnostics } = await import('../dist-electron/codexDiagnostics.js')
   app.setPath('userData', await mkdtemp(path.join(tmpdir(), 'petcast-ui-')))
   void app.whenReady().then(async () => {
   const scopeId = `codex-${'a'.repeat(64)}`
   const now = new Date()
   const usage = { shortWindowRemaining: 37, weeklyRemaining: 61, sampledAt: now.toISOString(),
     shortWindowResetAt: new Date(+now + 3600000).toISOString(), weeklyResetAt: new Date(+now + 4 * 86400000).toISOString() }
+  const windowFixture = (usedPercent, windowDurationMins) => ({ usedPercent, windowDurationMins, resetsAt: Math.floor(+now/1000) + 3600 })
+  usage.diagnostics = createCodexDiagnostics({account:{email:'fixture@example.invalid',planType:'plus'}}, {
+    rateLimitsByLimitId:{codex:{primary:windowFixture(63,300),secondary:windowFixture(39,10080)},
+      codex_other:{primary:windowFixture(5,300),secondary:windowFixture(1,10080)}},
+  }, 'path', true)
   const mockUsage = {...usage, shortWindowRemaining: 88, weeklyRemaining: 77, burnRate: 5, baselineBurnRate: 5}
   const initialSave = {version: 1, usage: mockUsage, aquarium: [], codex: {}, mailItems: [], unreadMailIds: [], autoFishingEnabled: false, resetWatchEnabled: false}
   let saved = initialSave, mode = 'login', resolvePending
@@ -30,7 +36,7 @@ if (!process.versions.electron) {
     if (mode === 'pending') return new Promise(resolve => { resolvePending = resolve })
     if (mode === 'login') return {ok: false, code: 'LOGIN_REQUIRED'}
     if (mode === 'stale') return {ok: false, code: 'UNAVAILABLE', scopeId}
-    return {ok: true, snapshot: {...usage, scopeId}}
+    return {ok: true, snapshot: {...usage, scopeId, sampledAt: new Date().toISOString()}}
   })
   const win = new BrowserWindow({width: 338, height: 226, frame: false, show: false, webPreferences: {
     preload: path.join(root, 'dist-electron/preload.cjs'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false,
@@ -68,6 +74,15 @@ if (!process.versions.electron) {
     await wait(status('real','fresh'), 'real quota')
     assert.equal(await js(`document.querySelector('.usage-settings-values').textContent.includes('37%')`), true)
     assert.match(await js(`document.querySelector('.usage-settings-values').textContent`), /数据不足/)
+    await js(`document.querySelector('.usage-source-details').open = true`)
+    const details = await js(`document.querySelector('.usage-source-details').textContent`)
+    assert.match(details, /f\*\*\*@e\*\*\*/)
+    assert.match(details, /codex_other/)
+    assert.match(details, /已用 5% \/ 剩余 95%/)
+    assert.match(details, /已用 1% \/ 剩余 99%/)
+    assert.doesNotMatch(details, /fixture@example/)
+    await shot('03-source-verification')
+    await js(`document.querySelector('.usage-source-details').open = false`)
     await js(`document.querySelector('[aria-label="关闭额度设置"]').click()`)
     await shot('03-compact-real')
     await click('河边'); await sleep(350)
@@ -85,6 +100,13 @@ if (!process.versions.electron) {
     assert.equal(saved.mailItems.length, beforeStale)
     assert.equal(saved.usage.shortWindowRemaining, 88, 'real quotas must not overwrite mock save')
     await shot('04-expanded-stale')
+    // Model returning to a visible window / network recovery without waiting for the poll interval.
+    await js(`void Object.defineProperty(document, 'visibilityState', {configurable:true, get:()=> 'visible'})`)
+    mode = 'live'; await js(`window.dispatchEvent(new Event('online'))`)
+    await wait(status('real','fresh'), 'network recovery refresh')
+    mode = 'stale'; await js(`window.dispatchEvent(new Event('focus'))`)
+    await wait(status('real','stale'), 'focus triggers a fresh read')
+    await js(`delete document.visibilityState`)
     await click('模拟演示'); await wait(status('mock','fresh'), 'mock switch')
     assert.equal(await js(`!!document.querySelector('.mock-controls')`), true)
     assert.equal(await js(`document.querySelector('.usage-board').textContent.includes('88%')`), true)
@@ -117,7 +139,7 @@ if (!process.versions.electron) {
     }
     assert.equal(await browserJs(status('mock', 'fresh')), true)
     browserWin.destroy()
-    console.log('Usage UI acceptance passed: browser fallback; loading, login, real, stale, mock, persistence, cancellation, logout')
+    console.log('Usage UI acceptance passed: browser fallback; loading, login, real, stale, mock, persistence, cancellation, logout, focus/online refresh')
     app.exit(0)
   } catch (error) { console.error(error); app.exit(1) }
   }).catch(error => { console.error(error); app.exit(1) })

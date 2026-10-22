@@ -69,7 +69,9 @@ test('RPC handshake, safe fields, cleanup; no inference APIs or credentials', as
   assert.equal(result.ok, true)
   assert.match(result.snapshot.scopeId, /^codex-[a-f0-9]{64}$/)
   assert.equal(result.snapshot.shortWindowRemaining, 75)
-  assert.doesNotMatch(JSON.stringify(result), /fixture|example|email|planType/)
+  assert.doesNotMatch(JSON.stringify(result), /fixture|example|email/)
+  assert.equal(result.snapshot.diagnostics.accountLabel, 'f***@e***')
+  assert.equal(result.snapshot.diagnostics.planType, 'plus')
   assert.deepEqual(fake.requests.map(value => value.method), ['initialize', 'initialized', 'account/read', 'account/rateLimits/read', 'account/read'])
   assert.equal(fake.child.killed, true)
 })
@@ -144,4 +146,42 @@ test('upstream account ID is hashed and separates workspaces of the same login',
   assert.notEqual(a.snapshot.accountScopeId, b.snapshot.accountScopeId)
   assert.equal(a.snapshot.accountScopeId, again.snapshot.accountScopeId)
   assert.doesNotMatch(JSON.stringify(a), /workspace-one|fixture@example/)
+})
+
+test('discovery is covered by the total deadline and a late result cannot spawn', async () => {
+  let finish, launched = false
+  const result = await readCodexQuota({scopeSalt:'salt', timeoutMs:10,
+    resolveExecutable:()=>new Promise(resolve=>{finish=resolve}),
+    launch:()=>{launched=true;throw Error('must not launch')},
+  })
+  assert.equal(result.code,'TIMEOUT')
+  finish({executable:'fake',source:'path'})
+  await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(launched,false)
+})
+
+test('cancel during discovery returns immediately without waiting for a filesystem result', async () => {
+  const controller=new AbortController()
+  const result=readCodexQuota({scopeSalt:'salt',signal:controller.signal,
+    resolveExecutable:()=>new Promise(()=>{}),launch:()=>{throw Error('must not launch')},
+  })
+  controller.abort()
+  assert.equal((await result).code,'CANCELLED')
+})
+
+test('server request IDs cannot collide with client read replies', async () => {
+  const fake=server(message=>{
+    if(message.method==='account/read') fake.child.stdout.write(JSON.stringify({id:message.id,method:'unsupported/server/request',params:{private:'secret'}})+'\n')
+    return successful(message)
+  })
+  const result=await run(fake)
+  assert.equal(result.ok,true)
+  assert.ok(fake.requests.some(message=>message.error?.code===-32601))
+  assert.doesNotMatch(JSON.stringify(fake.requests),/secret/)
+})
+
+test('a response with both result and error is invalid rather than accepted', async () => {
+  const fake=server(message=>message.method==='account/rateLimits/read'
+    ? {result:limits(),error:{code:-1,message:'private'}} : successful(message))
+  assert.equal((await run(fake)).code,'INVALID_RESPONSE')
 })

@@ -1,6 +1,8 @@
 export type RecentResetType = 'short' | 'weekly' | null
 
 export interface UsageState {
+  /** Local source verification; never persisted as report evidence or game save. */
+  diagnostics?: import('../../electron/codexProtocol').CodexQuotaDiagnostics
   /** Non-sensitive local account scope; real providers always supply it. */
   scopeId?: string
   shortWindowRemaining: number
@@ -32,6 +34,7 @@ export type PetMood =
   | 'celebrating'
 
 export type UsageFlag =
+  | 'resetPending'
   | 'balanced'
   | 'capacityAvailable'
   | 'shortLow'

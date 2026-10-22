@@ -63,3 +63,53 @@ test('strict-mode stop/start and unsubscribe do not publish obsolete reads', asy
   connection.select('mock')
   assert.equal(changes, after)
 })
+
+test('wake after a long pause marks old quota stale before a pending refresh completes', async t => {
+  t.mock.timers.enable({apis:['Date','setTimeout'],now:1000000})
+  let calls=0
+  const connection=new UsageConnection(source=>({source,cacheKey:'same',getCurrentUsage:()=>++calls===1
+    ? Promise.resolve(createMockUsageState()) : new Promise(()=>{})}))
+  try {
+    connection.start();await flush()
+    const original=+connection.getSnapshot().reading.data.sampledAt
+    t.mock.timers.setTime(1120000)
+    const refreshing=connection.refresh()
+    assert.equal(connection.getSnapshot().reading.status,'stale')
+    assert.equal(+connection.getSnapshot().reading.data.sampledAt,original)
+    assert.equal(connection.getSnapshot().reading.data.recentResetType,null)
+    connection.stop();await refreshing
+  } finally {connection.stop()}
+})
+
+test('freshness deadline expires snapshots even when a provider keeps returning old sample times', async t => {
+  t.mock.timers.enable({apis:['Date','setTimeout'],now:1000000})
+  const sample=createMockUsageState()
+  const connection=new UsageConnection(source=>({source,getCurrentUsage:async()=>sample}))
+  const invalidFresh=[]
+  connection.subscribe(()=>{
+    const reading=connection.getSnapshot().reading
+    if(reading?.status==='fresh' && Date.now()-+reading.data.sampledAt>=90000) invalidFresh.push(reading)
+  })
+  try {
+    connection.start();await flush()
+    for(let i=0;i<3;i++){t.mock.timers.tick(30000);await flush()}
+    assert.equal(connection.getSnapshot().reading.status,'stale')
+    assert.equal(+connection.getSnapshot().reading.data.sampledAt,1000000)
+    assert.equal(invalidFresh.length,0,'expired responses must never reach subscribers as fresh')
+  } finally {connection.stop()}
+})
+
+test('a fresh response restores normal status after wake and backward clock changes invalidate old data', async t => {
+  t.mock.timers.enable({apis:['Date','setTimeout'],now:1000000})
+  let release, calls=0
+  const connection=new UsageConnection(source=>({source,getCurrentUsage:()=>++calls===1
+    ? Promise.resolve(createMockUsageState()) : new Promise(resolve=>{release=resolve})}))
+  try {
+    connection.start();await flush()
+    t.mock.timers.setTime(999000)
+    const pending=connection.refresh()
+    assert.equal(connection.getSnapshot().reading.status,'stale')
+    release(createMockUsageState());await pending
+    assert.equal(connection.getSnapshot().reading.status,'fresh')
+  } finally {connection.stop()}
+})

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { FISH_SPECIES } from '../game/fishSpecies'
-import { formatTimeUntil } from '../game/usageAnalysis'
+import { formatResetStatus } from '../game/usageAnalysis'
 import type { MailItem } from '../types/notifications'
 import type { UsageState } from '../types/usage'
 
@@ -20,17 +20,19 @@ const signalUsageContext = (item: Extract<MailItem, { type: 'resetSignal' }>, us
   const remaining = isShortWindow ? usage.shortWindowRemaining : usage.weeklyRemaining
   const resetAt = isShortWindow ? usage.shortWindowResetAt : usage.weeklyResetAt
   const minutesUntilReset = Math.max(0, Math.round((resetAt.getTime() - now.getTime()) / 60_000))
-  const isNearReset = minutesUntilReset <= (isShortWindow ? 45 : 12 * 60)
+  const pending = +resetAt <= +now
+  const isNearReset = !pending && minutesUntilReset <= (isShortWindow ? 45 : 12 * 60)
   const isLow = remaining <= (isShortWindow ? 25 : 22)
 
   let verdict = '当前额度仍可使用，这条消息只作为提前预告。'
-  if (isNearReset) verdict = '外部线索与当前倒计时接近，建议稍后再次确认额度。'
+  if (pending) verdict = '已到预计时间，尚未确认额度恢复，请重新读取。'
+  else if (isNearReset) verdict = '外部线索与当前倒计时接近，建议稍后再次确认额度。'
   else if (isLow) verdict = '额度已经进入低位，但重置时间仍以额度页面为准。'
 
   return {
     label: isShortWindow ? '5h 额度' : '周额度',
     remaining: `${remaining}%`,
-    resetText: `${formatTimeUntil(resetAt, now)}后`,
+    resetText: formatResetStatus(resetAt, now),
     verdict,
   }
 }
@@ -102,8 +104,8 @@ export function MailboxPanel({ items, usage, onClose }: MailboxPanelProps) {
               <span>{item.source === 'mock' ? '模拟重置记录' : item.source === 'real' ? '真实额度历史记录' : '历史记录（来源未标记）'}<time>{timeLabel(item.createdAt)}</time></span>
               <strong>{item.resetType === 'short' ? '5h 额度已经恢复' : '周额度已经恢复'}</strong>
               <p>{item.resetType === 'short'
-                ? '新的 5h 使用周期已经开始，当时观测到额度恢复，可以重新安排任务。'
-                : '新的周额度周期已经开始，当时观测到额度恢复，可以重新规划本周节奏。'}</p>
+                ? '当时观测到 5h 额度恢复。执行新任务前需核对最新的两个窗口余额。'
+                : '当时观测到周额度恢复。执行新任务前需核对最新的两个窗口余额。'}</p>
               <footer><b>历史事件</b><em>不代表当前余额</em></footer>
             </div>
           </article>
