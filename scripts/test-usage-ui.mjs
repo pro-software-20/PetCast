@@ -1,7 +1,7 @@
 /** Fixture-based renderer acceptance. No user credentials or network required. Build first. */
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { spawn } from 'node:child_process'
@@ -14,6 +14,7 @@ if (!process.versions.electron) {
   child.on('exit', code => { clearTimeout(timer); process.exitCode = code ?? 1 })
 } else {
   const { app, BrowserWindow, ipcMain } = await import('electron')
+  const { registerUsageHistoryIpc } = await import('../dist-electron/historyIpc.js')
   app.setPath('userData', await mkdtemp(path.join(tmpdir(), 'petcast-ui-')))
   void app.whenReady().then(async () => {
   const scopeId = `codex-${'a'.repeat(64)}`
@@ -34,6 +35,7 @@ if (!process.versions.electron) {
   const win = new BrowserWindow({width: 338, height: 226, frame: false, show: false, webPreferences: {
     preload: path.join(root, 'dist-electron/preload.cjs'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false,
   }})
+  registerUsageHistoryIpc(() => win, app.getPath('userData'), pathToFileURL(path.join(root, 'dist/index.html')).href)
   ipcMain.handle('window:toggle-expanded', (_e, expanded) => win.setSize(expanded ? 1008 : 338, expanded ? 526 : 226))
   const js = code => win.webContents.executeJavaScript(code)
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))

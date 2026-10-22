@@ -430,3 +430,80 @@ button { font: inherit; }
 .card > .usage-settings .usage-refresh { position: sticky; bottom: 0; margin-top: 6px; background: #fff; }
 .expanded .topbar small { padding: 4px 7px; border-radius: 7px; background: #f3fbffeb; color: #31566b; }
 
+.history-open { margin: 12px 12px 0; width: calc(100% - 24px); padding: 9px; border: 1px solid #2d7e9c; border-radius: 10px; color: white; background: #2d7e9c; cursor: pointer; font-size: 12px; }
+.history-panel { position: absolute; z-index: 100; inset: 12px; padding: 16px; display: flex; flex-direction: column; border: 1px solid #b8d8e4; border-radius: 18px; background: #f7fcff; color: #284f64; box-shadow: 0 12px 40px #18384844; cursor: default; touch-action: pan-y; user-select: text; }
+.history-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.history-header small { font-size: 9px; letter-spacing: .15em; color: #738e9c; }
+.history-header h2 { margin: 3px 0 10px; font-size: 21px; }
+.history-panel button, .history-panel select { padding: 6px 9px; border: 1px solid #b9d7e4; border-radius: 7px; color: #315d71; background: white; font-size: 11px; cursor: pointer; }
+.history-panel button:disabled { opacity: .5; cursor: default; }
+.history-panel button:focus-visible, .history-panel select:focus-visible { outline: 2px solid #267c9c; outline-offset: 2px; }
+.history-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid #dceaf0; }
+.history-tabs button[aria-pressed=true] { background: #276f8c; color: #fff; border-color: #276f8c; }
+.history-tabs label { margin-left: auto; font-size: 10px; }
+.history-scroll { overflow-y: auto; min-height: 0; padding-right: 7px; scrollbar-width: thin; font-size: 11px; }
+.history-source { padding: 8px 10px; border-radius: 8px; background: #e2f2ed; color: #31685a; }
+.history-source.is-demo { background: #fff0ce; color: #705525; }
+.history-range { font-size: 10px; color: #647e8e; }
+.history-summary { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; }
+.history-summary > div { display: grid; gap: 6px; padding: 12px 9px; border: 1px solid #d6e5ec; border-radius: 10px; background: white; }
+.history-summary span { font-size: 10px; color: #527487; }
+.history-summary strong { font-size: 19px; }
+.history-summary small { font-size: 9px; color: #78919e; }
+.history-chart { margin-top: 12px; padding: 10px; background: white; border: 1px solid #d7e7ed; border-radius: 10px; }
+.history-panel h3 { margin: 3px 0 9px; font-size: 12px; }
+.history-panel h3 small { font-size: 9px; font-weight: normal; color: #718c9a; }
+.history-bars { display: flex; gap: 4px; overflow-x: auto; padding: 6px 0; }
+.history-day { flex: 1 0 26px; text-align: center; }
+.history-day span { font-size: 8px; color: #617c8c; }
+.history-bar-track { height: 65px; display: flex; align-items: flex-end; justify-content: center; border-bottom: 1px solid #cbdde5; background: #f5f9fb; }
+.history-bar-track i { display: block; width: 65%; max-width: 32px; background: #5fa9bd; border-radius: 3px 3px 0 0; }
+.history-bar-track b { align-self: center; color: #9baeb8; font-weight: normal; }
+.history-chart > p { margin: 7px 0 0; font-size: 9px; color: #728997; }
+.history-observations { display: flex; flex-wrap: wrap; gap: 10px 18px; padding: 12px 0; border-bottom: 1px solid #deebef; }
+.history-observations b { margin-left: 6px; }
+.history-advice, .history-warnings { padding: 10px 0 0; line-height: 1.65; }
+.history-panel ul { margin: 0; padding-left: 18px; }
+.history-warnings { color: #627d8a; font-size: 10px; }
+.history-actions { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0; }
+.history-confirm { padding: 10px; background: #fff0da; border-radius: 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.history-confirm span { flex-basis: 100%; }
+.history-error { padding: 12px; background: #fff0da; border-radius: 8px; color: #87592b; }
+.history-source.has-error { background: #fff0da; color: #87592b; }
+
+.history-filters { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; }
+.history-filters label { display:flex; gap:4px; align-items:center; }
+.history-filters input { max-width:135px; border:1px solid #b9d7e4; border-radius:6px; padding:5px; color:#315d71; background:white; font-size:11px; }
+.history-filters p { flex-basis:100%; margin:0; font-size:10px; color:#627d8a; }
+.history-comparison { padding:10px; background:#edf3fa; border-radius:8px; line-height:1.6; }
+.history-hours { display:grid; grid-template-columns:repeat(24,minmax(20px,1fr)); gap:3px; overflow-x:auto; }
+.history-hours>div { text-align:center; padding:7px 2px; border-radius:4px; font-size:10px; }
+.history-hours small { display:block; font-size:8px; }
+.history-badges { display:flex; flex-wrap:wrap; gap:8px; }
+.history-badges>div { flex:1 1 180px; padding:10px; border-radius:9px; background:#fff3d4; color:#725819; }
+.history-badges p { font-size:10px; line-height:1.6; }
+.task-report { overflow-wrap:anywhere; }
+.task-report table { width:100%; border-collapse:collapse; font-size:10px; }
+.task-report td,.task-report th { padding:7px; text-align:left; border-bottom:1px solid #dfebf0; }
+.task-report details { margin-top:8px; padding:7px; background:#f2f7fa; border-radius:7px; }
+.task-report summary { cursor:pointer; }
+.history-file { padding:6px 9px; border:1px solid #b9d7e4; border-radius:7px; background:white; cursor:pointer; }
+.history-file input { display:block; max-width:230px; margin-top:5px; font-size:10px; }
+
+.history-trend-table { width:100%; text-align:left; border-collapse:collapse; font-size:10px; }
+.history-trend-table td,.history-trend-table th { padding:6px; border-bottom:1px solid #dfebf0; }
+
+.task-advice { margin:12px 0; }
+.task-advice-card { padding:11px 12px; margin:9px 0; border:1px solid #cce1e9; border-left:3px solid #3b91a8; border-radius:8px; background:#f7fcff; }
+.task-advice-card h4 { margin:0 0 7px; font-size:12px; }
+.task-advice-card p { margin:5px 0; line-height:1.65; }
+.task-advice-limit { color:#617e8d; font-size:10px; }
+.task-timing .history-filters input[type=datetime-local] { max-width:210px; }
+
+.unified-plan { margin:14px 0!important; padding:12px!important; border:1px solid #a9cfdd; background:#edf8fb!important; }
+.plan-capacity { margin:10px 0; border:1px solid #c5dce5; border-radius:8px; min-width:0; padding:10px; }
+.plan-capacity legend { font-weight:600; }
+.unified-plan input[type=datetime-local] { max-width:210px; }
+.unified-plan select { max-width:290px; }
+.unified-plan input[type=number] { max-width:95px; }
+.unified-plan small { color:#627d8a; }

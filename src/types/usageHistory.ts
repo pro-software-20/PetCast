@@ -29,7 +29,7 @@ export interface UsageReport {
   warnings: string[]
 }
 
-/** Planned boundary for D; not yet implemented by the desktop bridge. */
+/** Implemented by independent desktop file storage and browser storage. */
 export interface UsageHistoryStore {
   appendUsageSample(sample: UsageSample): Promise<void>
   queryUsageSamples(query: { startAt: string; endAt: string; source: UsageSample['source']; scopeId: string }): Promise<UsageSample[]>
