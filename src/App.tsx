@@ -9,7 +9,7 @@ import { MailboxPanel } from './components/MailboxPanel'
 import { TaskAnalysisPanel } from './components/TaskAnalysisPanel'
 import { AQUARIUM_CAPACITY, createEmptyCodex, recordCatch, recordDisposition, replaceAquariumFish, toKeptFish } from './game/collection'
 import { generateAutoFishingRound } from './game/autoFishing'
-import { analyzeUsage, isProactiveUsageFlag } from './game/usageAnalysis'
+import { analyzeUsage, isProactiveUsageFlag, resetConfirmationMessage } from './game/usageAnalysis'
 import { createGameSave, loadGameSave, restoreGameSave, saveGame } from './persistence/storage'
 import type { KeptFish } from './types/collection'
 import type { FishCatch } from './types/fishing'
@@ -359,9 +359,7 @@ export default function App() {
       resetType,
     }
     addMailItem(notice)
-    showStageSixNotice(resetType === 'short'
-      ? '5h 额度已经恢复，河流也重新亮起来了。'
-      : '周额度已经恢复，可以重新安排这一周了。')
+    showStageSixNotice(resetConfirmationMessage(usage))
   }, [fresh, connection.source, usage?.recentResetType, usage?.sampledAt])
 
   useEffect(() => {

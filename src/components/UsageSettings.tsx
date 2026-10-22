@@ -24,6 +24,7 @@ export function UsageSettings({ state, desktop, onSelect, onRefresh, onClose }: 
   }, [onClose])
   const reading = state.reading
   const usage = reading?.data
+  const diagnostics = usage?.diagnostics
   return (
     <section className="usage-settings" role={onClose ? "dialog" : "region"} aria-label="额度数据设置" onPointerDown={event => event.stopPropagation()}>
       <header><strong>额度数据</strong>{onClose && <button autoFocus onClick={onClose} aria-label="关闭额度设置">×</button>}</header>
@@ -33,7 +34,7 @@ export function UsageSettings({ state, desktop, onSelect, onRefresh, onClose }: 
       </div>
       <p className="source-explanation">{state.source === 'mock'
         ? '演示数据，可在河边控制台调整。'
-        : '读取此电脑上已登录的 Codex 账号。'}</p>
+        : '读取本机 Codex 接口的登录配置；需与正在使用的客户端核对账号和配额组。'}</p>
       <div className={`usage-read-feedback feedback-${reading?.status ?? 'loading'}`} role="status">
         <strong>{usageStatus(state)}</strong>
         {state.source === 'real' && !desktop
@@ -50,6 +51,22 @@ export function UsageSettings({ state, desktop, onSelect, onRefresh, onClose }: 
         <span>周剩余 <b>{Math.round(usage.weeklyRemaining)}%</b></span>
         <span>消耗速度 <b>{usage.burnRate === null ? '数据不足' : `${usage.burnRate.toFixed(1)} 百分点/小时`}</b></span>
       </div>}
+      {state.source === 'real' && diagnostics && <details className="usage-source-details">
+        <summary>账号与额度来源核对</summary>
+        <p>{reading?.status === 'stale' ? '上次成功读取的来源' : '本次读取来源'}：{diagnostics.accountLabel ?? '账号无法脱敏显示'} · {diagnostics.planType}</p>
+        <p>主看板使用：{diagnostics.selectedBucket} 配额组。不同配额组不能混算，也不代表全部模型。</p>
+        <p>程序来源：{{ override: '手动指定', path: '系统 PATH', desktop: '桌面版目录', explicit: '显式指定' }[diagnostics.executableSource]}；登录配置：{diagnostics.customHome ? '自定义 CODEX_HOME' : '默认配置'}。</p>
+        {!diagnostics.workspaceIdentified && <p>接口未提供工作区标识：暂不能保证同邮箱下不同工作区的历史隔离。</p>}
+        {diagnostics.buckets.map(bucket => <div key={bucket.id}>
+          <strong>{bucket.id}{bucket.id === diagnostics.selectedBucket ? '（主看板）' : '（仅供核对）'}</strong>
+          {bucket.windows.map((window, index) => <p key={index}>
+            {window.minutes === 300 ? '5h' : window.minutes === 10080 ? '周' : window.minutes === null ? '未知窗口' : `${window.minutes} 分钟`}：
+            {window.usedPercent === null ? '用量未知' : `已用 ${window.usedPercent}% / 剩余 ${Math.max(0, 100 - window.usedPercent)}%`}<br />
+            重置时间：{window.resetsAt ? new Date(window.resetsAt).toLocaleString('zh-CN') : '未知'}
+          </p>)}
+        </div>)}
+        <p>请同时刷新两边，核对账号、配额组及重置时间。其他客户端可使用不同登录配置；数值不同不能直接视为额度估算误差。</p>
+      </details>}
     </section>
   )
 }
