@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { WorkspaceSnapshot } from '../../electron/workspaceProtocol'
 import { buildManualTaskPrompt } from '../orchestration/manualTaskPrompt'
 import { LOCAL_PROVIDER_PROFILE } from '../orchestration/providerProfiles'
 import { generateTaskSessionReport } from '../orchestration/taskReport'
 import {
   canEditTaskDependencies,
+  canEditTaskPlan,
   updateTaskSession,
   type TaskSessionAction,
 } from '../orchestration/taskSession'
@@ -15,6 +17,7 @@ import type {
   VerificationStatus,
 } from '../types/taskOrchestration'
 import { copyText } from '../utils/copyText'
+import { TaskDefinitionEditor } from './TaskDefinitionEditor'
 
 export interface TaskPlanCardsProps {
   session: TaskSessionV1
@@ -84,6 +87,11 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
   const [copyStatuses, setCopyStatuses] = useState<Record<string, CopyStatus>>({})
   const [actionError, setActionError] = useState<string | null>(null)
   const [reportCopyStatus, setReportCopyStatus] = useState<CopyStatus>('idle')
+  const [workspace, setWorkspace] = useState<WorkspaceSnapshot | undefined>()
+  const [pendingWorkspace, setPendingWorkspace] = useState<WorkspaceSnapshot | undefined>()
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null)
+  const [workspaceLoading, setWorkspaceLoading] = useState(false)
+  const workspaceRequest = useRef<string | null>(null)
   const manualProviders = providers.filter(provider => provider.executionModes.includes('manual'))
   const selectableProviders = manualProviders.some(provider => provider.id === 'local')
     ? manualProviders
@@ -91,8 +99,15 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
   const completedCount = session.runs.filter(run => run.status === 'done').length
   const readyCount = session.runs.filter(run => run.status === 'ready').length
   const dependenciesEditable = canEditTaskDependencies(session)
+  const planEditable = canEditTaskPlan(session)
   const allTasksDone = completedCount === session.runs.length
   const report = session.completedAt ? generateTaskSessionReport(session) : null
+
+  useEffect(() => () => {
+    const requestId = workspaceRequest.current
+    workspaceRequest.current = null
+    if (requestId) window.petcast?.cancelTaskWorkspace?.(requestId)
+  }, [])
 
   const applyAction = (action: TaskSessionAction, persistImmediately = true) => {
     const outcome = updateTaskSession(session, action)
@@ -125,6 +140,55 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
     setReportCopyStatus(await copyText(report.markdown) ? 'success' : 'error')
   }
 
+  const selectWorkspace = async () => {
+    if (!window.petcast?.selectTaskWorkspace) {
+      setWorkspaceError('工作区选择仅桌面版可用。')
+      return
+    }
+    const requestId = `workspace-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
+    workspaceRequest.current = requestId
+    setWorkspaceLoading(true)
+    setWorkspaceError(null)
+    try {
+      const outcome = await window.petcast.selectTaskWorkspace(requestId)
+      if (workspaceRequest.current !== requestId) return
+      if (!outcome.ok) {
+        if (outcome.code !== 'CANCELLED') setWorkspaceError(outcome.message)
+        return
+      }
+      if (session.plan.workspace && session.plan.workspace.id !== outcome.workspace.workspaceId) {
+        setPendingWorkspace(outcome.workspace)
+        return
+      }
+      if (applyAction({
+        type: 'set-workspace',
+        workspace: { id: outcome.workspace.workspaceId, displayName: outcome.workspace.displayName },
+      })) {
+        setWorkspace(outcome.workspace)
+      }
+    } finally {
+      if (workspaceRequest.current === requestId) {
+        workspaceRequest.current = null
+        setWorkspaceLoading(false)
+      }
+    }
+  }
+
+  const cancelWorkspaceScan = () => {
+    if (workspaceRequest.current) window.petcast?.cancelTaskWorkspace?.(workspaceRequest.current)
+  }
+
+  const confirmWorkspaceSwitch = () => {
+    if (!pendingWorkspace) return
+    if (applyAction({
+      type: 'set-workspace',
+      workspace: { id: pendingWorkspace.workspaceId, displayName: pendingWorkspace.displayName },
+    })) {
+      setWorkspace(pendingWorkspace)
+      setPendingWorkspace(undefined)
+    }
+  }
+
   return (
     <section className="task-plan-panel" aria-labelledby="task-plan-title">
       <header className="task-plan-header">
@@ -132,6 +196,29 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
         <h2 id="task-plan-title">人工 AI 任务方案</h2>
         <p>{session.plan.title}</p>
       </header>
+
+      <section className="task-workspace-selector">
+        <div>
+          <strong>项目工作区</strong>
+          <span>{session.plan.workspace?.displayName ?? '尚未选择；不会读取文件内容'}</span>
+          {workspace && <small>{workspace.entries.length} 项路径元信息{workspace.truncated ? '（清单已截断）' : ''}</small>}
+        </div>
+        <button type="button" disabled={!planEditable || workspaceLoading} onClick={() => void selectWorkspace()}>
+          {workspaceLoading ? '正在扫描…' : session.plan.workspace ? '重新选择' : '选择项目文件夹'}
+        </button>
+        {workspaceLoading && <button type="button" onClick={cancelWorkspaceScan}>取消扫描</button>}
+        {!window.petcast?.selectTaskWorkspace && <p>工作区选择仅桌面版可用。</p>}
+        {workspaceError && <p role="alert">{workspaceError}</p>}
+        {workspace?.warnings.map(warning => <p key={warning}>{warning}</p>)}
+        {session.plan.workspace && !workspace && <p>已恢复相对路径授权；重新选择同一工作区后可以继续浏览文件清单。</p>}
+        {pendingWorkspace && (
+          <div className="task-workspace-switch-warning" role="alert">
+            <strong>切换为“{pendingWorkspace.displayName}”会清空所有任务的旧工作区路径授权。</strong>
+            <button type="button" onClick={confirmWorkspaceSwitch}>确认切换并清空</button>
+            <button type="button" onClick={() => setPendingWorkspace(undefined)}>取消</button>
+          </div>
+        )}
+      </section>
 
       <div className="task-plan-progress" aria-label={`已完成 ${completedCount} / ${session.runs.length}`}>
         <span><strong>{completedCount}</strong> / {session.runs.length} 已完成</span>
@@ -219,6 +306,20 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
                     : <p>旧会话未记录推荐依据；仍可按实际需要人工选择 AI。</p>}
                 </div>
               </div>
+
+              <TaskDefinitionEditor
+                key={`${task.id}:${session.plan.workspace?.id ?? 'none'}`}
+                task={task}
+                taskType={session.analysisResult.taskType}
+                providers={providers}
+                workspace={workspace}
+                disabled={!planEditable}
+                onSave={definition => applyAction({
+                  type: 'update-task-definition',
+                  taskId: task.id,
+                  task: definition,
+                })}
+              />
 
               <fieldset className="task-dependency-editor" disabled={!dependenciesEditable}>
                 <legend>前置任务</legend>

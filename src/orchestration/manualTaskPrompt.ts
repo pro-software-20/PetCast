@@ -52,6 +52,7 @@ export function buildManualTaskPrompt(
   return [
     `执行角色：${providerName}`,
     `总体目标：${plan.goal}`,
+    `工作区：${plan.workspace?.displayName ?? '未选择工作区'}`,
     '',
     `当前任务：${task.title}`,
     task.description,

@@ -371,6 +371,30 @@ button { font: inherit; }
 .task-provider-recommendation strong { color: #3f7479; font-size: 8px; }
 .task-provider-recommendation em { padding: 2px 5px; border-radius: 99px; color: #8a6439; background: #f8dfae; font-size: 7px; font-style: normal; font-weight: 900; }
 .task-provider-recommendation p { flex-basis: 100%; margin: 0; color: #67898c; font-size: 7px; line-height: 1.45; }
+.task-workspace-selector { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 9px; padding: 8px; border: 1px solid rgba(82,145,151,.25); border-radius: 9px; background: rgba(239,250,247,.88); }
+.task-workspace-selector > div:first-child { display: grid; flex: 1 1 180px; gap: 2px; color: #527d82; font-size: 8px; }
+.task-workspace-selector small, .task-workspace-selector p { flex-basis: 100%; margin: 0; color: #719193; font-size: 7px; line-height: 1.4; }
+.task-workspace-selector button, .task-definition-edit, .task-definition-actions button, .task-workspace-entry-list button, .task-manual-output button { padding: 5px 7px; border: 1px solid rgba(82,145,151,.34); border-radius: 7px; color: #44747b; background: #fff; font: inherit; font-size: 7px; font-weight: 800; cursor: pointer; }
+.task-workspace-selector button:disabled, .task-definition-edit:disabled { cursor: not-allowed; opacity: .55; }
+.task-workspace-switch-warning { display: flex; flex: 1 1 100%; flex-wrap: wrap; align-items: center; gap: 5px; padding: 6px; border-radius: 7px; color: #775932; background: #fff0cf; font-size: 7px; }
+.task-workspace-switch-warning strong { flex: 1 1 180px; }
+.task-definition-edit { margin-top: 8px; }
+.task-definition-editor { display: grid; gap: 7px; margin-top: 8px; padding: 9px; border: 1px solid rgba(82,145,151,.3); border-radius: 9px; background: rgba(239,249,246,.94); }
+.task-definition-editor h3 { margin: 0; color: #42757c; font-size: 9px; }
+.task-definition-editor > label { display: grid; gap: 3px; color: #507d82; font-size: 8px; font-weight: 800; }
+.task-definition-editor input, .task-definition-editor textarea { width: 100%; padding: 6px 7px; border: 1px solid rgba(82,145,151,.3); border-radius: 7px; color: #3f6b72; background: #fff; font: inherit; font-size: 8px; line-height: 1.45; }
+.task-definition-editor textarea { resize: vertical; }
+.task-workspace-scope-editor { display: grid; gap: 5px; }
+.task-workspace-scope-editor > strong { color: #4a7a80; font-size: 8px; }
+.task-workspace-scope-editor > p { margin: 0; color: #718f91; font-size: 7px; }
+.task-workspace-entry-list { display: grid; gap: 3px; max-height: 180px; overflow: auto; padding: 4px; border-radius: 7px; background: rgba(216,238,233,.62); }
+.task-workspace-entry-list > div { display: flex; align-items: center; gap: 3px; min-width: 0; }
+.task-workspace-entry-list span { flex: 1; overflow: hidden; color: #577f83; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.task-workspace-entry-list button.is-selected { color: #fff; border-color: #4f9895; background: #5ca7a2; }
+.task-manual-output { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; }
+.task-definition-errors { margin: 0; padding: 6px 6px 6px 20px; border-radius: 7px; color: #8b4d45; background: #ffe9e4; font-size: 7px; line-height: 1.45; }
+.task-definition-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.task-definition-actions button.is-primary { color: #fff; border-color: #4f9895; background: #5ca7a2; }
 .task-plan-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin: 8px 0 0; }
 .task-plan-meta div { min-width: 0; padding: 6px 7px; border: 1px solid rgba(82,145,151,.16); border-radius: 7px; background: rgba(238,249,245,.8); }
 .task-plan-meta dt { color: #7a999a; font-size: 7px; }

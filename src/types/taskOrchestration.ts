@@ -74,6 +74,11 @@ export interface TaskFileScope {
   outputPaths: string[]
 }
 
+export interface TaskWorkspaceContext {
+  id: string
+  displayName: string
+}
+
 /** Static task definition. Runtime state is kept in TaskRunRecord. */
 export interface TaskNode {
   id: string
@@ -96,6 +101,7 @@ export interface TaskPlan {
   title: string
   goal: string
   assumptions: string[]
+  workspace?: TaskWorkspaceContext
   tasks: TaskNode[]
   finalAcceptanceChecks: string[]
 }

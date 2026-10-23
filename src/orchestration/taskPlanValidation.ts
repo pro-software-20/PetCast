@@ -8,6 +8,7 @@ import {
   type TaskNode,
   type TaskPlan,
 } from '../types/taskOrchestration'
+import { normalizeWorkspacePath, validateTaskPathScope } from './taskPathScope'
 
 export const MAX_TASK_PLAN_TASKS = 50
 export const MAX_TASK_PLAN_TEXT_LENGTH = 12_000
@@ -52,9 +53,7 @@ const isProviderId = (value: unknown): value is ProviderId => (
 )
 
 const isSafeWorkspacePath = (value: unknown): value is string => {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.includes('\0')) return false
-  if (value.includes(':') || /^[\\/]/.test(value)) return false
-  return !value.split(/[\\/]+/).includes('..')
+  return typeof value === 'string' && normalizeWorkspacePath(value) === value
 }
 
 const pushIssue = (
@@ -194,6 +193,7 @@ const validateTask = (
   value: unknown,
   path: string,
   issues: TaskPlanValidationIssue[],
+  requireAuthorizedOutputs: boolean,
 ): value is DependencyTask => {
   if (!isRecord(value)) {
     pushIssue(issues, 'INVALID_SHAPE', path, '任务必须是对象。')
@@ -225,6 +225,13 @@ const validateTask = (
     validatePathArray(value.files.allowedWritePaths, `${path}.files.allowedWritePaths`, issues)
     validatePathArray(value.files.forbiddenPaths, `${path}.files.forbiddenPaths`, issues)
     validatePathArray(value.files.outputPaths, `${path}.files.outputPaths`, issues)
+    if (Array.isArray(value.files.inputs)
+      && Array.isArray(value.files.allowedWritePaths)
+      && Array.isArray(value.files.forbiddenPaths)
+      && Array.isArray(value.files.outputPaths)) {
+      const scopeIssues = validateTaskPathScope(value.files as unknown as TaskNode['files'], { requireAuthorizedOutputs })
+      scopeIssues.forEach(issue => pushIssue(issues, 'INVALID_PATH', `${path}.files.${issue.path}`, issue.message))
+    }
   }
 
   return validId && validDependencies
@@ -300,6 +307,18 @@ export function validateTaskPlan(value: unknown): TaskPlanValidationResult {
   validateStringArray(value.assumptions, 'assumptions', issues, false)
   validateStringArray(value.finalAcceptanceChecks, 'finalAcceptanceChecks', issues, true)
 
+  const hasWorkspace = value.workspace !== undefined
+  if (hasWorkspace) {
+    if (!isRecord(value.workspace)) {
+      pushIssue(issues, 'INVALID_SHAPE', 'workspace', '工作区信息必须是对象。')
+    } else {
+      if (typeof value.workspace.id !== 'string' || !/^[0-9a-f]{64}$/.test(value.workspace.id)) {
+        pushIssue(issues, 'INVALID_SHAPE', 'workspace.id', '工作区标识无效。')
+      }
+      validateRequiredString(value.workspace.displayName, 'workspace.displayName', issues)
+    }
+  }
+
   const validTasks: DependencyTask[] = []
   if (!Array.isArray(value.tasks)) {
     pushIssue(issues, 'INVALID_SHAPE', 'tasks', '任务列表必须是数组。')
@@ -311,7 +330,7 @@ export function validateTaskPlan(value: unknown): TaskPlanValidationResult {
       pushIssue(issues, 'LIMIT_EXCEEDED', 'tasks', `任务数量不能超过 ${MAX_TASK_PLAN_TASKS}。`)
     }
     value.tasks.forEach((task, index) => {
-      if (validateTask(task, `tasks[${index}]`, issues)) validTasks.push(task)
+        if (validateTask(task, `tasks[${index}]`, issues, hasWorkspace)) validTasks.push(task)
     })
   }
 

@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('petcast', {
   optimizeTaskPrompt: (input: import('./promptOptimizationProtocol.js').PromptOptimizationRequest) => (
     ipcRenderer.invoke('prompt:optimize', input)
   ),
+  selectTaskWorkspace: (requestId: string) => ipcRenderer.invoke('workspace:select', requestId),
+  cancelTaskWorkspace: (requestId: string) => ipcRenderer.send('workspace:cancel', requestId),
   writeExecutionEvent: (event: unknown) => ipcRenderer.invoke('tasks:execution-write', event),
   queryExecutions: (scope: unknown) => ipcRenderer.invoke('tasks:executions', scope),
   reconcileExecutions: (scope: unknown) => ipcRenderer.invoke('tasks:reconcile', scope),
