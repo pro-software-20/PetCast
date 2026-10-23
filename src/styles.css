@@ -507,3 +507,7 @@ button { font: inherit; }
 .unified-plan select { max-width:290px; }
 .unified-plan input[type=number] { max-width:95px; }
 .unified-plan small { color:#627d8a; }
+/* Source comparison stays within the existing scrollable side panel. */
+.usage-source-details { font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; margin-top: 8px; }
+.usage-source-details summary { cursor: pointer; font-weight: 700; }
+.usage-source-details p { margin: 6px 0; }

@@ -4,6 +4,7 @@ export type CodexUsageErrorCode =
   | 'ACCOUNT_CHANGED' | 'TIMEOUT' | 'CANCELLED' | 'UNAVAILABLE' | 'INVALID_RESPONSE'
 
 export interface CodexQuotaSnapshot {
+  diagnostics?: CodexQuotaDiagnostics
   scopeId: string
   /** Optional opaque account/workspace scope supplied when the upstream response has accountId. */
   accountScopeId?: string
@@ -12,6 +13,17 @@ export interface CodexQuotaSnapshot {
   weeklyRemaining: number
   shortWindowResetAt: string
   weeklyResetAt: string
+}
+
+/** Local troubleshooting only: no full email, account ID, credentials or filesystem paths. */
+export interface CodexQuotaDiagnostics {
+  accountLabel: string | null
+  planType: 'free' | 'plus' | 'pro' | 'team' | 'business' | 'enterprise' | 'edu' | 'unknown'
+  executableSource: 'override' | 'path' | 'desktop' | 'explicit'
+  customHome: boolean
+  workspaceIdentified: boolean
+  selectedBucket: 'codex'
+  buckets: Array<{ id: string; windows: Array<{ minutes: number | null; usedPercent: number | null; resetsAt: string | null }> }>
 }
 
 export type CodexQuotaResult =

@@ -17,5 +17,6 @@ if (!result.ok) {
     shortWindowResetAt: usage.shortWindowResetAt,
     weeklyResetAt: usage.weeklyResetAt,
     note: '剩余订阅额度百分比，不是 Token 账单。首次读取不计算消耗速度。',
+    ...(process.argv.includes('--details') ? { diagnostics: usage.diagnostics } : {}),
   }, null, 2))
 }

@@ -5,6 +5,7 @@ export function startUsagePolling(
   reader: UsageReader,
   onReading: (reading: UsageReading) => void,
   intervalMs = 30_000,
+  onStart?: () => void,
 ) {
   if (!Number.isFinite(intervalMs) || intervalMs < 1000) throw Error('轮询间隔至少为 1000 毫秒')
   let stopped = false
@@ -15,6 +16,7 @@ export function startUsagePolling(
     if (pending) return pending
     clearTimeout(timer)
     pending = (async () => {
+      onStart?.()
       const reading = await reader.read()
       if (stopped) return
       let delay = intervalMs

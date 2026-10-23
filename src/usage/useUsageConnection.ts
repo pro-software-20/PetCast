@@ -14,7 +14,16 @@ export function useUsageConnection(mock: MockUsageProvider, bridge: CodexUsageBr
   const state = useSyncExternalStore(connection.subscribe, connection.getSnapshot)
   useEffect(() => {
     if (enabled) connection.start()
-    return () => connection.stop()
+    const refresh = () => { if (enabled && document.visibilityState !== 'hidden') void connection.refresh().catch(() => {}) }
+    window.addEventListener('focus', refresh)
+    window.addEventListener('online', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('online', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+      connection.stop()
+    }
   }, [connection, enabled])
   const select = (source: UsageSource) => {
     connection.select(source)
