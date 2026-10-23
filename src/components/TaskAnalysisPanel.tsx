@@ -1,6 +1,15 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
+import type { BrainProvider } from '../orchestration/BrainProvider'
+import { LocalBrainProvider } from '../orchestration/LocalBrainProvider'
+import { DEFAULT_PROVIDER_PROFILES } from '../orchestration/providerProfiles'
+import {
+  LocalTaskSessionStore,
+  type TaskSessionStore,
+} from '../orchestration/TaskSessionStore'
+import { createTaskSession } from '../orchestration/taskSession'
 import { HeuristicTaskAnalyzer, MAX_TASK_ANALYSIS_PROMPT_LENGTH } from '../task-analysis/HeuristicTaskAnalyzer'
+import { createDefaultPromptOptimizer } from '../task-analysis/RemotePromptOptimizer'
 import {
   MAX_TASK_ANALYSIS_FILES,
   MAX_TASK_ANALYSIS_FILE_SIZE,
@@ -12,15 +21,23 @@ import type {
   TaskAnalysisResult,
   TaskAnalyzer,
 } from '../types/taskAnalysis'
+import type { ProviderProfile, TaskSessionV1 } from '../types/taskOrchestration'
+import { copyText } from '../utils/copyText'
+import { TaskPlanCards } from './TaskPlanCards'
 
 export interface TaskAnalysisPanelProps {
   analyzer?: TaskAnalyzer
   initialPrompt?: string
   initialFiles?: TaskAnalysisFile[]
+  brainProvider?: BrainProvider
+  providers?: ProviderProfile[]
+  sessionStore?: TaskSessionStore
   onClose?: () => void
 }
 
-const defaultAnalyzer = new HeuristicTaskAnalyzer()
+const defaultAnalyzer = new HeuristicTaskAnalyzer(createDefaultPromptOptimizer())
+const defaultBrainProvider = new LocalBrainProvider()
+const defaultSessionStore = new LocalTaskSessionStore()
 
 const errorLabels: Record<'EMPTY_INPUT' | 'INPUT_TOO_LARGE' | 'INVALID_FILE' | 'ANALYSIS_FAILED', string> = {
   EMPTY_INPUT: '缺少分析输入',
@@ -45,55 +62,98 @@ const toFileMetadata = (file: File): TaskAnalysisFile => ({
   size: file.size,
 })
 
-const copyText = async (text: string) => {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      return true
-    }
-  } catch {
-    // Fall through to the compatibility copy path.
-  }
-
-  const textarea = document.createElement('textarea')
-  const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  textarea.value = text
-  textarea.readOnly = true
-  textarea.tabIndex = -1
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-
-  try {
-    return document.execCommand('copy')
-  } catch {
-    return false
-  } finally {
-    textarea.remove()
-    activeElement?.focus()
-  }
-}
-
-export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles = [], onClose }: TaskAnalysisPanelProps) {
+export function TaskAnalysisPanel({
+  analyzer,
+  initialPrompt = '',
+  initialFiles = [],
+  brainProvider,
+  providers = DEFAULT_PROVIDER_PROFILES,
+  sessionStore = defaultSessionStore,
+  onClose,
+}: TaskAnalysisPanelProps) {
   const initialFileSelection = mergeTaskAnalysisFiles([], initialFiles)
   const [prompt, setPrompt] = useState(initialPrompt)
   const [files, setFiles] = useState<TaskAnalysisFile[]>(() => initialFileSelection.files)
   const [fileNotice, setFileNotice] = useState<string | null>(() => initialFileSelection.notice)
   const [result, setResult] = useState<TaskAnalysisResult | null>(null)
+  const [taskSession, setTaskSession] = useState<TaskSessionV1 | null>(null)
+  const [completedSession, setCompletedSession] = useState<TaskSessionV1 | null>(null)
+  const [planError, setPlanError] = useState<string | null>(null)
+  const [storageNotice, setStorageNotice] = useState<string | null>(null)
+  const [storageBlocked, setStorageBlocked] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [clearArmed, setClearArmed] = useState(false)
   const analysisRequestId = useRef(0)
+  const planningController = useRef<AbortController | null>(null)
+  const restoreRequestId = useRef(0)
+
+  const persistSession = async (session: TaskSessionV1) => {
+    const outcome = await sessionStore.save(session)
+    if (!outcome.ok) setStorageNotice(outcome.message)
+    else setStorageNotice(null)
+  }
+
+  const showSession = (session: TaskSessionV1) => {
+    setPrompt(session.analysisInput.prompt)
+    setFiles(session.analysisInput.files)
+    setResult(session.analysisResult)
+    setTaskSession(session)
+    setCompletedSession(null)
+    setPlanError(null)
+    setError(null)
+  }
+
+  useEffect(() => {
+    if (initialPrompt.length > 0 || initialFiles.length > 0) return
+    const requestId = restoreRequestId.current + 1
+    restoreRequestId.current = requestId
+    let active = true
+    void sessionStore.loadLatest().then((outcome) => {
+      if (!active || requestId !== restoreRequestId.current) return
+      if (!outcome.ok) {
+        setStorageNotice(`${outcome.message}（${outcome.code}）`)
+        setStorageBlocked(outcome.code === 'CORRUPT_DATA' || outcome.code === 'LIMIT_EXCEEDED')
+        return
+      }
+      if (!outcome.session) return
+      if (outcome.session.completedAt) setCompletedSession(outcome.session)
+      else showSession(outcome.session)
+    })
+    return () => { active = false }
+  }, [sessionStore])
+
+  useEffect(() => {
+    if (!taskSession) return
+    const timer = window.setTimeout(() => { void persistSession(taskSession) }, 300)
+    return () => window.clearTimeout(timer)
+  }, [taskSession, sessionStore])
+
+  const handleSessionChange = (session: TaskSessionV1, persistImmediately = false) => {
+    setTaskSession(session)
+    if (persistImmediately) void persistSession(session)
+  }
 
   const invalidateAnalysis = () => {
     analysisRequestId.current += 1
+    planningController.current?.abort()
+    planningController.current = null
     setResult(null)
+    setTaskSession(null)
+    setCompletedSession(null)
+    setPlanError(null)
     setError(null)
     setIsAnalyzing(false)
     setCopyStatus('idle')
     setClearArmed(false)
+    void sessionStore.clear().then((outcome) => {
+      if (!outcome.ok) setStorageNotice(outcome.message)
+      else {
+        setStorageNotice(null)
+        setStorageBlocked(false)
+      }
+    })
   }
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -116,15 +176,57 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
     analysisRequestId.current = requestId
     setError(null)
     setResult(null)
+    setTaskSession(null)
+    setCompletedSession(null)
+    setPlanError(null)
     setIsAnalyzing(true)
     setCopyStatus('idle')
     setClearArmed(false)
+    void sessionStore.clear().then((outcome) => {
+      if (!outcome.ok) setStorageNotice(outcome.message)
+      else {
+        setStorageNotice(null)
+        setStorageBlocked(false)
+      }
+    })
 
     try {
       const outcome = await (analyzer ?? defaultAnalyzer).analyze({ prompt, files })
       if (requestId !== analysisRequestId.current) return
       if (outcome.ok) {
         setResult(outcome.result)
+        const controller = new AbortController()
+        planningController.current?.abort()
+        planningController.current = controller
+        let planningOutcome
+        try {
+          planningOutcome = await (brainProvider ?? defaultBrainProvider).createPlan({
+            analysisInput: { prompt, files },
+            analysisResult: outcome.result,
+            availableProviders: providers,
+          }, controller.signal)
+        } catch {
+          if (requestId === analysisRequestId.current && !controller.signal.aborted) {
+            setPlanError('任务拆解请求失败，请稍后重试。')
+          }
+          return
+        }
+        if (requestId !== analysisRequestId.current || controller.signal.aborted) return
+        if (planningOutcome.ok) {
+          const sessionOutcome = createTaskSession({
+            analysisInput: { prompt, files },
+            analysisResult: outcome.result,
+            plan: planningOutcome.plan,
+          })
+          if (sessionOutcome.ok) {
+            setTaskSession(sessionOutcome.session)
+            void persistSession(sessionOutcome.session)
+          } else {
+            setPlanError(`${sessionOutcome.message}（${sessionOutcome.code}）`)
+          }
+        } else {
+          setPlanError(`${planningOutcome.message}（${planningOutcome.code}）`)
+        }
       } else {
         setError(`${errorLabels[outcome.code]}：${outcome.message}（${outcome.code}）`)
       }
@@ -132,7 +234,10 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
       if (requestId !== analysisRequestId.current) return
       setError('分析请求失败，请稍后重试。')
     } finally {
-      if (requestId === analysisRequestId.current) setIsAnalyzing(false)
+      if (requestId === analysisRequestId.current) {
+        planningController.current = null
+        setIsAnalyzing(false)
+      }
     }
   }
 
@@ -148,22 +253,37 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
     }
 
     analysisRequestId.current += 1
+    planningController.current?.abort()
+    planningController.current = null
     setPrompt('')
     setFiles([])
     setFileNotice(null)
     setResult(null)
+    setTaskSession(null)
+    setCompletedSession(null)
+    setPlanError(null)
     setError(null)
     setIsAnalyzing(false)
     setCopyStatus('idle')
     setClearArmed(false)
+    void sessionStore.clear().then((outcome) => {
+      setStorageNotice(outcome.ok ? null : outcome.message)
+      if (outcome.ok) setStorageBlocked(false)
+    })
   }
 
   const canClear = prompt.length > 0
     || files.length > 0
     || Boolean(result)
+    || Boolean(taskSession)
+    || Boolean(completedSession)
+    || Boolean(planError)
     || Boolean(error)
     || Boolean(fileNotice)
     || isAnalyzing
+
+  const sessionStarted = Boolean(taskSession?.runs.some(run => run.attempt > 0 || !['waiting', 'ready'].includes(run.status)))
+  const sessionLocked = sessionStarted || Boolean(completedSession) || storageBlocked
 
   return (
     <section
@@ -174,11 +294,32 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
       <header className="task-analysis-header">
         <span> TASK ANALYSIS </span>
         <h2 id="task-analysis-title">任务分析</h2>
-        <p>只使用 Prompt 和文件元信息进行粗估，不会读取或上传文件内容。</p>
+        <p>启用 AI 优化时会发送 Prompt 和文件元信息；不会读取或上传文件内容。</p>
       </header>
 
       {onClose && (
         <button type="button" className="task-analysis-close" onClick={onClose} aria-label="关闭任务分析">×</button>
+      )}
+
+      {completedSession && !taskSession && (
+        <div className="task-session-restore" role="status">
+          <strong>发现最近已完成的任务报告</strong>
+          <span>{completedSession.plan.title}</span>
+          <button type="button" onClick={() => showSession(completedSession)}>查看上次报告</button>
+          <button type="button" onClick={handleClear}>{clearArmed ? '再次点击确认新建' : '新建任务'}</button>
+        </div>
+      )}
+
+      {storageNotice && (
+        <div className="task-storage-notice" role="alert">
+          <span>{storageNotice}</span>
+          <button type="button" onClick={() => void sessionStore.clear().then((outcome) => {
+            if (outcome.ok) {
+              setStorageNotice(null)
+              setStorageBlocked(false)
+            }
+          })}>清除本地记录</button>
+        </div>
       )}
 
       <div className="task-analysis-inputs">
@@ -186,6 +327,7 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
         <textarea
           id="task-analysis-prompt"
           value={prompt}
+          disabled={sessionLocked}
           onChange={(event) => {
             invalidateAnalysis()
             setPrompt(event.target.value)
@@ -199,7 +341,8 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
         </p>
 
         <label htmlFor="task-analysis-files">相关文件</label>
-        <input id="task-analysis-files" type="file" multiple onChange={handleFileChange} />
+        <input id="task-analysis-files" type="file" multiple disabled={sessionLocked} onChange={handleFileChange} />
+        {sessionStarted && <p className="task-analysis-input-hint">任务已经开始，输入已锁定；新建任务需要二次确认。</p>}
         <p className="task-analysis-file-limits">
           最多 {MAX_TASK_ANALYSIS_FILES} 个文件；单个不超过 {formatBytes(MAX_TASK_ANALYSIS_FILE_SIZE)}；总计不超过 {formatBytes(MAX_TASK_ANALYSIS_TOTAL_SIZE)}。
         </p>
@@ -214,7 +357,7 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
                   <strong>{file.name}</strong>
                   <small>{file.type} · {formatBytes(file.size)}</small>
                 </span>
-                <button type="button" onClick={() => removeFile(file)} aria-label={`移除 ${file.name}`}>移除</button>
+                <button type="button" disabled={sessionLocked} onClick={() => removeFile(file)} aria-label={`移除 ${file.name}`}>移除</button>
               </li>
             ))}
           </ul>
@@ -223,8 +366,8 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
         )}
 
         <div className="task-analysis-actions">
-          <button type="button" onClick={handleAnalyze} disabled={isAnalyzing}>
-            {isAnalyzing ? '分析中…' : '开始分析'}
+          <button type="button" onClick={handleAnalyze} disabled={isAnalyzing || sessionLocked}>
+            {isAnalyzing ? '分析并拆解中…' : '开始分析'}
           </button>
           <button
             type="button"
@@ -233,7 +376,7 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
             disabled={!canClear}
             aria-pressed={clearArmed}
           >
-            {clearArmed ? '再次点击确认清空' : '清空输入'}
+            {clearArmed ? '再次点击确认清空' : sessionStarted ? '新建任务' : '清空输入'}
           </button>
         </div>
       </div>
@@ -266,6 +409,9 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
           <section>
             <div className="task-analysis-section-heading">
               <h3>优化后的 Prompt</h3>
+              <span className={`task-analysis-optimization-source is-${result.promptOptimizationSource}`}>
+                {result.promptOptimizationSource === 'deepseek' ? 'DeepSeek AI 优化' : '本地规则优化'}
+              </span>
               <button type="button" className="task-analysis-copy" onClick={handleCopyPrompt}>
                 {copyStatus === 'success' ? '已复制' : '复制 Prompt'}
               </button>
@@ -293,6 +439,19 @@ export function TaskAnalysisPanel({ analyzer, initialPrompt = '', initialFiles =
             </section>
           )}
         </article>
+      )}
+
+      {result && planError && (
+        <p className="task-plan-error" role="alert">分析已完成，但任务拆解失败：{planError}</p>
+      )}
+
+      {result && taskSession && (
+        <TaskPlanCards
+          key={taskSession.id}
+          session={taskSession}
+          providers={providers}
+          onSessionChange={handleSessionChange}
+        />
       )}
     </section>
   )
