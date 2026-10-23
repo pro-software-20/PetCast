@@ -1,0 +1,116 @@
+/* Approved October 23 reference: four shell shapes, dynamic sky, cartoon fishing. */
+.compact-device .shell-button { height:auto; aspect-ratio:1; }
+.compact-device .shell-home,.compact-device .shell-appearance,.compact-device .shell-tasks { padding:7px; }
+.shell-preview-device { position:relative; height:100%; max-width:100%; flex:none; }
+.shell-preview-screen { position:absolute; aspect-ratio:1; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.shell-preview-screen .pixel-pet { max-width:74%; max-height:74%; width:auto; height:auto; }
+
+.appearance-frame { left:31.2%; right:16px; top:81px; bottom:29px; }
+.appearance-preview { left:8px; width:210px; top:150px; }
+.appearance-preview-pet { width:202px; height:170px; margin-top:20px; }
+.appearance-preview-pet img { max-width:202px; max-height:166px; }
+.appearance-paper { padding:10px 12px; }
+.appearance-paper>header { height:29px; margin-bottom:8px; }
+.appearance-paper h2 { margin-bottom:5px; }
+.pet-choice-row button { height:70px; }
+.pet-choice-row img { max-height:47px; }
+.shell-choice { margin-top:10px; }
+.shell-settings-card { display:grid; grid-template-columns:188px minmax(0,1fr); gap:12px; height:132px; padding:6px 8px; }
+.shell-settings-preview { width:auto; padding-right:10px; border-right:1px solid #e4d3b7; display:flex; flex-direction:column; align-items:center; }
+.shell-settings-preview>span { font-size:8px; line-height:11px; margin-bottom:3px; letter-spacing:.5px; }
+.shell-settings-preview>.shell-preview-row { width:100%; height:102px; display:flex; align-items:center; gap:7px; }
+.shell-live-preview { width:73px; height:100px; display:flex; justify-content:center; align-items:center; flex:none; }
+.shell-choice-grid { min-width:0; flex:1; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px; }
+.petcast-warm.expanded .shell-choice-grid button { position:relative; height:48px; min-width:0; padding:3px 2px 2px; border:1px solid #d9bf99; border-radius:4px; background:#fbf3e4; color:#9b7b54; display:flex; flex-direction:column; align-items:center; justify-content:space-between; }
+.shell-choice-grid .shell-artwork { width:auto; height:auto; max-width:39px; max-height:32px; }
+.shell-choice-grid button>span { font-size:7px; line-height:9px; white-space:nowrap; }
+.petcast-warm.expanded .shell-choice-grid button.selected { border:1.5px solid #96ac8c; padding:2.5px 1.5px 1.5px; background:#edf2e1; color:#627b55; }
+.shell-choice-grid .selection-check { top:2px; right:2px; width:9px; height:9px; line-height:9px; font-size:7px; border-radius:2px; }
+.shell-choice .shell-color-picker { display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:73px 33px; gap:5px; padding-top:1px; }
+.shell-choice .picker-main>.picker-label { line-height:10px; margin-bottom:3px; }
+.shell-choice .saturation-picker { height:48px; }
+.shell-choice .hue-picker { height:7px; margin-top:5px; }
+.shell-choice .picker-values { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:10px 21px; column-gap:9px; row-gap:2px; }
+.shell-choice .picker-values>.picker-label { grid-column:1; grid-row:1; font-size:8px; line-height:10px; margin:0; }
+.shell-choice .picker-values>.hex-picker { grid-column:1; grid-row:2; height:21px; padding:2px 3px; margin:0; gap:3px; }
+.shell-choice .picker-values>span.picker-label { grid-column:2; }
+.shell-choice .picker-values>.color-swatches { grid-column:2; grid-row:2; align-items:center; gap:3px; }
+.shell-choice .color-swatches button { width:11px; height:11px; }
+.shell-choice .hex-picker input[type=color] { width:15px; height:15px; }
+.shell-choice .hex-picker input:not([type]) { font-size:8px; }
+.appearance-footer { margin-top:10px; padding-top:9px; }
+.appearance-save-status { bottom:4px; line-height:10px; }
+
+/* The clock controls sky presentation only; existing quota and game rules stay separate. */
+.river-backdrop,.river-sky,.river-clouds { position:absolute; inset:0; overflow:hidden; pointer-events:none; }
+.river-backdrop { z-index:0; }
+.river-sky { background:linear-gradient(#64b8f0 0%,#a2d6f6 42%,#daecdd 75%); }
+.river-clouds { z-index:1; }
+.river-backdrop .river-art { z-index:2; }
+.sky-period-evening .river-sky { background:linear-gradient(#9a90c6 0%,#e5adbd 26%,#ffccab 50%,#eed3b0 76%); }
+.sky-period-night .river-sky { background:linear-gradient(#263858 0%,#3b5178 35%,#778ba1 63%,#b1bbc1 82%); }
+.sky-period-evening .river-art { filter:brightness(.94) saturate(.88); }
+.sky-period-night .river-art { filter:brightness(.72) saturate(.73); }
+.river-cloud { position:absolute; width:20%; height:14%; opacity:.96; animation:petcast-cloud-drift 80s linear infinite alternate; }
+.river-cloud svg { width:100%; height:100%; }
+.river-cloud:nth-child(1) { left:6%; top:6%; width:30%; height:20%; animation-duration:95s; animation-delay:-25s; }
+.river-cloud:nth-child(2) { left:41%; top:15%; width:12.5%; height:9.25%; animation-duration:65s; animation-delay:-11s; }
+.river-cloud:nth-child(3) { left:75%; top:3%; width:23%; height:16%; animation-duration:86s; animation-delay:-48s; }
+.river-cloud:nth-child(4) { left:25%; top:27%; width:11.25%; height:7.75%; animation-duration:110s; animation-delay:-40s; }
+.sky-period-evening .river-cloud { opacity:.84; filter:sepia(.17) hue-rotate(324deg); }
+.sky-period-night .river-cloud { opacity:.48; filter:brightness(.75) saturate(.5); }
+@keyframes petcast-cloud-drift { from { transform:translateX(-44px); } to { transform:translateX(67px); } }
+.river-pet-anchor.pet-on-sand { top:50.5%; left:35.5%; }
+.cartoon-river>.usage-board-detail { transform:scale(1.1); transform-origin:left top; }
+
+/* Same river artwork, warm wooden frame, and approved stick/leaf/string illustration. */
+.petcast-warm .fishing-game { inset:65px 23px 45px; border:8px solid #e4c08c; outline:2px solid #b3875c; outline-offset:-1px; border-radius:10px; background:#fff6e5; box-shadow:inset 0 0 0 1px #d0ad7e,0 7px 18px #78583528; }
+.petcast-warm .fishing-game:before { display:none; }
+.petcast-warm .fishing-close { top:11px; right:13px; width:27px; height:27px; z-index:10; color:#88613a; border:1px solid #c7a171; border-radius:5px; background:#fff1d4; font-size:20px; line-height:24px; }
+.petcast-warm .fishing-header { top:0; left:0; right:0; height:55px; padding:9px 15px; border-bottom:1px solid #d7ba91; background:linear-gradient(#fff9eb,#f8ebd1); display:block; }
+.petcast-warm .fishing-header>span { font-size:19px; line-height:24px; letter-spacing:1px; font-weight:600; color:#7f5835; }
+.petcast-warm .fishing-header>strong { position:absolute; top:15px; right:55px; padding:4px 9px; border:1px solid #bac8a0; border-radius:4px; background:#eef2df; color:#899778; font-size:9px; line-height:15px; letter-spacing:0; font-weight:500; text-shadow:none; }
+.petcast-warm .fishing-header>small { display:block; font-size:7px; line-height:12px; color:#a38b67; }
+.petcast-warm .fishing-water { top:55px; bottom:65px; background:#8fcbdc; container-type:inline-size; }
+.petcast-warm .fishing-water:before { display:none; }
+.fishing-river-art { position:absolute; width:250%; height:auto; max-width:none; left:-75%; bottom:0; filter:saturate(.75) brightness(1.03); pointer-events:none; }
+.leaf-fishing-stick { position:absolute; z-index:2; left:2%; top:-5px; width:57%; height:auto; pointer-events:none; user-select:none; }
+.petcast-warm .fishing-current { z-index:1; opacity:.2; background:repeating-linear-gradient(176deg,transparent 0 21px,#efffff88 22px 24px,transparent 26px 40px); image-rendering:auto; }
+.petcast-warm .bobber { z-index:3; left:calc(48.25% - 4px); top:calc(35.52cqw - 14px); width:9px; height:16px; border:1px solid #a87554; border-radius:45%; background:linear-gradient(#d98c70 0 46%,#fff5d8 47%); box-shadow:none; }
+.petcast-warm .bobber i { width:50px; height:10px; top:10px; left:-21px; border:1px solid #e8ffffbb; border-radius:50%; background:none; }
+.petcast-warm .phase-waiting .bobber { animation:cartoon-bobber 2.6s ease-in-out infinite; }
+.petcast-warm .phase-bite .bobber { animation:cartoon-bobber-bite .25s ease-in-out infinite; }
+.petcast-warm .bite-mark { left:calc(48.25% - 8px); top:calc(35.52cqw - 49px); width:19px; height:27px; color:#b86a44; font-size:25px; background:#fff5dc; border:1px solid #d4b37a; border-radius:5px; box-shadow:0 2px 5px #7a6e5222; }
+.petcast-warm .waiting-ripple { left:calc(48.25% - 24px); top:calc(35.52cqw - 3px); width:49px; height:14px; border:1px solid #e7ffffa6; }
+@keyframes cartoon-bobber { 0%,100% { transform:translateY(-1px) rotate(4deg); } 50% { transform:translateY(1px) rotate(-3deg); } }
+@keyframes cartoon-bobber-bite { 0%,100% { transform:translateY(-2px); } 50% { transform:translateY(3px); } }
+.fishing-guidance { position:absolute; z-index:3; top:118px; right:24px; width:194px; padding:15px; border:1px solid #cdae80; border-radius:7px; background:#fff9e9ef; box-shadow:0 4px 12px #53758b22; color:#a58a63; }
+.fishing-guidance strong { color:#80603c; font-size:15px; font-weight:600; line-height:1.5; }
+.fishing-guidance p { margin:7px 0 0; font-size:10px; line-height:1.8; }
+.fishing-footer { position:absolute; z-index:5; bottom:0; left:0; right:0; height:65px; padding:10px 17px; display:flex; align-items:center; justify-content:space-between; gap:12px; background:linear-gradient(#fff8e9,#f7e9ce); border-top:1px solid #d5b78c; }
+.fishing-footer>div { min-width:0; }
+.fishing-footer strong { display:block; font-size:10px; line-height:1.5; color:#836341; font-weight:500; }
+.fishing-footer small { display:block; font-size:8px; line-height:1.8; color:#a78c65; }
+.petcast-warm .fishing-footer>button { position:relative; bottom:auto; left:auto; transform:none; width:119px; height:33px; flex:none; border:1px solid #98ac85; border-radius:5px; background:linear-gradient(#d6e2c0,#bfceaa); box-shadow:inset 0 1px #f0f7e0,0 3px #97aa83; color:#60764e; font-size:14px; font-weight:600; letter-spacing:2px; }
+.petcast-warm .fishing-footer>.pull-button { font-size:11px; letter-spacing:0; }
+.petcast-warm .fishing-footer>.pull-button.is-biting { background:#efdcaf; border-color:#bd9e6c; color:#96683e; box-shadow:0 3px #c1a36b; }
+.petcast-warm .fishing-footer>button:active { transform:translateY(2px); }
+.petcast-warm .fishing-result.is-caught { top:65px; left:50%; transform:translateX(-50%); width:365px; min-height:0; padding:14px 14px 14px 82px; }
+.petcast-warm .fishing-card .catch-snapshot em { background:#f2e8cf; color:#92734d; }
+.petcast-warm .fishing-card .catch-snapshot b { color:#ad936c; }
+.petcast-warm .fishing-card .catch-actions button,.petcast-warm .fishing-card .replacement-actions button { height:31px; border:1px solid #b89c72; border-radius:5px; box-shadow:0 3px #b89c724d; color:#795b39; background:#e9dec1; }
+.petcast-warm .fishing-card .keep-action { background:#d8e3c5; color:#61774f; }
+.petcast-warm .fishing-card .feed-action { background:#f0d6b3; color:#956d41; }
+.petcast-warm .fishing-card .release-action { background:#d6e5e4; color:#668589; }
+.petcast-warm .replacement-card { top:55px; min-height:0; max-height:calc(100% - 65px); overflow-y:auto; }
+.petcast-warm .resolved-card { top:108px; min-height:175px; }
+.petcast-warm .fishing-result.is-failed { top:115px; left:50%; transform:translateX(-50%); }
+@media (prefers-reduced-motion:reduce) { .river-cloud { animation:none; } }
+
+.petcast-warm .fishing-result>span,.petcast-warm .replacement-card>span { color:#a58b65; }
+.petcast-warm .fishing-result>strong,.petcast-warm .replacement-card>strong { color:#7f5e3c; }
+.petcast-warm .fishing-result>p,.petcast-warm .replacement-card>p { color:#8f704c; }
+.petcast-warm .fishing-result>small { color:#a38a66; }
+.petcast-warm .fishing-card .catch-actions .keep-action { background:#d8e3c5; color:#61774f; }
+.petcast-warm .fishing-card .catch-actions .feed-action,.petcast-warm .fishing-card .replacement-actions .feed-action { background:#f0d6b3; color:#956d41; }
+.petcast-warm .fishing-card .catch-actions .release-action,.petcast-warm .fishing-card .replacement-actions .release-action { background:#d6e5e4; color:#668589; }

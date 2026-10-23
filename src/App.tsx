@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Pet } from './Pet'
+import { CompactDevice, type MainPage } from './components/CompactDevice'
+import { AppearanceSettings } from './components/AppearanceSettings'
+import { loadAppearance } from './appearance/preferences'
 import { RiverScene } from './RiverScene'
 import { MockUsageControls } from './components/MockUsageControls'
 import { UsageBoard } from './components/UsageBoard'
@@ -28,6 +30,8 @@ export default function App() {
   const mockUsageProvider = useMemo(() => new MockUsageProvider('balanced'), [])
   const resetSignalProvider = useMemo(() => new MockResetSignalProvider(), [])
   const [expanded, setExpanded] = useState(false)
+  const [page, setPage] = useState<MainPage>('home')
+  const [appearance, setAppearance] = useState(loadAppearance)
   const [dragging, setDragging] = useState(false)
   const [dragDirection, setDragDirection] = useState<'left' | 'right'>('right')
   const [mockSaveUsage, setMockSaveUsage] = useState(() => createMockUsageState('balanced'))
@@ -92,7 +96,7 @@ export default function App() {
   const showFeedReaction = (fishName: string) => {
     setFishingOpen(false)
     setHomeOpen(false)
-    setBubbleMessage(`谢谢！${fishName}很好吃，布罗艾开心地摇了摇尾巴。`)
+    setBubbleMessage(`谢谢！${fishName}很好吃，${appearance.petName || '布罗艾'}开心地摇了摇尾巴。`)
     setBubbleVisible(true)
     setReaction('eat')
     if (bubbleTimer.current) window.clearTimeout(bubbleTimer.current)
@@ -190,6 +194,7 @@ export default function App() {
   }
 
   const openMailbox = async () => {
+    setPage('home')
     if (!expanded) {
       setExpanded(true)
       await desktopApi?.toggleExpanded(true)
@@ -203,6 +208,7 @@ export default function App() {
   }
 
   const openTaskAnalysis = async () => {
+    setPage('tasks')
     if (!expanded) {
       setExpanded(true)
       await desktopApi?.toggleExpanded(true)
@@ -216,6 +222,7 @@ export default function App() {
   }
 
   const closeTaskAnalysis = () => {
+    setPage('home')
     setTaskAnalysisOpen(false)
   }
 
@@ -406,7 +413,7 @@ export default function App() {
   }, [desktopApi, dragging])
 
   const startDrag = (event: React.PointerEvent) => {
-    if ((event.target as HTMLElement).closest('button')) return
+    if (event.button !== 0 || (event.target as HTMLElement).closest('button, input, textarea, select, a, [role=slider], [role=group], .task-analysis-panel, .usage-history-panel, .mailbox-panel, .appearance-frame, .quota-page-panel, .fishing-game, .home-panel, .fish-detail')) return
     setDragging(true)
     dragDistance.current = 0
     petPointerStart.current = Boolean((event.target as HTMLElement).closest('.pet-wrap'))
@@ -476,151 +483,48 @@ export default function App() {
     await connection.refresh()
   }
 
+  const navigate = async (target: MainPage) => {
+    setPage(target)
+    setFishingOpen(false); setHomeOpen(false); setMailboxOpen(false); setHistoryOpen(false); setSettingsOpen(false)
+    setTaskAnalysisOpen(target === 'tasks')
+    if (!expanded) { setExpanded(true); await desktopApi?.toggleExpanded(true) }
+  }
+  const openRoom = () => {
+    setPage('home'); setFishingOpen(false); setMailboxOpen(false); setTaskAnalysisOpen(false); setHistoryOpen(false); setHomeOpen(true)
+  }
+  const openHistory = () => {
+    setPage('quota'); setFishingOpen(false); setHomeOpen(false); setMailboxOpen(false); setTaskAnalysisOpen(false); setHistoryOpen(true)
+  }
   return (
-    <main
-      className={`app ${isBrowserFallback ? 'browser-mode' : 'desktop-mode'} ${expanded ? 'expanded' : 'compact'} ${dragging ? 'dragging' : ''}`}
-      data-drag-direction={dragDirection}
-      data-usage-source={connection.source}
-      data-history-status={history.recordingState}
-      data-usage-status={connection.reading?.status ?? 'loading'}
-    >
-      <section
-        className="card"
-        style={isBrowserFallback ? { transform: `translate(${browserPosition.x}px, ${browserPosition.y}px)` } : undefined}
-        onPointerDown={startDrag}
-        onPointerMove={moveDrag}
-      >
-        {expanded && usage && analysis && (
-          <RiverScene
-            usage={usage}
-            analysis={analysis}
-            stale={!fresh}
-            onStartFishing={() => {
-              setHomeOpen(false)
-              setMailboxOpen(false)
-              setTaskAnalysisOpen(false)
-              if (fresh) setFishingOpen(true)
-            }}
-            onOpenHome={() => {
-              setFishingOpen(false)
-              setMailboxOpen(false)
-              setTaskAnalysisOpen(false)
-              setHomeOpen(true)
-            }}
-            onOpenMailbox={openMailbox}
-            unreadMailCount={unreadMailIds.length}
-          />
-        )}
-        <div className="grain" />
-        <header className="topbar">
-          <small title={usageReadStatus}>{usageReadStatus}</small>
-          <button
-            type="button"
-            className="task-analysis-launch"
-            onClick={openTaskAnalysis}
-            aria-label="打开任务分析"
-          >
-            任务分析
-          </button>
-          <div className={`status mood-${fresh ? analysis?.petMood : 'normal'}`}><i /> {fresh ? analysis?.badge : connection.reading?.status === 'stale' ? '旧数据' : connection.reading?.status === 'unavailable' ? '读取失败' : '等待读取'}</div>
-          {desktopApi && <button className="close" onClick={() => desktopApi.close()} aria-label="关闭">×</button>}
-        </header>
-
-        <Pet
-          dragging={dragging}
-          expanded={expanded}
-          dragDirection={dragDirection}
-          mood={fresh ? analysis?.petMood ?? 'normal' : 'normal'}
-          reaction={reaction}
-        />
-
-        {unreadMailIds.length > 0 && (
-          <button className={`notification-envelope ${expanded ? 'is-expanded' : ''}`} onClick={openMailbox} aria-label={`查看${unreadMailIds.length}封新消息`}>
-            <span>✉</span><b>{unreadMailIds.length}</b>
-          </button>
-        )}
-
-        {expanded && fishingOpen && fresh && usage && (
-          <FishingGame
-            usage={usage}
-            aquarium={aquarium}
-            capacity={AQUARIUM_CAPACITY}
-            onCatch={handleCatch}
-            onKeep={handleKeep}
-            onFeed={handleFeedCatch}
-            onRelease={handleReleaseCatch}
-            onReplace={handleReplaceFish}
-            onClose={() => setFishingOpen(false)}
-          />
-        )}
-
-        {expanded && homeOpen && (
-          <HomeScene
-            aquarium={aquarium}
-            codex={codex}
-            capacity={AQUARIUM_CAPACITY}
-            onClose={() => setHomeOpen(false)}
-            onFeed={(fish) => handleStoredFish(fish, 'fed')}
-            onRelease={(fish) => handleStoredFish(fish, 'released')}
-          />
-        )}
-
-        {expanded && mailboxOpen && (
-          <MailboxPanel items={mailItems} usage={fresh ? usage : null} onClose={() => setMailboxOpen(false)} />
-        )}
-
-        {expanded && taskAnalysisOpen && (
-          <TaskAnalysisPanel onClose={closeTaskAnalysis} />
-        )}
-
-        {(!expanded || !usage) && <UsageBoard usage={usage} analysis={analysis} compact={!expanded} stale={!fresh} status={usageReadStatus} />}
-        {expanded && !usage && <div className="empty-scene-actions"><button onClick={() => setHomeOpen(true)}>进入小屋</button><button onClick={openMailbox}>打开邮箱</button></div>}
-        {!expanded && <button className="usage-settings-toggle" onClick={() => setSettingsOpen(true)}>额度设置</button>}
-        {expanded && historyOpen && <UsageHistoryPanel key={`${historyScope?.source}-${historyScope?.scopeId}`} scope={historyScope} store={history.store} currentQuota={historyScope && usage ? {...historyScope,fresh,sampledAt:usage.sampledAt.toISOString(),shortRemaining:usage.shortWindowRemaining,weeklyRemaining:usage.weeklyRemaining,shortResetAt:usage.shortWindowResetAt.toISOString(),weeklyResetAt:usage.weeklyResetAt.toISOString()}:null} revision={history.revision} recordStatus={history.status} onClear={scope => history.recorder.clear(scope)} onClose={() => setHistoryOpen(false)} />}
-        {!expanded && settingsOpen && <UsageSettings state={connection} desktop={!isBrowserFallback} onSelect={connection.select} onRefresh={() => void connection.refresh()} onClose={() => setSettingsOpen(false)} />}
-
-        {bubbleVisible && (
-          <div className={`pet-bubble ${expanded ? 'bubble-expanded' : ''}`} role="status">
-            <button aria-label="关闭提醒" onClick={() => setBubbleVisible(false)}>×</button>
-            <strong>布罗艾提醒</strong>
-            <span>{bubbleMessage ?? (fresh ? analysis?.message : '额度暂未更新，请打开额度设置查看状态。')}</span>
-          </div>
-        )}
-
-        <button className="expand-button" onClick={toggleExpanded} aria-label={expanded ? '收起场景' : '展开河边场景'}>
-          {expanded ? (
-            <svg viewBox="0 0 24 24"><path d="M7 3v4H3M17 3v4h4M7 21v-4H3m14 4v-4h4" /></svg>
-          ) : (
-            <svg viewBox="0 0 24 24"><path d="M9 4H4v5m11-5h5v5M9 20H4v-5m11 5h5v-5" /></svg>
-          )}
-          <span>{expanded ? '收起' : '河边'}</span>
-        </button>
-
+    <main className={`app petcast-warm ${isBrowserFallback ? 'browser-mode' : 'desktop-mode'} ${expanded ? 'expanded' : 'compact'} ${dragging ? 'dragging' : ''}`}
+      data-drag-direction={dragDirection} data-usage-source={connection.source} data-history-status={history.recordingState} data-usage-status={connection.reading?.status ?? 'loading'} data-page={expanded ? page : 'compact'}>
+      <section className="card" style={isBrowserFallback ? { transform: `translate(${browserPosition.x}px, ${browserPosition.y}px)` } : undefined} onPointerDown={startDrag} onPointerMove={moveDrag}>
+        {!expanded && <CompactDevice appearance={appearance} usage={usage} status={usageReadStatus} stale={!fresh} onNavigate={target => void navigate(target)} onClose={desktopApi ? () => desktopApi.close() : undefined} />}
+        {expanded && <>
+          <RiverScene usage={usage} analysis={analysis} appearance={appearance} status={usageReadStatus} stale={!fresh}
+            onStartFishing={() => { setHomeOpen(false); setMailboxOpen(false); setTaskAnalysisOpen(false); setHistoryOpen(false); if (fresh) setFishingOpen(true) }}
+            onOpenHome={openRoom} onOpenMailbox={openMailbox} unreadMailCount={unreadMailIds.length} />
+          {homeOpen && page === 'home' && <HomeScene aquarium={aquarium} codex={codex} capacity={AQUARIUM_CAPACITY} petId={appearance.petId} petName={appearance.petName || '布罗艾'} onClose={() => setHomeOpen(false)} onFeed={fish => handleStoredFish(fish, 'fed')} onRelease={fish => handleStoredFish(fish, 'released')} />}
+          {page === 'appearance' && <AppearanceSettings value={appearance} onChange={setAppearance} onClose={() => void navigate('home')} />}
+          {page === 'quota' && !historyOpen && <section className="quota-page" aria-label="真实额度页面"><div className="room-art" /><div className="room-nameplate">{appearance.petName || '布罗艾'}的小屋</div><div className="quota-page-panel"><h1>额度数据</h1><UsageSettings state={connection} desktop={!isBrowserFallback} onSelect={connection.select} onRefresh={() => void connection.refresh()} /><UsageBoard usage={usage} analysis={analysis} stale={!fresh} status={usageReadStatus} /></div></section>}
+          {fishingOpen && fresh && usage && <FishingGame usage={usage} petName={appearance.petName} aquarium={aquarium} capacity={AQUARIUM_CAPACITY} onCatch={handleCatch} onKeep={handleKeep} onFeed={handleFeedCatch} onRelease={handleReleaseCatch} onReplace={handleReplaceFish} onClose={() => setFishingOpen(false)} />}
+          {mailboxOpen && <MailboxPanel items={mailItems} usage={fresh ? usage : null} onClose={() => setMailboxOpen(false)} />}
+          {taskAnalysisOpen && page === 'tasks' && <TaskAnalysisPanel onClose={closeTaskAnalysis} />}
+          {historyOpen && <UsageHistoryPanel key={`${historyScope?.source}-${historyScope?.scopeId}`} scope={historyScope} store={history.store} currentQuota={historyScope && usage ? { ...historyScope, fresh, sampledAt: usage.sampledAt.toISOString(), shortRemaining: usage.shortWindowRemaining, weeklyRemaining: usage.weeklyRemaining, shortResetAt: usage.shortWindowResetAt.toISOString(), weeklyResetAt: usage.weeklyResetAt.toISOString() } : null} revision={history.revision} recordStatus={history.status} onClear={scope => history.recorder.clear(scope)} onClose={() => setHistoryOpen(false)} />}
+          <nav className="wood-nav" aria-label="主导航">{([{ id: 'home', label: '主页' }, { id: 'appearance', label: '形象' }, { id: 'tasks', label: '任务分析' }, { id: 'quota', label: '真实额度' }] as const).map(item => <button key={item.id} aria-current={page === item.id ? 'page' : undefined} onClick={() => void navigate(item.id)}>{item.label}</button>)}</nav>
+          <header className="warm-window-actions"><span title={usageReadStatus}>{usageReadStatus}</span>{desktopApi && <button className="close" onClick={() => desktopApi.close()} aria-label="关闭">×</button>}</header>
+          <button className="expand-button" onClick={toggleExpanded} aria-label="收起场景"><span>收起</span></button>
+        </>}
+        {expanded && unreadMailIds.length > 0 && <button className="notification-envelope is-expanded" onClick={openMailbox} aria-label={`查看${unreadMailIds.length}封新消息`}><span>✉</span><b>{unreadMailIds.length}</b></button>}
+        {bubbleVisible && <div className={`pet-bubble ${expanded ? 'bubble-expanded' : 'device-bubble'}`} role="status"><button aria-label="关闭提醒" onClick={() => setBubbleVisible(false)}>×</button><strong>{appearance.petName || '布罗艾'}提醒</strong><span>{bubbleMessage ?? (fresh ? analysis?.message : '额度暂未更新，请打开真实额度页面查看状态。')}</span></div>}
         {dragging && <div className="drag-pill">移动中</div>}
       </section>
       {expanded && <aside className="usage-sidecar">
-        <button className="history-open" onClick={() => { setFishingOpen(false); setHomeOpen(false); setMailboxOpen(false); setTaskAnalysisOpen(false); setHistoryOpen(true) }}>使用历史与报告</button>
-        <UsageSettings state={connection} desktop={!isBrowserFallback} onSelect={connection.select} onRefresh={() => void connection.refresh()} />
+        <button className="history-open" onClick={openHistory}>使用历史与报告</button>
+        {(page !== 'quota' || historyOpen) && <UsageSettings state={connection} desktop={!isBrowserFallback} onSelect={connection.select} onRefresh={() => void connection.refresh()} />}
         {connection.source === 'real' && <button className="auto-fishing-toggle" disabled={!fresh && !autoFishingEnabled} onClick={toggleAutoFishing}>{autoFishingEnabled ? '关闭自动钓鱼' : '开启自动钓鱼'}</button>}
-        {connection.source === 'mock' && usage && fresh && <MockUsageControls
-          usage={usage}
-          onScenario={selectScenario}
-          onPatch={patchUsage}
-          onMockResetSignal={triggerMockResetSignal}
-          resetWatchEnabled={resetWatchEnabled}
-          resetWatchNextAt={resetWatchNextAt}
-          resetCheckStatus={resetCheckStatus}
-          onToggleResetWatch={toggleResetWatch}
-          autoFishingEnabled={autoFishingEnabled}
-          autoFishingNextAt={autoFishingNextAt}
-          onToggleAutoFishing={toggleAutoFishing}
-          onRunAutoFishing={runAutoFishingNow}
-          onClearCodexHistory={clearCodexHistory}
-          saveStatus={saveStatus}
-        />}
+        {connection.source === 'mock' && usage && fresh && <MockUsageControls usage={usage} onScenario={selectScenario} onPatch={patchUsage} onMockResetSignal={triggerMockResetSignal} resetWatchEnabled={resetWatchEnabled} resetWatchNextAt={resetWatchNextAt} resetCheckStatus={resetCheckStatus} onToggleResetWatch={toggleResetWatch} autoFishingEnabled={autoFishingEnabled} autoFishingNextAt={autoFishingNextAt} onToggleAutoFishing={toggleAutoFishing} onRunAutoFishing={runAutoFishingNow} onClearCodexHistory={clearCodexHistory} saveStatus={saveStatus} />}
       </aside>}
     </main>
   )
 }
-
-
