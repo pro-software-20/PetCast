@@ -2,6 +2,7 @@ import { CODEX_USAGE_MESSAGES, type CodexQuotaResult, type CodexUsageErrorCode }
 import type { UsageState } from '../types/usage'
 import type { UsageProvider } from './UsageProvider'
 import { cloneUsage } from './usageSnapshot'
+import { copyCodexDiagnostics } from '../../electron/codexDiagnostics'
 
 export interface CodexUsageBridge {
   readCodexUsage(requestId: string): Promise<CodexQuotaResult>
@@ -96,6 +97,7 @@ export class CodexUsageProvider implements UsageProvider {
       this.changeScope(raw.scopeId)
       const accountScope = this.checkAccountScope(raw.accountScopeId)
       const current: UsageState = {
+        diagnostics: copyCodexDiagnostics(raw.diagnostics),
         scopeId: accountScope,
         shortWindowRemaining: quota(raw.shortWindowRemaining),
         weeklyRemaining: quota(raw.weeklyRemaining),

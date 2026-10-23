@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 interface Window {
-  petcast?: {
+  petcast?: import('./history/UsageHistoryStore').HistoryBridge & import('./history/TaskLedger').TaskLedgerBridge & {
     readCodexUsage: (requestId: string) => Promise<import('../electron/codexProtocol').CodexQuotaResult>
     cancelCodexUsage: (requestId: string) => void
     optimizeTaskPrompt: (

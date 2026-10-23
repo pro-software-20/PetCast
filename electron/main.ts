@@ -3,6 +3,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promises as fs, mkdtempSync } from 'node:fs'
 import path from 'node:path'
 import { registerCodexUsageIpc } from './codexIpc.js'
+import { registerUsageHistoryIpc } from './historyIpc.js'
 import { registerPromptOptimizationIpc } from './promptOptimizationIpc.js'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
@@ -91,7 +92,7 @@ const createWindow = () => {
               const deadline = Date.now() + 20000;
               const check = () => {
                 const node = document.querySelector('main[data-usage-source="real"]');
-                if (node?.dataset.usageStatus === 'fresh') return resolve(true);
+                if (node?.dataset.usageStatus === 'fresh' && node.dataset.historyStatus === 'saved') return resolve(true);
                 if (Date.now() >= deadline) return resolve(false);
                 setTimeout(check, 100);
               }; check();
@@ -120,11 +121,15 @@ const createWindow = () => {
   else mainWindow.loadFile(path.join(currentDir, '../dist/index.html'))
 }
 
-app.whenReady().then(() => {
+const ownsInstance = app.requestSingleInstanceLock()
+if (!ownsInstance) app.quit()
+app.on('second-instance', () => { mainWindow?.show(); mainWindow?.focus() })
+
+if (ownsInstance) app.whenReady().then(() => {
   const rendererUrl = process.env.VITE_DEV_SERVER_URL
     ?? pathToFileURL(path.join(currentDir, '../dist/index.html')).href
-  registerCodexUsageIpc(() => mainWindow, app.getPath('userData'),
-    rendererUrl)
+  registerCodexUsageIpc(() => mainWindow, app.getPath('userData'), rendererUrl)
+  registerUsageHistoryIpc(() => mainWindow, app.getPath('userData'), rendererUrl)
   registerPromptOptimizationIpc(
     () => mainWindow,
     app.getPath('userData'),

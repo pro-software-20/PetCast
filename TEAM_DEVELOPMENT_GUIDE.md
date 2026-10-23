@@ -22,6 +22,8 @@ PetCast 是一个 Windows 桌面宠物与 AI 额度使用情况分析工具。
 
 负责把当前模拟额度替换成真实数据。
 
+2026-10-22 状态：真实读取及主页面接入已实现；组员反馈安装后额度正常。当前补充来源核对、查找超时与取消、RPC 响应区分和超龄快照保护，见 [A 修正与排查记录](docs/A_FIX_20261022.md)。此处任务清单是职责约定，不表示所有项仍待开发；B、C 分工及其原有代码继续保留。
+
 主要任务：
 
 - 研究可以读取 Codex 额度的方式。
@@ -88,7 +90,8 @@ interface UsageState {
 - 不要直接大规模修改 `App.tsx`。
 - A 完成数据模块后，由 C 接入主程序。业务只依赖 `UsageProvider`；`setScenario/update` 属于独立 Mock 控制，不加入真实 Provider 接口。
 - C 在真实模式关闭 Mock 控制台，不把游戏存档中的模拟额度写回真实 Provider，也不在首次读取前显示默认模拟数字。
-- A 已通过 Codex App Server 验证本机真实读取，并封装主进程与 preload 通道；只暴露经过校验的额度结果，不传凭据。用户安装 PetCast 后读取自己的本地 Codex 登录。本轮按用户要求同步完成主页面接入、来源设置、失败与旧数据展示；请 C 合并时保留这些逻辑，安装包和异机验收仍未完成。
+- A 已通过 Codex App Server 验证本机真实读取，并封装主进程与 preload 通道；只暴露经过校验的额度结果，不传凭据。用户安装 PetCast 后读取自己的本地 Codex 登录。主页面接入、来源设置、失败与旧数据展示已完成；请 C 合并时保留这些逻辑。组员反馈安装后正常，最终安装包与另一台电脑的完整异常验收仍待完成。
+- 页面快照超过 90 秒或检测到时钟回退后不得继续显示 fresh，也不得触发额度提醒、重置效果或新历史记录。恢复可见、获焦、联网时重新读取；新响应通过校验后才恢复。来源详情的诊断字段只用于核对，不持久化进 D 的历史。
 - 如果无法稳定读取真实数据，保留 Mock Provider 供用户明确选择演示；不得静默回退为模拟额度。
 
 验收标准：
@@ -270,7 +273,7 @@ UsageSample 除原有字段外，保存 source、scopeId、shortWindowResetAt、
 
 UsageReport 显式记录 source、scopeId、timeZone、coverageMs、warnings；数据不足时平均和峰值可以为 null，不能用 0 冒充无消耗。
 
-存储边界已经定义为 UsageHistoryStore（目前仅接口，尚无实现）：
+存储边界为 UsageHistoryStore（D 已实现浏览器存储，并同步完成桌面独立文件与 IPC 接入）：
 
 ```ts
 appendUsageSample(sample: UsageSample): Promise<void>;
@@ -280,13 +283,13 @@ queryUsageSamples(query: {
 clearUsageHistory(scope: { source: 'real' | 'mock'; scopeId: string }): Promise<void>;
 ```
 
-D 负责浏览器存储与纯统计函数，C 负责 Electron 主进程文件存储和 preload 桥接，双方共同验证相同契约。现有 saveGame/loadGameSave 只保存游戏，不能复用来写历史。接口缺失时不能静默切到另一种存储。
+原分工为 D 负责浏览器存储与纯统计函数、C 负责桌面存储。本轮为完成桌面验收，已同步实现 Electron 主进程文件存储和 preload 桥接；C 合并时保留该接线。现有 saveGame/loadGameSave 只保存游戏，不能复用来写历史。接口缺失时不能静默切到另一种存储。
 
 统一规则：
 
 - 只追加校验通过的 fresh 数据。真实和 Mock 按 source + scopeId 隔离查询；陈旧缓存不得当作新样本反复写入。
 - 同作用域、同 sampledAt 幂等去重；查询区间为 [startAt, endAt)，按采样时间升序。
-- 每个作用域最多保留 90 天、20,000 条，先剔除过期再保留最新记录。真实周报不合并演示数据；模拟月报标为示意。
+- 每个作用域最多保留 90 天、100,000 条，先剔除过期再保留最新记录。真实周报不合并演示数据；模拟月报标为示意。
 - 独立历史文件使用版本号、字段校验、串行写入和临时文件原子替换。读取失败应与空历史区分，不自动覆盖原文件。
 - 仅同一窗口且相邻间隔 <= 5 分钟的有效片段参与速率统计。额度增加、重置时间变化或长断档均断开片段，不计算跨重置消耗。
 - 平均速度按有效片段时长加权，峰值取有效片段速度最大值。coverageMs 记录有效覆盖时长，断档写入 warnings。
@@ -301,10 +304,14 @@ D 负责浏览器存储与纯统计函数，C 负责 Electron 主进程文件存
 - 使用最集中的时间段。
 - 5h 额度紧张次数。
 - 周额度紧张次数。
-- 使用节奏属于均衡、偏快还是保守。
+- 习惯证据是否充足、低额度持续时长、时段分布和带依据的趣味称号。
 - 下周使用建议。
 
-月报可以先做示意页面，不要求真的积累一个月数据。
+已提供自然月真实报告和独立月报示意，用户可选择月份或修改起止日期。月报包括月内分段趋势；真实报告按实际有效覆盖显示，不要求先积累满一个月。
+
+当前入口：河边 → 使用历史与报告。通常每 3 分钟保存 fresh 快照，遇到窗口变化、压力边界或额度回升立即补记。周报默认周一至周日，用户可设置起止星期（含止日，可跨周）；月报默认自然月，均支持手动日期。规则建议按有效覆盖、低额度持续时长、按覆盖归一的时段消耗生成，不再使用 10/20 的固定速度好坏标签。习惯门槛为至少 3 个有效日期、6 小时，具体小时段还需 3 天、1 小时。实现见 `docs/D_USAGE_HISTORY.md`。
+
+任务执行记录单独使用 `src/history/TaskLedger.ts` 与 `TaskExecutionRecorder.ts`，不要把 B 的分析估计当作真实调用。B/执行器需在实际调用后提供服务商 usage、费用依据、状态与时间；D 按任务完成时间归属报告并追溯调用。接入和字段口径见 `docs/D_TASK_LEDGER.md`。D 已自动从账本生成任务建议，模型推荐需要可选 evaluation 字段，时间评估需要 PendingTaskContext 与当前额度；见 `docs/D_TASK_ADVICE.md`。执行器无需另写同一套建议规则。
 
 注意：
 
@@ -851,3 +858,11 @@ pnpm build
 git diff --check
 ```
 
+## 19. D 模块后续接入说明
+
+D v4 已提供 `recommendTaskPlan(pendingTask, taskRecords, modelCapacities, now)` 及对应页面。B 可直接传入待办条件与各模型当前资源，获取同一任务的模型 / 时间方案。详见 `docs/D_UNIFIED_PLAN.md`。执行前仍需重新确认资源，不能把 recheck 当成确定排期；D 不负责自动调用或队列资源预留。
+
+D v5 增加事后评价日志、独立推荐历史、能力约束、显式指定模型和有来源的价格估算。新方法 appendTaskEvaluations / queryTaskEvaluations 已接入 Electron 与浏览器；TaskRecord 原始调用仍不可变。任务账本写入 version=2，读取 version=1 兼容。组员按 docs/D_V5_IMPROVEMENTS.md 与 D_TASK_LEDGER.md 合并接线；不能只复制 reports 目录。
+
+
+D v6 要求 TaskLedger 同时实现 writeExecutionEvent / queryExecutions / reconcileExecutions，并合并 3 个新 IPC 与执行日志 schema/store。旧记录器适配器未接日志时会在付费调用之前拒绝运行。TASK_PERSISTENCE_FAILED 只能重试保存，不能自动重新运行调用；结束记录可由界面补存。模型稳定配置按匿名账号隔离保存，余额/资源确认每次重新输入。详见 docs/D_V6_RELIABILITY.md 与 D_TASK_LEDGER.md。

@@ -9,7 +9,7 @@ import { MailboxPanel } from './components/MailboxPanel'
 import { TaskAnalysisPanel } from './components/TaskAnalysisPanel'
 import { AQUARIUM_CAPACITY, createEmptyCodex, recordCatch, recordDisposition, replaceAquariumFish, toKeptFish } from './game/collection'
 import { generateAutoFishingRound } from './game/autoFishing'
-import { analyzeUsage, isProactiveUsageFlag } from './game/usageAnalysis'
+import { analyzeUsage, isProactiveUsageFlag, resetConfirmationMessage } from './game/usageAnalysis'
 import { createGameSave, loadGameSave, restoreGameSave, saveGame } from './persistence/storage'
 import type { KeptFish } from './types/collection'
 import type { FishCatch } from './types/fishing'
@@ -19,6 +19,8 @@ import { createMockUsageState, MockUsageProvider } from './usage/MockUsageProvid
 import { MockResetSignalProvider } from './usage/MockResetSignalProvider'
 import { useUsageConnection } from './usage/useUsageConnection'
 import { UsageSettings, usageStatus } from './components/UsageSettings'
+import { UsageHistoryPanel } from './components/UsageHistoryPanel'
+import { useUsageHistory } from './history/useUsageHistory'
 
 export default function App() {
   const desktopApi = window.petcast
@@ -50,7 +52,10 @@ export default function App() {
   const [resetCheckStatus, setResetCheckStatus] = useState<'idle' | 'checking' | 'error'>('idle')
   const [saveReady, setSaveReady] = useState(false)
   const connection = useUsageConnection(mockUsageProvider, desktopApi, saveReady)
+  const history = useUsageHistory(connection.reading, desktopApi)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const usage = connection.reading?.data ?? null
+  const historyScope = connection.source === 'mock' ? {source: 'mock' as const, scopeId: 'mock-local'} : usage?.scopeId ? {source: 'real' as const, scopeId: usage.scopeId} : null
   const fresh = connection.reading?.status === 'fresh'
   const usageRef = useRef<UsageState | null>(usage)
   const sourceRef = useRef(connection.source)
@@ -192,6 +197,7 @@ export default function App() {
     setFishingOpen(false)
     setHomeOpen(false)
     setTaskAnalysisOpen(false)
+    setHistoryOpen(false)
     setMailboxOpen(true)
     setUnreadMailIds([])
   }
@@ -205,6 +211,7 @@ export default function App() {
     setFishingOpen(false)
     setHomeOpen(false)
     setMailboxOpen(false)
+    setHistoryOpen(false)
     setTaskAnalysisOpen(true)
   }
 
@@ -352,9 +359,7 @@ export default function App() {
       resetType,
     }
     addMailItem(notice)
-    showStageSixNotice(resetType === 'short'
-      ? '5h 额度已经恢复，河流也重新亮起来了。'
-      : '周额度已经恢复，可以重新安排这一周了。')
+    showStageSixNotice(resetConfirmationMessage(usage))
   }, [fresh, connection.source, usage?.recentResetType, usage?.sampledAt])
 
   useEffect(() => {
@@ -446,6 +451,7 @@ export default function App() {
       setHomeOpen(false)
       setMailboxOpen(false)
       setTaskAnalysisOpen(false)
+      setHistoryOpen(false)
     }
     setExpanded(next)
     await desktopApi?.toggleExpanded(next)
@@ -473,6 +479,7 @@ export default function App() {
       className={`app ${isBrowserFallback ? 'browser-mode' : 'desktop-mode'} ${expanded ? 'expanded' : 'compact'} ${dragging ? 'dragging' : ''}`}
       data-drag-direction={dragDirection}
       data-usage-source={connection.source}
+      data-history-status={history.recordingState}
       data-usage-status={connection.reading?.status ?? 'loading'}
     >
       <section
@@ -567,6 +574,7 @@ export default function App() {
         {(!expanded || !usage) && <UsageBoard usage={usage} analysis={analysis} compact={!expanded} stale={!fresh} status={usageReadStatus} />}
         {expanded && !usage && <div className="empty-scene-actions"><button onClick={() => setHomeOpen(true)}>进入小屋</button><button onClick={openMailbox}>打开邮箱</button></div>}
         {!expanded && <button className="usage-settings-toggle" onClick={() => setSettingsOpen(true)}>额度设置</button>}
+        {expanded && historyOpen && <UsageHistoryPanel key={`${historyScope?.source}-${historyScope?.scopeId}`} scope={historyScope} store={history.store} currentQuota={historyScope && usage ? {...historyScope,fresh,sampledAt:usage.sampledAt.toISOString(),shortRemaining:usage.shortWindowRemaining,weeklyRemaining:usage.weeklyRemaining,shortResetAt:usage.shortWindowResetAt.toISOString(),weeklyResetAt:usage.weeklyResetAt.toISOString()}:null} revision={history.revision} recordStatus={history.status} onClear={scope => history.recorder.clear(scope)} onClose={() => setHistoryOpen(false)} />}
         {!expanded && settingsOpen && <UsageSettings state={connection} desktop={!isBrowserFallback} onSelect={connection.select} onRefresh={() => void connection.refresh()} onClose={() => setSettingsOpen(false)} />}
 
         {bubbleVisible && (
@@ -589,6 +597,7 @@ export default function App() {
         {dragging && <div className="drag-pill">移动中</div>}
       </section>
       {expanded && <aside className="usage-sidecar">
+        <button className="history-open" onClick={() => { setFishingOpen(false); setHomeOpen(false); setMailboxOpen(false); setTaskAnalysisOpen(false); setHistoryOpen(true) }}>使用历史与报告</button>
         <UsageSettings state={connection} desktop={!isBrowserFallback} onSelect={connection.select} onRefresh={() => void connection.refresh()} />
         {connection.source === 'real' && <button className="auto-fishing-toggle" disabled={!fresh && !autoFishingEnabled} onClick={toggleAutoFishing}>{autoFishingEnabled ? '关闭自动钓鱼' : '开启自动钓鱼'}</button>}
         {connection.source === 'mock' && usage && fresh && <MockUsageControls

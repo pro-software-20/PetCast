@@ -18,7 +18,8 @@
     "test:contracts": "node --test tests/*.test.mjs",
     "check:codex": "npm run build:electron && node scripts/check-codex-usage.mjs",
     "test:desktop": "npm run build && node scripts/smoke-desktop.mjs",
-    "test:ui": "npm run build && node scripts/test-usage-ui.mjs"
+    "test:ui": "npm run build && node scripts/test-usage-ui.mjs",
+    "test:history-ui": "npm run build && node scripts/test-history-ui.mjs"
   },
   "dependencies": {
     "react": "18.3.1",
