@@ -7,6 +7,7 @@ const {
   MAX_TASK_ANALYSIS_PROMPT_LENGTH,
 } = await loadTs('../src/task-analysis/HeuristicTaskAnalyzer.ts')
 const { optimizePrompt } = await loadTs('../src/task-analysis/promptOptimizer.ts')
+const { RemotePromptOptimizer } = await loadTs('../src/task-analysis/RemotePromptOptimizer.ts')
 const { planParallelTasks } = await loadTs('../src/task-analysis/parallelPlanner.ts')
 const {
   MAX_TASK_ANALYSIS_FILES,
@@ -40,9 +41,20 @@ test('short prompt-only input succeeds with a low general result', async () => {
   const result = await analyzeSuccessfully({ prompt: '整理内容', files: [] })
   assert.equal(result.taskType, 'general')
   assert.equal(result.complexity, 'low')
+  assert.equal(result.promptOptimizationSource, 'local')
   assert.ok(result.warnings.some((warning) => warning.includes('仅基于 Prompt')))
   assertValidRange(result.estimatedInputTokens)
   assertValidRange(result.estimatedOutputTokens)
+})
+
+test('Chinese academic writing request is classified as writing', async () => {
+  const result = await analyzeSuccessfully({
+    prompt: '我想写一篇与中医药相关的论文建议怎么做',
+    files: [],
+  })
+  assert.equal(result.taskType, 'writing')
+  assert.match(result.optimizedPrompt, /选题规划、研究设计、提纲还是正文写作/)
+  assert.doesNotMatch(result.optimizedPrompt, /任务类型：writing|未提供文件|保守结构化整理/)
 })
 
 test('file-only input succeeds and reports that the prompt is empty', async () => {
@@ -172,13 +184,59 @@ test('prompt optimizer cleans whitespace and lists file metadata', () => {
   })
   assert.match(optimized, /修复 登录问题\n\n补充测试/)
   assert.match(optimized, /src\/login\.ts（text\/typescript）/)
-  assert.match(optimized, /保持原任务范围/)
+  assert.match(optimized, /技术环境、修改范围/)
+  assert.doesNotMatch(optimized, /任务类型：coding|保守结构化整理/)
 })
 
 test('empty prompt optimizer output is a fillable template', () => {
   const optimized = optimizePrompt('   ', { taskType: 'general', files: [] })
-  assert.match(optimized, /请补充需要完成的具体任务/)
-  assert.match(optimized, /未提供文件/)
+  assert.match(optimized, /帮助我明确任务/)
+  assert.doesNotMatch(optimized, /未提供文件|任务类型：general/)
+})
+
+test('remote prompt optimizer replaces local output after a successful response', async () => {
+  const remote = new RemotePromptOptimizer(async input => {
+    assert.equal(input.prompt, '写一篇论文')
+    assert.deepEqual(input.files, [])
+    return { ok: true, optimizedPrompt: '来自 DeepSeek 的优化结果', provider: 'deepseek' }
+  })
+  const remoteAnalyzer = new HeuristicTaskAnalyzer(remote)
+  const outcome = await remoteAnalyzer.analyze({ prompt: '写一篇论文', files: [] })
+  assert.equal(outcome.ok, true)
+  assert.equal(outcome.result.optimizedPrompt, '来自 DeepSeek 的优化结果')
+  assert.equal(outcome.result.promptOptimizationSource, 'deepseek')
+})
+
+test('remote prompt optimizer failures preserve a local result and warning', async () => {
+  const remote = new RemotePromptOptimizer(async () => ({
+    ok: false,
+    code: 'RATE_LIMITED',
+    retryAfterSeconds: 30,
+  }))
+  const remoteAnalyzer = new HeuristicTaskAnalyzer(remote)
+  const outcome = await remoteAnalyzer.analyze({ prompt: '写一篇论文', files: [] })
+  assert.equal(outcome.ok, true)
+  assert.equal(outcome.result.promptOptimizationSource, 'local')
+  assert.match(outcome.result.optimizedPrompt, /用户需求/)
+  assert.ok(outcome.result.warnings.some(warning => warning.includes('30 秒')))
+})
+
+test('all remote failure paths fall back to a usable local prompt', async () => {
+  const failures = [
+    undefined,
+    async () => ({ ok: false, code: 'UPSTREAM_TIMEOUT' }),
+    async () => ({ ok: false, code: 'INVALID_RESPONSE' }),
+    async () => { throw new Error('bridge failure') },
+  ]
+
+  for (const bridge of failures) {
+    const remoteAnalyzer = new HeuristicTaskAnalyzer(new RemotePromptOptimizer(bridge))
+    const outcome = await remoteAnalyzer.analyze({ prompt: '写一篇论文', files: [] })
+    assert.equal(outcome.ok, true)
+    assert.equal(outcome.result.promptOptimizationSource, 'local')
+    assert.match(outcome.result.optimizedPrompt, /用户需求/)
+    assert.ok(outcome.result.warnings.some(warning => warning.includes('本地规则优化')))
+  }
 })
 
 test('unexpected analyzer exceptions return ANALYSIS_FAILED', async () => {

@@ -23,6 +23,39 @@ pnpm build
 node .\node_modules\vite\bin\vite.js preview --host 127.0.0.1 --port 4173
 ```
 
+### DeepSeek Prompt 优化（可选）
+
+任务分析在未配置网络服务时仍会使用本地规则生成 Prompt。要启用 DeepSeek 优化，分别启动团队服务和桌面端：
+
+```powershell
+# 终端一：仅在服务端设置密钥，不要写入源码或提交到 Git
+$env:DEEPSEEK_API_KEY="你的 DeepSeek API Key"
+$env:RATE_LIMIT_HASH_SECRET="至少 32 个字符的随机字符串"
+pnpm dev:prompt-api
+
+# 终端二：桌面端只需要非敏感的服务地址
+$env:PETCAST_PROMPT_API_URL="http://127.0.0.1:8787"
+pnpm dev
+```
+
+只在自己的电脑上验证 DeepSeek 效果时，可以把 Key 写入不会被 Git 跟踪的
+`.env.local`：
+
+```dotenv
+DEEPSEEK_API_KEY=你的真实Key
+```
+
+然后使用一个命令同时启动本地 Prompt 服务和 PetCast：
+
+```powershell
+pnpm dev:ai
+```
+
+本地服务仅监听 `127.0.0.1`。Key 不会发送到 React 页面，也不会写入构建产物；
+关闭 Electron 窗口后，相关开发进程会一起停止。
+
+AI 优化只发送 Prompt 和文件名、MIME 类型、大小，不读取或上传附件内容。DeepSeek API 消耗独立于 PetCast 展示的 Codex/ChatGPT 额度；调用失败、超时或被限流时自动显示本地规则结果。公网部署必须使用 HTTPS、持久化限流目录和 DeepSeek 服务端消费上限，不能把团队 API Key 打包进 EXE。可配置项见 `.env.example`。
+
 ## 已完成的桌宠与演示功能
 
 - 无边框、置顶、透明窗口
@@ -67,6 +100,7 @@ node .\node_modules\vite\bin\vite.js preview --host 127.0.0.1 --port 4173
 - 控制台显示“读取 / 保存 / 已保存 / 失败”状态
 - 任务分析支持 Prompt 和文件元信息输入，并可识别任务类型与复杂度
 - 任务分析支持 Token 区间启发式估算、Prompt 优化以及串行/并行任务建议
+- 任务分析可通过受限 Electron IPC 调用团队 DeepSeek 服务，并在不可用时自动回退本地规则优化
 - `TaskAnalysisPanel` 已接入主程序，支持文件选择、结果展示和结构化错误提示
 
 ## 团队接口与开发状态
@@ -103,5 +137,6 @@ pnpm check:codex
 - 真实 Tokenizer 和基于文件内容的精确 Token 估算
 - 更精确的任务分类、任务依赖分析和自动任务拆分
 - 任务分析模块的完整单元测试与组件测试
+- DeepSeek Prompt 服务的正式用户认证和多实例分布式限流；当前仅为匿名限流公开 Demo 方案
 
 
