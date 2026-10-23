@@ -5,9 +5,10 @@ export interface ParallelPlanningResult {
   parallelPlan: string[]
 }
 
-const sequentialDependencyPattern = /先[\s\S]{0,80}(?:再|然后)|完成后|基于前一步|依赖|after|based on|depend/i
+const sequentialDependencyPattern = /先[\s\S]{0,80}(?:再|然后)|完成后|基于前一步|然后|依赖|\bafter\b|\bbased on\b|\bdepends? on\b|\bdependent on\b/i
 const independentMarkerPattern = /并行|分别|各自|互不依赖|独立任务|parallel|independent|separately/i
 const numberedTaskPattern = /^\s*(?:\d+[.)]|[一二三四五六七八九十]+[、.)])\s*(.+?)\s*$/
+const independentDependencyPattern = /互不依赖|不依赖|无需依赖|无依赖|\bindependent\b|\bwithout dependenc(?:y|ies)\b/gi
 
 const extractTaskFragments = (prompt: string) => {
   const numberedTasks = prompt
@@ -26,7 +27,8 @@ const extractTaskFragments = (prompt: string) => {
 export function planParallelTasks(input: TaskAnalysisInput): ParallelPlanningResult {
   const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : ''
   const fragments = extractTaskFragments(prompt)
-  const hasSequentialDependency = sequentialDependencyPattern.test(prompt)
+  const dependencyText = prompt.replace(independentDependencyPattern, '')
+  const hasSequentialDependency = sequentialDependencyPattern.test(dependencyText)
   const hasNumberedTasks = fragments.length >= 2 && prompt.split(/\r?\n/).filter((line) => numberedTaskPattern.test(line)).length >= 2
   const hasExplicitIndependentTasks = independentMarkerPattern.test(prompt) && fragments.length >= 2
   const canRunInParallel = !hasSequentialDependency && (hasNumberedTasks || hasExplicitIndependentTasks)

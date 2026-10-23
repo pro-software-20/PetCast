@@ -27,7 +27,13 @@ test('preload runs in a sandbox-style CommonJS environment and exposes only name
   assert.equal(bridge.exec, undefined)
   await bridge.readCodexUsage('request-1')
   bridge.cancelCodexUsage('request-1')
-  assert.deepEqual(calls, [['codex:read-usage', 'request-1'], ['codex:cancel-usage', 'request-1']])
+  const promptInput = { prompt: 'test', taskType: 'general', files: [] }
+  await bridge.optimizeTaskPrompt(promptInput)
+  assert.deepEqual(calls, [
+    ['codex:read-usage', 'request-1'],
+    ['codex:cancel-usage', 'request-1'],
+    ['prompt:optimize', promptInput],
+  ])
   assert.equal(typeof bridge.loadGameSave, 'function')
   assert.equal(typeof bridge.beginDrag, 'function')
 })

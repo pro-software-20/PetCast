@@ -7,7 +7,7 @@ import type {
   TokenRange,
 } from '../types/taskAnalysis'
 import type { TaskAnalyzer } from './TaskAnalyzer'
-import { optimizePrompt } from './promptOptimizer'
+import { localPromptOptimizer, type PromptOptimizer } from './promptOptimizer'
 import { planParallelTasks } from './parallelPlanner'
 
 type TaskCategory = 'coding' | 'analysis' | 'writing' | 'research' | 'testing'
@@ -32,8 +32,9 @@ const CATEGORY_KEYWORDS: Record<TaskCategory, readonly string[]> = {
     '分析', '比较', '对比', '解释', '总结',
   ],
   writing: [
-    'write', 'writing', 'draft', 'report', 'translate', 'translation', '文案',
-    '写作', '撰写', '报告', '翻译',
+    'write', 'writing', 'draft', 'report', 'translate', 'translation', 'paper',
+    'essay', 'thesis', '文案', '写作', '写一篇', '写论文', '撰写', '论文', '文章',
+    '选题', '报告', '翻译',
   ],
   research: [
     'search', 'research', 'look up', 'find', 'latest', 'verify', 'sources',
@@ -157,6 +158,8 @@ const createAssumptions = (hasUncertainFile: boolean) => [
 ]
 
 export class HeuristicTaskAnalyzer implements TaskAnalyzer {
+  constructor(private readonly promptOptimizer: PromptOptimizer = localPromptOptimizer) {}
+
   async analyze(input: TaskAnalysisInput): Promise<TaskAnalysisOutcome> {
     try {
       const prompt = typeof input?.prompt === 'string' ? input.prompt : ''
@@ -253,6 +256,9 @@ export class HeuristicTaskAnalyzer implements TaskAnalyzer {
       if (categories.size === 1) taskType = [...categories][0]
       else if (categories.size > 1) taskType = 'mixed'
 
+      const promptOptimization = await this.promptOptimizer.optimize(normalizedPrompt, { taskType, files })
+      if (promptOptimization.warning) warnings.add(promptOptimization.warning)
+
       const result: TaskAnalysisResult = {
         taskType,
         complexity,
@@ -260,7 +266,8 @@ export class HeuristicTaskAnalyzer implements TaskAnalyzer {
         estimatedOutputTokens: outputTokensByComplexity[complexity],
         estimationBasis: 'heuristic-metadata',
         assumptions: createAssumptions(hasUncertainFile),
-        optimizedPrompt: optimizePrompt(normalizedPrompt, { taskType, files }),
+        optimizedPrompt: promptOptimization.optimizedPrompt,
+        promptOptimizationSource: promptOptimization.source,
         canRunInParallel: parallelResult.canRunInParallel,
         parallelPlan: parallelResult.parallelPlan,
         warnings: [...warnings],

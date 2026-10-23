@@ -4,6 +4,7 @@ import { promises as fs, mkdtempSync } from 'node:fs'
 import path from 'node:path'
 import { registerCodexUsageIpc } from './codexIpc.js'
 import { registerUsageHistoryIpc } from './historyIpc.js'
+import { registerPromptOptimizationIpc } from './promptOptimizationIpc.js'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
 const COMPACT = { width: 338, height: 226 }
@@ -80,6 +81,7 @@ const createWindow = () => {
       void mainWindow?.webContents.executeJavaScript(
         `typeof window.petcast?.readCodexUsage === 'function'
           && typeof window.petcast?.cancelCodexUsage === 'function'
+          && typeof window.petcast?.optimizeTaskPrompt === 'function'
           && typeof window.petcast?.loadGameSave === 'function'`,
       ).then(async ready => {
         if (!ready) { console.error('PETCAST_PRELOAD_FAILED'); app.exit(1); return }
@@ -124,10 +126,16 @@ if (!ownsInstance) app.quit()
 app.on('second-instance', () => { mainWindow?.show(); mainWindow?.focus() })
 
 if (ownsInstance) app.whenReady().then(() => {
-  registerCodexUsageIpc(() => mainWindow, app.getPath('userData'),
-    process.env.VITE_DEV_SERVER_URL ?? pathToFileURL(path.join(currentDir, '../dist/index.html')).href)
-  registerUsageHistoryIpc(() => mainWindow, app.getPath('userData'),
-    process.env.VITE_DEV_SERVER_URL ?? pathToFileURL(path.join(currentDir, '../dist/index.html')).href)
+  const rendererUrl = process.env.VITE_DEV_SERVER_URL
+    ?? pathToFileURL(path.join(currentDir, '../dist/index.html')).href
+  registerCodexUsageIpc(() => mainWindow, app.getPath('userData'), rendererUrl)
+  registerUsageHistoryIpc(() => mainWindow, app.getPath('userData'), rendererUrl)
+  registerPromptOptimizationIpc(
+    () => mainWindow,
+    app.getPath('userData'),
+    rendererUrl,
+    process.env.PETCAST_PROMPT_API_URL ?? '',
+  )
   const savePath = path.join(app.getPath('userData'), 'petcast-save.json')
 
   ipcMain.handle('storage:load', async () => {

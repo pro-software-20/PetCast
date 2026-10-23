@@ -6,6 +6,7 @@ node_modules.stale/
 # Build and packaging output
 dist/
 dist-electron/
+dist-server/
 release/
 out/
 outputs/
