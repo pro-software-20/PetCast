@@ -19,6 +19,29 @@ export const PROVIDER_CAPABILITIES = [
 ] as const
 export type ProviderCapability = (typeof PROVIDER_CAPABILITIES)[number]
 
+export const TASK_WORK_CATEGORIES = [
+  'planning',
+  'coding',
+  'testing',
+  'research',
+  'analysis',
+  'writing',
+  'review',
+  'vision',
+  'general',
+] as const
+export type TaskWorkCategory = (typeof TASK_WORK_CATEGORIES)[number]
+
+export const RECOMMENDATION_CONFIDENCES = ['high', 'medium', 'low'] as const
+export type RecommendationConfidence = (typeof RECOMMENDATION_CONFIDENCES)[number]
+
+export interface TaskProviderRecommendation {
+  category: TaskWorkCategory
+  requiredCapabilities: ProviderCapability[]
+  confidence: RecommendationConfidence
+  reason: string
+}
+
 export type QuotaSupport = 'official-api' | 'local-record' | 'manual' | 'none'
 
 /** Public provider metadata only. Credentials never belong in this contract. */
@@ -58,6 +81,8 @@ export interface TaskNode {
   description: string
   dependsOn: string[]
   recommendedProviderId: ProviderId
+  /** Optional so task sessions created before P2.2 remain restorable. */
+  providerRecommendation?: TaskProviderRecommendation
   executionMode: ExecutionMode
   prompt: string
   files: TaskFileScope

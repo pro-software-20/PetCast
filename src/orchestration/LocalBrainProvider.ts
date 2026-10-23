@@ -1,21 +1,20 @@
 import type { BrainPlanningInput, BrainPlanningOutcome, BrainProvider } from './BrainProvider'
 import { validateTaskPlan } from './taskPlanValidation'
 import { LOCAL_PROVIDER_PROFILE } from './providerProfiles'
+import { recommendTaskProvider } from './taskRecommendation'
 import type {
-  ProviderCapability,
-  ProviderId,
   ProviderProfile,
   TaskInputFileReference,
   TaskNode,
   TaskPlan,
+  TaskWorkCategory,
 } from '../types/taskOrchestration'
 
 interface TaskDraft {
   title: string
   description: string
   prompt: string
-  preferredProviderId: ProviderId
-  capability: ProviderCapability
+  categoryHint?: TaskWorkCategory
   expectedDeliverables: string[]
   acceptanceChecks: string[]
 }
@@ -59,30 +58,11 @@ const shortTitle = (text: string, fallback: string) => {
   return normalized.length > 28 ? `${normalized.slice(0, 28)}…` : normalized
 }
 
-const categoryForText = (text: string, fallbackType: string) => {
-  if (/代码|编程|实现|修复|开发|重构|组件|接口|\b(?:code|implement|fix|refactor)\b/i.test(text)) return 'coding'
-  if (/测试|调试|验证|\b(?:test|debug|validate)\b/i.test(text)) return 'testing'
-  if (/写作|撰写|论文|文章|报告|翻译|润色|\b(?:write|paper|report|translate)\b/i.test(text)) return 'writing'
-  if (/搜索|调研|资料|文献|最新|\b(?:search|research|sources?)\b/i.test(text)) return 'research'
-  if (/分析|比较|解释|总结|\b(?:analyze|compare|explain|summarize)\b/i.test(text)) return 'analysis'
-  return fallbackType
-}
-
-const recommendationFor = (category: string): Pick<TaskDraft, 'preferredProviderId' | 'capability'> => {
-  if (category === 'coding') return { preferredProviderId: 'codex', capability: 'coding' }
-  if (category === 'testing') return { preferredProviderId: 'codex', capability: 'testing' }
-  if (category === 'writing') return { preferredProviderId: 'doubao', capability: 'text-generation' }
-  if (category === 'research') return { preferredProviderId: 'deepseek', capability: 'research' }
-  return { preferredProviderId: 'deepseek', capability: 'planning' }
-}
-
-const genericDraft = (text: string, taskType: string): TaskDraft => {
-  const category = categoryForText(text, taskType)
+const genericDraft = (text: string): TaskDraft => {
   return {
     title: shortTitle(text, '完成用户任务'),
     description: `独立完成以下任务：${text}`,
     prompt: text,
-    ...recommendationFor(category),
     expectedDeliverables: ['与任务目标一致的完整结果'],
     acceptanceChecks: ['结果覆盖任务要求，并明确说明限制和验证方式'],
   }
@@ -94,8 +74,7 @@ const templateDrafts = (taskType: string, goal: string, optimizedPrompt: string)
       title: '确认范围与实现方案',
       description: '梳理技术环境、修改范围、依赖关系和风险。',
       prompt: `围绕“${goal}”确认需求与约束，提出最小可行实现方案。`,
-      preferredProviderId: 'deepseek',
-      capability: 'planning',
+      categoryHint: 'planning',
       expectedDeliverables: ['实现方案和文件影响范围'],
       acceptanceChecks: ['方案不扩大原任务范围，并列出待确认信息'],
     },
@@ -103,8 +82,7 @@ const templateDrafts = (taskType: string, goal: string, optimizedPrompt: string)
       title: '完成代码实现',
       description: '按照已确认方案完成最小范围的代码修改。',
       prompt: `根据前一步方案实现“${goal}”，严格遵守文件权限并记录实际修改。`,
-      preferredProviderId: 'codex',
-      capability: 'coding',
+      categoryHint: 'coding',
       expectedDeliverables: ['代码修改或可审查的补丁', '修改文件说明'],
       acceptanceChecks: ['修改与方案一致', '没有改动未授权文件'],
     },
@@ -112,8 +90,7 @@ const templateDrafts = (taskType: string, goal: string, optimizedPrompt: string)
       title: '验证实现结果',
       description: '检查类型、构建、测试和任务验收条件。',
       prompt: `验证“${goal}”的实现结果，报告实际运行的检查、失败项和剩余风险。`,
-      preferredProviderId: 'codex',
-      capability: 'testing',
+      categoryHint: 'testing',
       expectedDeliverables: ['验证记录和问题清单'],
       acceptanceChecks: ['不声称执行未实际运行的检查', '失败信息可复现'],
     },
@@ -124,8 +101,7 @@ const templateDrafts = (taskType: string, goal: string, optimizedPrompt: string)
       title: '明确研究问题与资料标准',
       description: '确定研究范围、时间边界和可信来源要求。',
       prompt: `围绕“${goal}”明确研究问题、范围、关键词和来源标准。`,
-      preferredProviderId: 'deepseek',
-      capability: 'planning',
+      categoryHint: 'planning',
       expectedDeliverables: ['研究问题和检索方案'],
       acceptanceChecks: ['范围清晰且资料标准可执行'],
     },
@@ -133,8 +109,7 @@ const templateDrafts = (taskType: string, goal: string, optimizedPrompt: string)
       title: '检索并分析资料',
       description: '按既定标准整理事实、证据和不确定信息。',
       prompt: `按照前一步标准研究“${goal}”，区分事实、推断和待验证信息。`,
-      preferredProviderId: 'deepseek',
-      capability: 'research',
+      categoryHint: 'research',
       expectedDeliverables: ['带来源线索的资料分析'],
       acceptanceChecks: ['不虚构来源', '关键信息可以复核'],
     },
@@ -142,8 +117,7 @@ const templateDrafts = (taskType: string, goal: string, optimizedPrompt: string)
       title: '汇总结论并核验',
       description: '整合研究结果，检查证据是否支持结论。',
       prompt: `汇总“${goal}”的研究结果，指出证据不足、冲突信息和复核方法。`,
-      preferredProviderId: 'deepseek',
-      capability: 'research',
+      categoryHint: 'review',
       expectedDeliverables: ['研究结论和局限说明'],
       acceptanceChecks: ['结论与证据对应', '明确说明未知信息'],
     },
@@ -154,8 +128,7 @@ const templateDrafts = (taskType: string, goal: string, optimizedPrompt: string)
       title: '确认写作要求与提纲',
       description: '明确受众、篇幅、语气、资料要求和文章结构。',
       prompt: `针对“${goal}”确认写作要求并生成结构清晰的提纲。`,
-      preferredProviderId: 'deepseek',
-      capability: 'planning',
+      categoryHint: 'planning',
       expectedDeliverables: ['写作要求清单和提纲'],
       acceptanceChecks: ['提纲覆盖原始目标', '缺失信息被明确列出'],
     },
@@ -163,8 +136,7 @@ const templateDrafts = (taskType: string, goal: string, optimizedPrompt: string)
       title: '按提纲撰写内容',
       description: '根据已确认的结构和要求完成正文。',
       prompt: `根据前一步提纲撰写“${goal}”相关内容，不虚构事实、数据或引用。`,
-      preferredProviderId: 'doubao',
-      capability: 'text-generation',
+      categoryHint: 'writing',
       expectedDeliverables: ['符合提纲的完整稿件'],
       acceptanceChecks: ['结构完整', '表达符合目标读者和语气'],
     },
@@ -172,8 +144,7 @@ const templateDrafts = (taskType: string, goal: string, optimizedPrompt: string)
       title: '核查与润色',
       description: '检查逻辑、事实、引用风险和语言质量。',
       prompt: `复核并润色“${goal}”的稿件，列出事实或引用仍需人工确认的部分。`,
-      preferredProviderId: 'doubao',
-      capability: 'text-generation',
+      categoryHint: 'review',
       expectedDeliverables: ['润色稿和核查说明'],
       acceptanceChecks: ['不新增未经证实的事实', '问题和修改清晰可追踪'],
     },
@@ -184,8 +155,7 @@ const templateDrafts = (taskType: string, goal: string, optimizedPrompt: string)
       title: '设计测试方案',
       description: '明确测试对象、环境、场景和验收标准。',
       prompt: `为“${goal}”设计覆盖正常、边界和失败场景的测试方案。`,
-      preferredProviderId: 'codex',
-      capability: 'testing',
+      categoryHint: 'testing',
       expectedDeliverables: ['测试场景和预期结果'],
       acceptanceChecks: ['覆盖关键路径和异常情况'],
     },
@@ -193,8 +163,7 @@ const templateDrafts = (taskType: string, goal: string, optimizedPrompt: string)
       title: '执行测试并记录结果',
       description: '按照测试方案执行检查并记录可复现结果。',
       prompt: `按照前一步测试方案验证“${goal}”，记录实际结果、失败原因和复现方式。`,
-      preferredProviderId: 'codex',
-      capability: 'testing',
+      categoryHint: 'testing',
       expectedDeliverables: ['测试结果和缺陷记录'],
       acceptanceChecks: ['执行结果与预期逐项对应', '未执行项明确标记'],
     },
@@ -205,8 +174,7 @@ const templateDrafts = (taskType: string, goal: string, optimizedPrompt: string)
       title: '拆分目标并确认依赖',
       description: '识别不同目标、执行顺序和需要补充的信息。',
       prompt: `分析“${goal}”中的不同目标，明确范围、依赖和执行顺序。`,
-      preferredProviderId: 'deepseek',
-      capability: 'planning',
+      categoryHint: 'planning',
       expectedDeliverables: ['目标与依赖清单'],
       acceptanceChecks: ['各目标边界清楚且没有遗漏主要需求'],
     },
@@ -214,8 +182,6 @@ const templateDrafts = (taskType: string, goal: string, optimizedPrompt: string)
       title: '执行主要任务',
       description: '按照已确认的范围完成主要交付内容。',
       prompt: `根据前一步拆分结果完成“${goal}”的主要任务，并记录限制。`,
-      preferredProviderId: 'deepseek',
-      capability: 'text-generation',
       expectedDeliverables: ['主要任务结果'],
       acceptanceChecks: ['结果与拆分后的目标一致'],
     },
@@ -223,30 +189,17 @@ const templateDrafts = (taskType: string, goal: string, optimizedPrompt: string)
       title: '汇总并整体验证',
       description: '整合所有结果并检查一致性和完成情况。',
       prompt: `汇总“${goal}”的各部分结果，检查冲突、遗漏和验收条件。`,
-      preferredProviderId: 'deepseek',
-      capability: 'planning',
+      categoryHint: 'review',
       expectedDeliverables: ['汇总结果和未解决问题'],
       acceptanceChecks: ['各部分结果一致', '未解决问题明确列出'],
     },
   ]
 
   return [{
-    ...genericDraft(optimizedPrompt, taskType),
+    ...genericDraft(optimizedPrompt),
     title: taskType === 'analysis' ? '完成分析任务' : '完成用户任务',
     description: taskType === 'analysis' ? '根据现有信息完成分析并说明依据。' : '按照优化后的要求完成任务。',
   }]
-}
-
-const selectProvider = (
-  preferredId: ProviderId,
-  capability: ProviderCapability,
-  providers: ProviderProfile[],
-): ProviderId => {
-  const manualProviders = providers.filter((provider) => provider.executionModes.includes('manual'))
-  if (manualProviders.some((provider) => provider.id === preferredId)) return preferredId
-  return manualProviders.find((provider) => provider.capabilities.includes(capability))?.id
-    ?? manualProviders.find((provider) => provider.id === 'local')?.id
-    ?? 'local'
 }
 
 const toAttachments = (files: BrainPlanningInput['analysisInput']['files']): TaskInputFileReference[] => files.map((file) => ({
@@ -262,23 +215,36 @@ const createTaskNode = (
   dependsOn: string[],
   providers: ProviderProfile[],
   inputs: TaskInputFileReference[],
-): TaskNode => ({
-  id: `task-${index + 1}`,
-  title: draft.title,
-  description: draft.description,
-  dependsOn,
-  recommendedProviderId: selectProvider(draft.preferredProviderId, draft.capability, providers),
-  executionMode: 'manual',
-  prompt: draft.prompt,
-  files: {
-    inputs: inputs.map((input) => ({ ...input })),
-    allowedWritePaths: [],
-    forbiddenPaths: [],
-    outputPaths: [],
-  },
-  expectedDeliverables: [...draft.expectedDeliverables],
-  acceptanceChecks: [...draft.acceptanceChecks],
-})
+  taskType: string,
+): TaskNode => {
+  const selected = recommendTaskProvider({
+    title: draft.title,
+    description: draft.description,
+    prompt: draft.prompt,
+    globalTaskType: taskType,
+    files: inputs,
+    availableProviders: providers,
+    categoryHint: draft.categoryHint,
+  })
+  return {
+    id: `task-${index + 1}`,
+    title: draft.title,
+    description: draft.description,
+    dependsOn,
+    recommendedProviderId: selected.recommendedProviderId,
+    providerRecommendation: selected.recommendation,
+    executionMode: 'manual',
+    prompt: draft.prompt,
+    files: {
+      inputs: inputs.map((input) => ({ ...input })),
+      allowedWritePaths: [],
+      forbiddenPaths: [],
+      outputPaths: [],
+    },
+    expectedDeliverables: [...draft.expectedDeliverables],
+    acceptanceChecks: [...draft.acceptanceChecks],
+  }
+}
 
 const isPlanningInput = (input: BrainPlanningInput) => Boolean(
   input
@@ -303,7 +269,7 @@ export class LocalBrainProvider implements BrainProvider {
       const goal = prompt || `根据 ${input.analysisInput.files.length} 个附件的元信息明确并完成任务`
       const fragments = extractNumberedTasks(prompt)
       const drafts = fragments.length >= 2
-        ? fragments.map((fragment) => genericDraft(fragment, input.analysisResult.taskType))
+        ? fragments.map((fragment) => genericDraft(fragment))
         : templateDrafts(input.analysisResult.taskType, goal, input.analysisResult.optimizedPrompt)
       const attachments = toAttachments(input.analysisInput.files)
       const tasks = drafts.map((draft, index) => createTaskNode(
@@ -314,6 +280,7 @@ export class LocalBrainProvider implements BrainProvider {
           : (index === 0 ? [] : [`task-${index}`]),
         input.availableProviders,
         attachments,
+        input.analysisResult.taskType,
       ))
 
       const plan: TaskPlan = {

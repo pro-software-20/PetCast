@@ -1,6 +1,9 @@
 import {
   BUILT_IN_PROVIDER_IDS,
   EXECUTION_MODES,
+  PROVIDER_CAPABILITIES,
+  RECOMMENDATION_CONFIDENCES,
+  TASK_WORK_CATEGORIES,
   type ProviderId,
   type TaskNode,
   type TaskPlan,
@@ -35,6 +38,9 @@ const PLAN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 const CUSTOM_PROVIDER_ID_PATTERN = /^custom:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
 const builtInProviderIds = new Set<string>(BUILT_IN_PROVIDER_IDS)
 const executionModes = new Set<string>(EXECUTION_MODES)
+const providerCapabilities = new Set<string>(PROVIDER_CAPABILITIES)
+const recommendationConfidences = new Set<string>(RECOMMENDATION_CONFIDENCES)
+const taskWorkCategories = new Set<string>(TASK_WORK_CATEGORIES)
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -152,6 +158,38 @@ const validateInputFiles = (
 
 type DependencyTask = Pick<TaskNode, 'id' | 'dependsOn'>
 
+const validateProviderRecommendation = (
+  value: unknown,
+  path: string,
+  issues: TaskPlanValidationIssue[],
+) => {
+  if (!isRecord(value)) {
+    pushIssue(issues, 'INVALID_SHAPE', path, 'Provider 推荐信息必须是对象。')
+    return
+  }
+  if (typeof value.category !== 'string' || !taskWorkCategories.has(value.category)) {
+    pushIssue(issues, 'INVALID_SHAPE', `${path}.category`, '任务工作类型不受支持。')
+  }
+  if (typeof value.confidence !== 'string' || !recommendationConfidences.has(value.confidence)) {
+    pushIssue(issues, 'INVALID_SHAPE', `${path}.confidence`, '推荐可信度必须是 high、medium 或 low。')
+  }
+  validateRequiredString(value.reason, `${path}.reason`, issues)
+  if (!Array.isArray(value.requiredCapabilities) || value.requiredCapabilities.length === 0) {
+    pushIssue(issues, 'INVALID_SHAPE', `${path}.requiredCapabilities`, '至少需要一项 Provider 能力。')
+    return
+  }
+  const seen = new Set<string>()
+  value.requiredCapabilities.forEach((capability, index) => {
+    const capabilityPath = `${path}.requiredCapabilities[${index}]`
+    if (typeof capability !== 'string' || !providerCapabilities.has(capability)) {
+      pushIssue(issues, 'INVALID_SHAPE', capabilityPath, 'Provider 能力不受支持。')
+    } else if (seen.has(capability)) {
+      pushIssue(issues, 'INVALID_SHAPE', capabilityPath, 'Provider 能力不能重复。')
+    }
+    if (typeof capability === 'string') seen.add(capability)
+  })
+}
+
 const validateTask = (
   value: unknown,
   path: string,
@@ -172,6 +210,9 @@ const validateTask = (
 
   if (!isProviderId(value.recommendedProviderId)) {
     pushIssue(issues, 'INVALID_PROVIDER_ID', `${path}.recommendedProviderId`, 'Provider ID 不受支持。')
+  }
+  if (value.providerRecommendation !== undefined) {
+    validateProviderRecommendation(value.providerRecommendation, `${path}.providerRecommendation`, issues)
   }
   if (typeof value.executionMode !== 'string' || !executionModes.has(value.executionMode)) {
     pushIssue(issues, 'INVALID_SHAPE', `${path}.executionMode`, '执行模式必须是 manual、api 或 local-agent。')

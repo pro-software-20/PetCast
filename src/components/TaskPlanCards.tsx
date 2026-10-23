@@ -41,6 +41,24 @@ const verificationLabels: Record<VerificationStatus, string> = {
   'not-run': '未执行',
 }
 
+const categoryLabels = {
+  planning: '方案规划',
+  coding: '代码实现',
+  testing: '测试验证',
+  research: '资料研究',
+  analysis: '分析推理',
+  writing: '内容写作',
+  review: '复核润色',
+  vision: '视觉理解',
+  general: '通用任务',
+} as const
+
+const confidenceLabels = {
+  high: '高可信',
+  medium: '中可信',
+  low: '低可信',
+} as const
+
 const formatFile = (file: TaskSessionV1['plan']['tasks'][number]['files']['inputs'][number]) => (
   file.kind === 'workspace'
     ? file.path
@@ -142,6 +160,10 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
           if (!run) return null
           const selectedProviderId = run.assignedProviderId
           const selectedKnown = selectableProviders.some(provider => provider.id === selectedProviderId)
+          const recommendedProviderName = selectableProviders.find(
+            provider => provider.id === task.recommendedProviderId,
+          )?.displayName ?? task.recommendedProviderId
+          const manuallyOverridden = selectedProviderId !== task.recommendedProviderId
           const dependencyResults = task.dependsOn.flatMap(dependencyId => {
             const result = session.runs.find(candidate => candidate.taskId === dependencyId)?.result
             return result ? [result] : []
@@ -185,6 +207,17 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
                   ))}
                 </select>
                 <small>人工复制 · 第 {run.attempt} 次</small>
+                <div className="task-provider-recommendation">
+                  {task.providerRecommendation
+                    ? <>
+                      <strong>
+                        推荐：{recommendedProviderName} · {categoryLabels[task.providerRecommendation.category]} · {confidenceLabels[task.providerRecommendation.confidence]}
+                      </strong>
+                      {manuallyOverridden && <em>已人工改选</em>}
+                      <p>{task.providerRecommendation.reason}</p>
+                    </>
+                    : <p>旧会话未记录推荐依据；仍可按实际需要人工选择 AI。</p>}
+                </div>
               </div>
 
               <fieldset className="task-dependency-editor" disabled={!dependenciesEditable}>

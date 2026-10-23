@@ -367,6 +367,10 @@ button { font: inherit; }
 .task-plan-assignment select { min-width: 0; padding: 5px 7px; border: 1px solid rgba(82,145,151,.38); border-radius: 7px; color: #356672; background: #fff; font: inherit; font-size: 8px; outline: none; }
 .task-plan-assignment select:focus { border-color: #4f9da3; box-shadow: 0 0 0 2px rgba(79,157,163,.14); }
 .task-plan-assignment small { color: #7b999a; font-size: 7px; white-space: nowrap; }
+.task-provider-recommendation { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding-top: 5px; border-top: 1px dashed rgba(82,145,151,.24); }
+.task-provider-recommendation strong { color: #3f7479; font-size: 8px; }
+.task-provider-recommendation em { padding: 2px 5px; border-radius: 99px; color: #8a6439; background: #f8dfae; font-size: 7px; font-style: normal; font-weight: 900; }
+.task-provider-recommendation p { flex-basis: 100%; margin: 0; color: #67898c; font-size: 7px; line-height: 1.45; }
 .task-plan-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin: 8px 0 0; }
 .task-plan-meta div { min-width: 0; padding: 6px 7px; border: 1px solid rgba(82,145,151,.16); border-radius: 7px; background: rgba(238,249,245,.8); }
 .task-plan-meta dt { color: #7a999a; font-size: 7px; }

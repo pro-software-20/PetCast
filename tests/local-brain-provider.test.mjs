@@ -89,7 +89,7 @@ test('uses conservative templates for broad task categories', async () => {
     ['coding', 3, ['deepseek', 'codex', 'codex']],
     ['research', 3, ['deepseek', 'deepseek', 'deepseek']],
     ['writing', 3, ['deepseek', 'doubao', 'doubao']],
-    ['testing', 2, ['codex', 'codex']],
+    ['testing', 2, ['deepseek', 'codex']],
     ['mixed', 3, ['deepseek', 'deepseek', 'deepseek']],
     ['analysis', 1, ['deepseek']],
     ['general', 1, ['deepseek']],
@@ -100,12 +100,29 @@ test('uses conservative templates for broad task categories', async () => {
     assert.equal(plan.tasks.length, expectedCount, taskType)
     assert.deepEqual(plan.tasks.map(task => task.recommendedProviderId), expectedProviders, taskType)
     assert.ok(plan.tasks.every(task => task.executionMode === 'manual'), taskType)
+    assert.ok(plan.tasks.every(task => task.providerRecommendation), taskType)
     assert.deepEqual(
       plan.tasks.map(task => task.dependsOn),
       plan.tasks.map((_, index) => index === 0 ? [] : [`task-${index}`]),
       taskType,
     )
   }
+})
+
+test('records a distinct recommendation reason for every numbered task', async () => {
+  const plan = await createPlan('mixed', {
+    analysisInput: {
+      prompt: '1. 分析产品需求\n2. 实现登录组件\n3. 撰写中文使用说明',
+      files: [],
+    },
+  })
+
+  assert.deepEqual(plan.tasks.map(task => task.recommendedProviderId), ['deepseek', 'codex', 'doubao'])
+  assert.deepEqual(
+    plan.tasks.map(task => task.providerRecommendation.category),
+    ['planning', 'coding', 'writing'],
+  )
+  assert.ok(plan.tasks.every(task => task.providerRecommendation.reason.length > 0))
 })
 
 test('falls back to local when no matching manual provider is available', async () => {

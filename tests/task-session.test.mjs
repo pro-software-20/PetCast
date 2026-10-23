@@ -243,6 +243,31 @@ test('blocks invalid starts and provider changes after a task starts', () => {
   assert.equal(updateTaskSession(started, { type: 'assign-provider', taskId: 'task-1', providerId: 'doubao' }, DONE).ok, false)
 })
 
+test('manual provider changes preserve the static recommendation record', () => {
+  const recommendationPlan = plan()
+  recommendationPlan.tasks[0].providerRecommendation = {
+    category: 'planning',
+    requiredCapabilities: ['planning'],
+    confidence: 'high',
+    reason: '需求分析适合结构化规划。',
+  }
+  const created = createTaskSession({ ...input(), plan: recommendationPlan }, NOW)
+  assert.equal(created.ok, true)
+
+  const assigned = mustUpdate(created.session, {
+    type: 'assign-provider',
+    taskId: 'task-1',
+    providerId: 'doubao',
+  })
+
+  assert.equal(assigned.runs[0].assignedProviderId, 'doubao')
+  assert.deepEqual(
+    assigned.plan.tasks[0].providerRecommendation,
+    recommendationPlan.tasks[0].providerRecommendation,
+  )
+  assert.equal(assigned.plan.tasks[0].recommendedProviderId, 'deepseek')
+})
+
 test('requires pasted output and passed checks before unlocking dependencies', () => {
   let session = mustUpdate(mustCreate(), { type: 'start', taskId: 'task-1' })
   assert.equal(updateTaskSession(session, { type: 'submit-result', taskId: 'task-1' }, DONE).ok, false)
