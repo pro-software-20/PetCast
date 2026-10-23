@@ -12,6 +12,8 @@ export interface TokenRange {
   max: number
 }
 
+export type PromptOptimizationSource = 'deepseek' | 'local'
+
 export interface TaskAnalysisInput {
   prompt: string
   files: TaskAnalysisFile[]
@@ -25,6 +27,7 @@ export interface TaskAnalysisResult {
   estimationBasis: 'heuristic-metadata'
   assumptions: string[]
   optimizedPrompt: string
+  promptOptimizationSource: PromptOptimizationSource
   canRunInParallel: boolean
   /** Display-only advice, never an executable task graph. */
   parallelPlan: string[]

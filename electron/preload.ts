@@ -3,9 +3,12 @@ import { contextBridge, ipcRenderer } from 'electron'
 contextBridge.exposeInMainWorld('petcast', {
   readCodexUsage: (requestId: string) => ipcRenderer.invoke('codex:read-usage', requestId),
   cancelCodexUsage: (requestId: string) => ipcRenderer.send('codex:cancel-usage', requestId),
-  writeExecutionEvent: (event:unknown)=>ipcRenderer.invoke('tasks:execution-write',event),
-  queryExecutions: (scope:unknown)=>ipcRenderer.invoke('tasks:executions',scope),
-  reconcileExecutions: (scope:unknown)=>ipcRenderer.invoke('tasks:reconcile',scope),
+  optimizeTaskPrompt: (input: import('./promptOptimizationProtocol.js').PromptOptimizationRequest) => (
+    ipcRenderer.invoke('prompt:optimize', input)
+  ),
+  writeExecutionEvent: (event: unknown) => ipcRenderer.invoke('tasks:execution-write', event),
+  queryExecutions: (scope: unknown) => ipcRenderer.invoke('tasks:executions', scope),
+  reconcileExecutions: (scope: unknown) => ipcRenderer.invoke('tasks:reconcile', scope),
   appendTaskEvaluations: (events: unknown) => ipcRenderer.invoke('tasks:evaluate', events),
   queryTaskEvaluations: (query: unknown) => ipcRenderer.invoke('tasks:evaluations', query),
   appendTaskRecords: (tasks: unknown) => ipcRenderer.invoke('tasks:append', tasks),

@@ -556,6 +556,9 @@ Pull Request 模板：
 - 实现 `promptOptimizer` 和 `parallelPlanner`，生成结构化 Prompt 以及串行/并行执行建议。
 - 实现 `TaskAnalysisPanel`，支持 Prompt 输入、多个文件元信息录入、文件删除、结果展示和异常提示。
 - 在 `App.tsx` 中接入任务分析入口，并实现与钓鱼、小屋和邮箱面板的互斥显示。
+- 完成 P1 第一阶段体验优化：限制文件数量与大小、提示重复或超限文件、复制优化 Prompt，并提供双确认清空。
+- 完成 P1 第二阶段：增加可替换的异步 Prompt 优化器、DeepSeek 团队服务、受限 IPC、自动本地回退和优化来源提示。
+- 增强论文、文章、写一篇和选题等中文写作识别；本地回退按写作、研究、编程、分析和测试生成差异化 Prompt。
 
 ### 修改的模块
 
@@ -564,28 +567,43 @@ Pull Request 模板：
 - `src/components/TaskAnalysisPanel.tsx`
 - `src/App.tsx`
 - `src/styles.css`
+- `tests/task-analysis.test.mjs`
+- `electron/promptOptimizationProtocol.ts`、`electron/promptOptimizationClient.ts`、`electron/promptOptimizationIpc.ts`
+- `server/`、`tests/prompt-optimization.test.mjs`、`tests/prompt-optimization-ipc.test.mjs`
 
 ### 测试方法
 
-1. 测试空 Prompt、无文件、超长 Prompt 和非法文件元信息，确认返回结构化错误且页面不会崩溃。
+1. 使用 `tests/task-analysis.test.mjs` 自动测试空 Prompt、无文件、超长 Prompt 和非法文件元信息，确认返回结构化错误且页面不会崩溃。
 2. 测试单文件、多文件以及代码文件、PDF、图片文件，确认任务类别、复杂度和 Token 区间会受到影响。
 3. 测试多个编号任务和存在前后依赖的 Prompt，确认分别生成并行或串行建议。
-4. 手动打开任务分析入口，验证面板自动展开、文件选择、结果展示、关闭和拖拽隔离。
+4. 测试 Prompt 优化的空白清理、文件列表和空 Prompt 模板，并检查所有 Token 区间均为非负有序整数。
+5. 手动打开任务分析入口，验证面板自动展开、文件选择、MIME 缺失错误、旧结果清理、关闭和拖拽隔离。
+6. 测试 20 个文件、100 MiB 单文件和 500 MiB 总大小边界，并覆盖重复文件及多种拒绝原因。
+7. 手动验证复制反馈、复制兼容回退、双确认清空和分析中清空不会恢复旧结果。
+8. 使用伪造 DeepSeek 响应测试成功、超时、限流、非法 JSON、本地回退和错误脱敏，不在自动测试中消耗真实 API。
+9. 测试 Electron IPC 与 HTTP 服务只转发 Prompt 和文件元信息，额外字段与文件内容不会穿过边界。
+10. 测试匿名安装标识、IP 和全局限流；持久化文件只保存 HMAC 标识，不保存原始 IP 或安装标识。
 
 ### 检查结果
 
 - [x] `pnpm typecheck` 通过
 - [x] `pnpm build` 通过
 - [x] `pnpm dev` 可以正常运行
-- [x] 契约测试通过（10/10）
+- [x] `pnpm test:contracts` 契约测试全部通过
 - [x] 没有提交账号、Token 或其他敏感信息
 - [x] 原有功能没有明显损坏
+- [x] DeepSeek 未配置或不可用时仍可完成本地任务分析
 
 ### 尚未解决的问题
 
 - 当前 Token 估算是基于 Prompt 和文件元信息的启发式结果，不是真实 Tokenizer 计数。
 - 当前版本不读取附件内容，图片、PDF 和二进制文件的估算存在额外不确定性。
-- 后续可以增加更完整的任务依赖分析、真实文件解析以及单元测试和组件测试。
+- 后续可以增加更完整的任务依赖分析、真实文件解析以及自动化组件交互测试。
+- DeepSeek Prompt 优化会把 Prompt 和文件元信息发送到团队服务，但不会读取或上传附件内容；其 API 消耗不属于 Codex/ChatGPT 额度。
+- 当前公网方案是匿名限流测试版，只适合公开 Demo。正式商业发布前需要用户认证、多实例共享限流、HTTPS、持久化存储和服务端消费上限。
+- `PETCAST_PROMPT_API_URL` 未配置时直接使用本地优化；DeepSeek Key 只允许保存在团队服务端环境变量中，不能进入 React、preload、Git 或 EXE。
+- 本机效果验证可在被 Git 忽略的 `.env.local` 中配置 `DEEPSEEK_API_KEY`，然后运行
+  `pnpm dev:ai`。该命令只在 `127.0.0.1` 启动 Prompt 服务，不用于公网发布。
 
 ## 10. 文件修改范围
 
@@ -751,6 +769,96 @@ pnpm dev
 - 已创建 Pull Request。
 - Pull Request 中写明测试方法。
 
+## 15. B 模块 P0：多 AI 任务编排契约
+
+本阶段只建立多 AI 编排的公共契约和严格校验，不会直接执行任务，也不会把现有的 `parallelPlan` 展示建议当作可执行任务图。
+
+- `src/types/taskOrchestration.ts` 定义 Provider、任务图、文件范围、运行状态和执行结果。
+- `src/orchestration/BrainProvider.ts`、`WorkerProvider.ts` 和 `QuotaProvider.ts` 定义可替换 Provider 接口，接口中不保存密钥。
+- 附件引用只包含文件元信息；可写、禁止和输出位置必须使用工作区相对路径。
+- `taskPlanValidation.ts` 检查任务 ID、Provider、路径安全和 DAG 依赖，不接受循环、未知依赖或路径穿越。
+- P1 再实现实际任务拆解和人工任务卡；P0 不新增调度、持久化、UI、API 调用或文件写入。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+git diff --check
+```
+
+## 16. B 模块 P1：本地任务拆解与人工 AI 任务卡
+
+本阶段在 P0 契约之上增加本地大脑和人工分发界面，但仍不会自动调用或控制 Codex、DeepSeek、豆包。
+
+- `LocalBrainProvider` 优先识别编号任务和显式依赖；没有明确子任务时，按任务类型生成保守的阶段模板。
+- 所有任务计划都经过 `validateTaskPlan()` 校验，执行模式固定为 `manual`。
+- 编程与测试默认推荐 Codex，研究与分析默认推荐 DeepSeek，写作与润色默认推荐豆包；不可用时回退本地规则。
+- 浏览器附件只转换为名称、MIME 和大小，不读取内容，也不伪造工作区路径。
+- 未提供真实工作区授权时，可修改路径和输出位置保持为空，任务卡明确提示先由用户确认。
+- 每张任务卡可单独切换 AI 并复制专属 Prompt；切换只影响复制文本，不修改已经校验的静态任务图。
+- 修改 Prompt、增删文件或清空输入会取消旧请求并移除旧计划，迟到结果不会覆盖当前输入。
+- 分析成功但拆解失败时保留分析结果，并单独展示安全错误信息。
+- P1 不记录执行中、完成或失败状态，不持久化任务，不生成最终报告；这些能力留给 P2。
+- P1 不读取或使用额度数据；通用额度适配由负责 P3 的成员单独接入。
+
+自动测试覆盖编号拆分、串并行依赖、各任务类型模板、Provider 推荐与回退、附件数据边界、取消和异常结果，以及四种人工复制 Prompt。验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+git diff --check
+```
+
+## 17. B 模块 P2：人工执行闭环与任务报告
+
+P2 在人工任务卡基础上增加本地运行状态、结果回收、进度恢复和最终报告，仍不自动调用或控制外部 AI。
+
+- 成功复制任务 Prompt 后进入“进行中”；用户粘贴结果并逐项填写验收状态。
+- 任务必须经过“待验收”，且所有验收项均通过后才能完成和解锁依赖任务。
+- 支持等待信息、继续、退回修改、失败、取消和重试；Provider 只能在任务开始前切换。
+- 后续任务 Prompt 只带入已完成前置任务的结果摘要，不包含完整返回正文。
+- `TaskSessionV1` 将静态任务图与运行记录分离，所有状态更新通过纯函数和严格校验完成。
+- 最近一次会话保存在独立的 `petcast.task-session.v1` 本地存储中，不写入游戏存档。
+- 单个结果最多 50,000 字符，整个会话最多 2 MiB；损坏记录不会被静默覆盖。
+- 未完成会话自动恢复；已完成会话可重新查看报告，新建任务需要二次确认。
+- 全部任务和最终验收通过后，本地生成可复制、可下载的 Markdown 摘要报告。
+- P2 不使用额度数据、不执行文件修改，也不调用 `WorkerProvider.execute()`。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+git diff --check
+```
+
+## 18. B 模块 P2.1：并行依赖图与人工依赖调整
+
+P2.1 修正了自动拆解任务全部串行等待的问题，并保留确实需要前置结果的阶段依赖。
+
+- 编号任务默认作为独立根任务；依赖词只作用于对应任务，不再把整个计划自动串成一条链。
+- “并行、同时、分别、独立、互不依赖”等描述会保留并行分支；明确引用任务编号时建立对应依赖。
+- 所有无前置依赖的任务同时进入“已就绪”，完成一个分支不会阻塞其他独立分支。
+- 汇总任务只有在它声明的所有前置任务都完成并验收后才会解锁。
+- 用户可以在首次执行前为每张任务卡选择前置任务；只能选择排在当前任务之前的任务。
+- 任一任务复制并开始后，整个依赖图锁定，避免运行过程中改变已生成 Prompt 的上下文。
+- 重复、自身、未知、后序和循环依赖会被拒绝，修改后的依赖随任务会话保存和恢复。
+- 本阶段仍为人工复制与人工验收，不自动调用 AI，也不读取或修改额度数据。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+git diff --check
+```
+
+## 19. D 模块后续接入说明
 
 D v4 已提供 `recommendTaskPlan(pendingTask, taskRecords, modelCapacities, now)` 及对应页面。B 可直接传入待办条件与各模型当前资源，获取同一任务的模型 / 时间方案。详见 `docs/D_UNIFIED_PLAN.md`。执行前仍需重新确认资源，不能把 recheck 当成确定排期；D 不负责自动调用或队列资源预留。
 
