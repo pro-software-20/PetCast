@@ -35,11 +35,11 @@ if(!process.versions.electron){
     ipcMain.handle('codex:read-usage',()=>loggedOut ? {ok:false,code:'LOGIN_REQUIRED'} : {ok:true,snapshot:make(Date.now(),account===scopeA?37:90,account)})
     ipcMain.handle('storage:load',()=>null);ipcMain.handle('storage:save',()=>undefined)
     const index=path.join(root,'dist/index.html')
-    const win=new BrowserWindow({width:338,height:226,frame:false,show:false,webPreferences:{preload:path.join(root,'dist-electron/preload.cjs'),contextIsolation:true,nodeIntegration:false,backgroundThrottling:false,offscreen:true}})
+    const win=new BrowserWindow({width:300,height:340,frame:false,show:false,webPreferences:{preload:path.join(root,'dist-electron/preload.cjs'),contextIsolation:true,nodeIntegration:false,backgroundThrottling:false,offscreen:true}})
     registerUsageHistoryIpc(()=>win,userData,pathToFileURL(index).href)
-    ipcMain.handle('window:toggle-expanded',(_e,expanded)=>win.setSize(expanded?1008:338,expanded?526:226))
+    ipcMain.handle('window:toggle-expanded',(_e,expanded)=>win.setSize(expanded?1008:300,expanded?526:340))
     const js=code=>win.webContents.executeJavaScript(code),sleep=ms=>new Promise(r=>setTimeout(r,ms))
-    const click=label=>js(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(label)});if(!b)throw Error('button missing');b.click()})()`)
+    const click=label=>js(`(()=>{const all=${JSON.stringify(label)}==='真实额度'||${JSON.stringify(label)}==='模拟演示'?document.querySelectorAll('.source-options button'):document.querySelectorAll('button');const b=[...all].find(b=>b.textContent.trim()===${JSON.stringify(label)}||b.getAttribute('aria-label')==='打开'+${JSON.stringify(label)});if(!b)throw Error('button missing');b.click()})()`)
     async function wait(code,label,timeout=7000){const end=Date.now()+timeout;while(Date.now()<end){if(await js(code))return;await sleep(40)}throw Error(`History UI timeout: ${label}`)}
     const count=number=>`document.querySelector('.history-summary strong')?.textContent === '${number}'`
     const query=(scopeId)=>({source:'real',scopeId,startAt:new Date(now-86400000).toISOString(),endAt:new Date(Date.now()+1000).toISOString()})
@@ -47,7 +47,7 @@ if(!process.versions.electron){
     try{
       await win.loadFile(index)
       await wait(`document.querySelector('main')?.dataset.usageStatus==='fresh'`,'real read')
-      await click('河边');await click('任务分析')
+      await click('主页');await click('任务分析')
       await wait(`!!document.querySelector('#task-analysis-prompt')`,'upstream task analysis opens')
       await js(`(()=>{const el=document.querySelector('#task-analysis-prompt');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,'请整理一份报告，先分析资料再写总结');el.dispatchEvent(new Event('input',{bubbles:true}))})()`)
       await click('开始分析');await wait(`!!document.querySelector('.task-analysis-result')`,'upstream task analysis still works')
@@ -167,7 +167,7 @@ if(!process.versions.electron){
       await click('重新读取');await wait(count(1),'recording resumes after clear')
       await taskStore.appendTaskRecords(historyTasks)
       await win.reload();await wait(`document.querySelector('main')?.dataset.usageStatus==='fresh'`,'restart')
-      await click('河边');await click('使用历史与报告');await wait(count(2),'restart persistence')
+      await click('主页');await click('使用历史与报告');await wait(count(2),'restart persistence')
       await wait(`document.querySelector('[aria-label="模型上下文 history-model"]')?.value==='8192'`,'stable model configuration restored')
       assert.equal(await js(`document.querySelector('[aria-label="模型顺序 history-model"]').value`),'3')
       assert.equal(await js(`document.querySelector('[aria-label="可用预算 history-model"]').value`),'')
@@ -194,9 +194,9 @@ if(!process.versions.electron){
       const browser=new BrowserWindow({width:1100,height:650,show:false,webPreferences:{contextIsolation:true,nodeIntegration:false}})
       const bjs=code=>browser.webContents.executeJavaScript(code)
       async function bwait(code){for(let i=0;i<175;i++){if(await bjs(code))return;await sleep(40)}throw Error('browser history timed out')}
-      const bclick=label=>bjs(`([...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(label)})).click()`)
+      const bclick=label=>bjs(`(()=>{const all=${JSON.stringify(label)}==='真实额度'||${JSON.stringify(label)}==='模拟演示'?document.querySelectorAll('.source-options button'):document.querySelectorAll('button');const b=[...all].find(b=>b.textContent.trim()===${JSON.stringify(label)}||b.getAttribute('aria-label')==='打开'+${JSON.stringify(label)});if(!b)throw Error('button missing: '+${JSON.stringify(label)});b.click()})()`)
       await browser.loadFile(index);await bwait(`document.querySelector('main')?.dataset.usageStatus==='fresh'`)
-      await bclick('河边');await bclick('使用历史与报告');await bwait(count(1))
+      await bclick('主页');await bclick('使用历史与报告');await bwait(count(1))
       const imported={...task,source:'mock',scopeId:'mock-local'}
       await bjs(`(()=>{const file=new File([${JSON.stringify(JSON.stringify({version:1,tasks:[imported]}))}],'tasks.json',{type:'application/json'});const dt=new DataTransfer();dt.items.add(file);const input=document.querySelector('[aria-label="导入任务记录"]');input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`)
       await bwait(`document.querySelector('.task-report')?.textContent.includes('成功 1')`)
@@ -206,7 +206,7 @@ if(!process.versions.electron){
       await bwait(`document.querySelector('.task-evaluation')?.textContent.includes('1 次追加')`)
 
       await browser.reload();await bwait(`document.querySelector('main')?.dataset.usageStatus==='fresh'`)
-      await bclick('河边');await bclick('使用历史与报告');await bwait(count(2))
+      await bclick('主页');await bclick('使用历史与报告');await bwait(count(2))
       await bwait(`document.querySelector('.task-report')?.textContent.includes('成功 1')`)
       assert.equal(JSON.parse(await bjs(`localStorage.getItem('petcast.task-ledger.v1')`)).evaluations.length,1)
       await bclick('清除当前账号任务记录');await bclick('确认清除任务')

@@ -20,4 +20,7 @@ export interface AppearancePreferences {
   version: 1
   petId: string
   sceneId: string
+  petName: string
+  shellId: string
+  shellColor: string
 }

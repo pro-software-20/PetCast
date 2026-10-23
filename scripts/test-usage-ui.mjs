@@ -38,11 +38,11 @@ if (!process.versions.electron) {
     if (mode === 'stale') return {ok: false, code: 'UNAVAILABLE', scopeId}
     return {ok: true, snapshot: {...usage, scopeId, sampledAt: new Date().toISOString()}}
   })
-  const win = new BrowserWindow({width: 338, height: 226, frame: false, show: false, webPreferences: {
+  const win = new BrowserWindow({width: 300, height: 340, frame: false, show: false, webPreferences: {
     preload: path.join(root, 'dist-electron/preload.cjs'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false,
   }})
   registerUsageHistoryIpc(() => win, app.getPath('userData'), pathToFileURL(path.join(root, 'dist/index.html')).href)
-  ipcMain.handle('window:toggle-expanded', (_e, expanded) => win.setSize(expanded ? 1008 : 338, expanded ? 526 : 226))
+  ipcMain.handle('window:toggle-expanded', (_e, expanded) => win.setSize(expanded ? 1008 : 300, expanded ? 526 : 340))
   const js = code => win.webContents.executeJavaScript(code)
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
   async function wait(code, label) {
@@ -50,7 +50,8 @@ if (!process.versions.electron) {
     while (Date.now() < deadline) { if (await js(code)) return; await sleep(40) }
     throw new Error(`UI timeout: ${label}`)
   }
-  const click = label => js(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(label)}); if(!b)throw Error('missing button'); b.click()})()`)
+  const click = label => js(`(()=>{const all=${JSON.stringify(label)}==='真实额度'||${JSON.stringify(label)}==='模拟演示'?document.querySelectorAll('.source-options button'):document.querySelectorAll('button');const b=[...all].find(b=>b.textContent.trim()===${JSON.stringify(label)}||b.getAttribute('aria-label')==='打开'+${JSON.stringify(label)}); if(!b)throw Error('missing button'); b.click()})()`)
+  const openQuota = async () => { if (await js(`!!document.querySelector('.shell-home')`)) { await click('主页'); await wait(`!!document.querySelector('.wood-nav')`, 'expanded navigation') }; await js(`[...document.querySelectorAll('.wood-nav button')].find(b=>b.textContent==='真实额度').click()`); await wait(`!!document.querySelector('.quota-page')`, 'quota page') }
   const status = (source, value) => `document.querySelector('main')?.dataset.usageSource === '${source}' && document.querySelector('main')?.dataset.usageStatus === '${value}'`
   async function shot(name) {
     if (!process.env.PETCAST_UI_SCREENSHOTS) return
@@ -62,9 +63,11 @@ if (!process.versions.electron) {
   try {
     await win.loadFile(path.join(root, 'dist/index.html'))
     await wait(status('real','unavailable'), 'cold login failure')
-    assert.equal(await js(`document.querySelector('.usage-board').textContent.includes('88%')`), false)
-    assert.equal(await js(`document.querySelector('.usage-board').textContent.includes('额度未知')`), true)
-    await click('额度设置')
+    assert.equal(await js(`(document.querySelector('.usage-board')??document.querySelector('.device-quotas')).textContent.includes('88%')`), false)
+    assert.equal(await js(`document.querySelector('.device-quotas').textContent.includes('—')`), true)
+    assert.ok(Math.abs(win.getSize()[0]-300)<=1 && Math.abs(win.getSize()[1]-340)<=1, "Windows DPI rounding must remain within one pixel")
+    const screen = await js(`(()=>{const r=document.querySelector('.device-screen').getBoundingClientRect();return [r.width,r.height]})()`);assert.ok(Math.abs(screen[0]-screen[1])<.1)
+    await openQuota()
     assert.match(await js(`document.querySelector('.usage-read-feedback').textContent`), /登录/)
     await shot('01-login-required')
     mode = 'pending'; await click('重新读取')
@@ -83,9 +86,24 @@ if (!process.versions.electron) {
     assert.doesNotMatch(details, /fixture@example/)
     await shot('03-source-verification')
     await js(`document.querySelector('.usage-source-details').open = false`)
-    await js(`document.querySelector('[aria-label="关闭额度设置"]').click()`)
+    await click('形象'); await wait(`!!document.querySelector('.appearance-page')`, 'appearance page')
+    assert.deepEqual(await js(`[...document.querySelectorAll('.wood-nav button')].map(b=>b.textContent)`), ['主页','形象','任务分析','真实额度'])
+    for (const label of ['猫','狗','鸡','兔子','鲨鱼']) { await js(`document.querySelector('[aria-label="选择${label}"]').click()`); await wait(`document.querySelector('.pet-choice-row button[aria-pressed="true"]')?.textContent.includes('${label}')`, 'pet selection') }
+    assert.equal(await js(`document.querySelector('.shell-choice h2').textContent.trim()`), '外观颜色')
+    assert.equal(await js(`document.querySelectorAll('.shell-choice-grid button').length`), 4)
+    for (const name of ['猫耳','垂耳狗','长耳兔','圆形']) {
+      await js(`document.querySelector('[aria-label="切换${name}外壳"]').click()`)
+      await wait(`document.querySelector('.shell-choice-grid button[aria-pressed="true"]')?.textContent.includes('${name}')`, 'shell selection')
+    }
+    const sprite = await js(`document.querySelector('.appearance-preview-pet img').src`)
+    await js(`document.querySelector('[aria-label="外壳雾蓝"]').click()`); await click('✓ 保存设置')
+    assert.equal(await js(`JSON.parse(localStorage.getItem('petcast.appearance.v1')).shellColor`), '#A6BCC9')
+    assert.equal(await js(`document.querySelector('.appearance-preview-pet img').src`), sprite)
+    await click('收起'); await wait(`!!document.querySelector('.compact-device')`, 'compact restored')
+    assert.equal(await js(`document.querySelector('.compact-device').dataset.shellId`), 'round')
+    const changedScreen = await js(`(()=>{const r=document.querySelector('.device-screen').getBoundingClientRect();return [r.width,r.height]})()`);assert.ok(Math.abs(changedScreen[0]-changedScreen[1])<.1)
     await shot('03-compact-real')
-    await click('河边'); await sleep(350)
+    await click('主页'); await sleep(350)
     assert.equal(await js(`!!document.querySelector('.mock-controls')`), false)
     await click('开启自动钓鱼')
     await sleep(350)
@@ -112,9 +130,10 @@ if (!process.versions.electron) {
     assert.equal(await js(`document.querySelector('.usage-board').textContent.includes('88%')`), true)
     await shot('05-expanded-mock')
     await win.reload(); await wait(status('mock','fresh'), 'source preference survives restart')
-    await click('额度设置'); mode = 'pending'; await click('真实额度')
+    assert.equal(await js(`document.querySelector('.compact-device').dataset.shellId`), 'round')
+    await openQuota(); mode = 'pending'; await click('真实额度')
     await wait(status('real','loading'), 'source switch clears mock immediately')
-    assert.equal(await js(`document.querySelector('.usage-board').textContent.includes('88%')`), false)
+    assert.equal(await js(`(document.querySelector('.usage-board')??document.querySelector('.device-quotas')).textContent.includes('88%')`), false)
     await click('模拟演示'); await wait(status('mock','fresh'), 'cancel pending real')
     resolvePending({ok:true,snapshot:{...usage,scopeId}}); await sleep(150)
     assert.equal(await js(status('mock','fresh')), true)
@@ -130,7 +149,7 @@ if (!process.versions.electron) {
       await sleep(40)
     }
     assert.equal(await browserJs(status('real', 'unavailable')), true)
-    await browserJs("document.querySelector('.usage-settings-toggle').click()")
+    await browserJs("document.querySelector('.shell-home').click()"); await browserJs("[...document.querySelectorAll('.wood-nav button')].find(b=>b.textContent==='真实额度').click()")
     assert.match(await browserJs("document.querySelector('.usage-read-feedback').textContent"), /浏览器无法读取本机/)
     await browserJs("[...document.querySelectorAll('button')].find(b=>b.textContent==='模拟演示').click()")
     for (let i = 0; i < 100; i++) {
@@ -139,7 +158,7 @@ if (!process.versions.electron) {
     }
     assert.equal(await browserJs(status('mock', 'fresh')), true)
     browserWin.destroy()
-    console.log('Usage UI acceptance passed: browser fallback; loading, login, real, stale, mock, persistence, cancellation, logout, focus/online refresh')
+    console.log('Usage/appearance UI acceptance passed: 300x340 compact; square display; five pets; four shells; shell palette; navigation; source diagnostics; browser fallback; loading, login, real, stale, mock, persistence, cancellation, logout, focus/online refresh')
     app.exit(0)
   } catch (error) { console.error(error); app.exit(1) }
   }).catch(error => { console.error(error); app.exit(1) })

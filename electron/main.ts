@@ -7,7 +7,7 @@ import { registerUsageHistoryIpc } from './historyIpc.js'
 import { registerPromptOptimizationIpc } from './promptOptimizationIpc.js'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
-const COMPACT = { width: 338, height: 226 }
+const COMPACT = { width: 300, height: 340 }
 // 760 × 510 game scene + 218 px mock sidecar + 14 px gap + 16 px app padding.
 const EXPANDED = { width: 1008, height: 526 }
 

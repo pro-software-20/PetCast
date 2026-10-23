@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { FishSprite } from './FishSprite'
+import { assetUrl } from '../appearance/petRegistry'
 import { difficultyLabel } from '../game/fishSpecies'
 import { classifyFishingPattern, generateFish } from '../game/fishingEngine'
 import type { KeptFish } from '../types/collection'
@@ -9,6 +11,7 @@ type FishingPhase = 'ready' | 'waiting' | 'bite' | 'caught' | 'replace' | 'resol
 
 type FishingGameProps = {
   usage: UsageState
+  petName?: string
   aquarium: KeptFish[]
   capacity: number
   onCatch: (fish: FishCatch) => void
@@ -19,7 +22,7 @@ type FishingGameProps = {
   onClose: () => void
 }
 
-export function FishingGame({ usage, aquarium, capacity, onCatch, onKeep, onFeed, onRelease, onReplace, onClose }: FishingGameProps) {
+export function FishingGame({ usage, petName = '布罗艾', aquarium, capacity, onCatch, onKeep, onFeed, onRelease, onReplace, onClose }: FishingGameProps) {
   const [phase, setPhase] = useState<FishingPhase>('ready')
   const [candidate, setCandidate] = useState<FishCatch | null>(null)
   const [failure, setFailure] = useState('')
@@ -119,40 +122,34 @@ export function FishingGame({ usage, aquarium, capacity, onCatch, onKeep, onFeed
   }
 
   return (
-    <section className="fishing-game" aria-label="手动钓鱼小游戏">
+    <section className={`fishing-game cartoon-fishing phase-${phase}`} aria-label="手动钓鱼小游戏">
       <button className="fishing-close" onClick={closeGame} aria-label="返回河边">×</button>
       <div className="fishing-header">
-        <span>FISHING · STAGE 4</span>
+        <span>河畔钓鱼</span>
         <strong>{pattern.label}</strong>
         <small>当前习惯会改变鱼的出现概率</small>
       </div>
 
       <div className={`fishing-water phase-${phase}`}>
+        <img className="fishing-river-art" src={assetUrl('scenes/river-cartoon.png')} alt="沿用主页的卡通河面" draggable={false} />
         <div className="fishing-current current-one" />
         <div className="fishing-current current-two" />
+        <img className="leaf-fishing-stick" src={assetUrl('fishing/leaf-fishing-stick.png')} alt="木棍顶端一片叶子，垂下一条鱼线" draggable={false} />
         <div className="bobber"><i /></div>
         {phase === 'bite' && <div className="bite-mark">!</div>}
         {phase === 'waiting' && <div className="waiting-ripple" />}
       </div>
 
-      {phase === 'ready' && (
-        <div className="fishing-card fishing-intro">
-          <span>点击抛竿，然后等待浮标出现“！”</span>
-          <strong>太早或太晚都会失败，但没有任何损失。</strong>
-          <button onClick={cast}>抛竿</button>
-        </div>
-      )}
-
-      {(phase === 'waiting' || phase === 'bite') && candidate && (
-        <button
-          className={`pull-button ${phase === 'bite' ? 'is-biting' : ''}`}
-          onClick={pull}
-          style={{ '--bite-window': `${candidate.species.reactionWindowMs}ms` } as React.CSSProperties}
-        >
-          <span>{phase === 'bite' ? '现在！点击收竿' : '等待咬钩……'}</span>
-          <i />
-        </button>
-      )}
+      {(phase === 'ready' || phase === 'waiting' || phase === 'bite') && <>
+        <aside className="fishing-guidance">
+          <strong>{phase === 'ready' ? '准备好抛竿了吗？' : phase === 'bite' ? '有鱼咬钩了！' : '安静等一等…'}</strong>
+          <p>{phase === 'bite' ? '就是现在，点击收竿。' : '点击抛竿，等待浮标出现“！”'}<br />看准时机，再点击收竿。</p>
+        </aside>
+        <footer className="fishing-footer">
+          <div><strong>{phase === 'bite' ? '浮标在动，抓住这个时机。' : phase === 'waiting' ? '已经抛竿，等待鱼咬钩。' : '点击抛竿，然后等待浮标出现“！”'}</strong><small>太早或太晚都会失败，但没有任何损失。</small></div>
+          {phase === 'ready' ? <button className="cast-button" onClick={cast}>抛竿</button> : candidate && <button className={`pull-button ${phase === 'bite' ? 'is-biting' : ''}`} onClick={pull} style={{ '--bite-window': `${candidate.species.reactionWindowMs}ms` } as React.CSSProperties}><span>{phase === 'bite' ? '现在！点击收竿' : '等待咬钩……'}</span><i /></button>}
+        </footer>
+      </>}
 
       {phase === 'failed' && (
         <div className="fishing-card fishing-result is-failed" role="status">
@@ -171,8 +168,8 @@ export function FishingGame({ usage, aquarium, capacity, onCatch, onKeep, onFeed
               '--fish-accent': candidate.species.accentColor,
             } as React.CSSProperties}
             aria-hidden="true"
-          ><i /></div>
-          <span>NEW CATCH</span>
+          ><i /><FishSprite species={candidate.species} /></div>
+          <span>新捕获</span>
           <strong>{candidate.species.name}</strong>
           <p>{candidate.length.toFixed(1)} cm · {difficultyLabel(candidate.species.difficulty)}</p>
           <small>{candidate.species.description}</small>
@@ -184,7 +181,7 @@ export function FishingGame({ usage, aquarium, capacity, onCatch, onKeep, onFeed
           </div>
           <div className="catch-actions" aria-label="处理这条鱼">
             <button className="keep-action" onClick={keep}>保留</button>
-            <button className="feed-action" onClick={feed}>喂给布罗艾</button>
+            <button className="feed-action" onClick={feed}>喂给{petName}</button>
             <button className="release-action" onClick={release}>放生</button>
           </div>
         </div>
@@ -192,7 +189,7 @@ export function FishingGame({ usage, aquarium, capacity, onCatch, onKeep, onFeed
 
       {phase === 'replace' && candidate && (
         <div className="fishing-card replacement-card" role="dialog" aria-label="水族箱已满">
-          <span>AQUARIUM FULL · {aquarium.length}/{capacity}</span>
+          <span>水族箱已满 · {aquarium.length}/{capacity}</span>
           <strong>选择一条旧鱼，让新鱼住进来</strong>
           <p>新鱼：{candidate.species.name} · {candidate.length.toFixed(1)} cm</p>
           <div className="replacement-list">
@@ -204,7 +201,7 @@ export function FishingGame({ usage, aquarium, capacity, onCatch, onKeep, onFeed
             ))}
           </div>
           <div className="replacement-actions">
-            <button className="feed-action" onClick={() => replace('fed')}>旧鱼喂给布罗艾</button>
+            <button className="feed-action" onClick={() => replace('fed')}>旧鱼喂给{petName}</button>
             <button className="release-action" onClick={() => replace('released')}>旧鱼放生</button>
           </div>
         </div>
