@@ -4,6 +4,7 @@ import path from 'node:path'
 import { dialog, ipcMain, type BrowserWindow } from 'electron'
 import { isWorkspaceRequestId, type WorkspaceSelectionResult } from './workspaceProtocol.js'
 import { scanWorkspace } from './workspaceScanner.js'
+import type { WorkspaceRegistry } from './workspaceRegistry.js'
 
 const authorizedRenderer = (
   event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent,
@@ -29,6 +30,7 @@ export function registerWorkspaceIpc(
   getWindow: () => BrowserWindow | null,
   userData: string,
   rendererUrl: string,
+  registry: Pick<WorkspaceRegistry, 'set'> = { set: () => undefined },
 ) {
   const active = new Map<string, AbortController>()
   let secretPromise: Promise<Buffer> | undefined
@@ -71,6 +73,7 @@ export function registerWorkspaceIpc(
       const workspaceId = createHmac('sha256', await installationSecret()).update(normalizedRoot).digest('hex')
       const scan = await scanWorkspace(root, { signal: controller.signal })
       if (controller.signal.aborted) return { ok: false, code: 'CANCELLED', message: '已取消工作区扫描。' }
+      registry.set(workspaceId, root)
       return {
         ok: true,
         workspace: {

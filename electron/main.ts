@@ -6,6 +6,9 @@ import { registerCodexUsageIpc } from './codexIpc.js'
 import { registerUsageHistoryIpc } from './historyIpc.js'
 import { registerPromptOptimizationIpc } from './promptOptimizationIpc.js'
 import { registerWorkspaceIpc } from './workspaceIpc.js'
+import { WorkspaceRegistry } from './workspaceRegistry.js'
+import { createCodexScopeIdentity } from './codexScopeIdentity.js'
+import { registerTaskExecutionIpc } from './taskExecutionIpc.js'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
 const COMPACT = { width: 300, height: 340 }
@@ -84,6 +87,8 @@ const createWindow = () => {
           && typeof window.petcast?.cancelCodexUsage === 'function'
           && typeof window.petcast?.optimizeTaskPrompt === 'function'
           && typeof window.petcast?.selectTaskWorkspace === 'function'
+          && typeof window.petcast?.prepareCodexTaskExecution === 'function'
+          && typeof window.petcast?.runCodexTaskExecution === 'function'
           && typeof window.petcast?.loadGameSave === 'function'`,
       ).then(async ready => {
         if (!ready) { console.error('PETCAST_PRELOAD_FAILED'); app.exit(1); return }
@@ -130,7 +135,9 @@ app.on('second-instance', () => { mainWindow?.show(); mainWindow?.focus() })
 if (ownsInstance) app.whenReady().then(() => {
   const rendererUrl = process.env.VITE_DEV_SERVER_URL
     ?? pathToFileURL(path.join(currentDir, '../dist/index.html')).href
-  registerCodexUsageIpc(() => mainWindow, app.getPath('userData'), rendererUrl)
+  const workspaceRegistry = new WorkspaceRegistry()
+  const codexIdentity = createCodexScopeIdentity(app.getPath('userData'))
+  registerCodexUsageIpc(() => mainWindow, app.getPath('userData'), rendererUrl, codexIdentity)
   registerUsageHistoryIpc(() => mainWindow, app.getPath('userData'), rendererUrl)
   registerPromptOptimizationIpc(
     () => mainWindow,
@@ -138,7 +145,20 @@ if (ownsInstance) app.whenReady().then(() => {
     rendererUrl,
     process.env.PETCAST_PROMPT_API_URL ?? '',
   )
-  registerWorkspaceIpc(() => mainWindow, app.getPath('userData'), rendererUrl)
+  registerWorkspaceIpc(() => mainWindow, app.getPath('userData'), rendererUrl, workspaceRegistry)
+  const taskExecutionManager = registerTaskExecutionIpc({
+    getWindow: () => mainWindow,
+    rendererUrl,
+    workspaces: workspaceRegistry,
+    identity: codexIdentity,
+  })
+  let taskExecutionCleanupStarted = false
+  app.on('before-quit', (event) => {
+    if (taskExecutionCleanupStarted) return
+    taskExecutionCleanupStarted = true
+    event.preventDefault()
+    void taskExecutionManager.dispose().finally(() => app.quit())
+  })
   const savePath = path.join(app.getPath('userData'), 'petcast-save.json')
 
   ipcMain.handle('storage:load', async () => {

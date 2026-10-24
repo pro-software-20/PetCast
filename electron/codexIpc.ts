@@ -4,18 +4,24 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { readCodexQuota } from './codexUsage.js'
 import type { CodexQuotaResult } from './codexProtocol.js'
+import type { CodexScopeIdentity } from './codexScopeIdentity.js'
 
 /** Registration kept separate so C can reuse it without moving quota logic into main.ts. */
-export function registerCodexUsageIpc(getWindow: () => BrowserWindow | null, userData: string, rendererUrl: string) {
+export function registerCodexUsageIpc(
+  getWindow: () => BrowserWindow | null,
+  userData: string,
+  rendererUrl: string,
+  identity?: CodexScopeIdentity,
+) {
   let active: { id: string; controller: AbortController } | undefined
   let saltPromise: Promise<string> | undefined
-  const salt = () => saltPromise ??= (async () => {
+  const fallbackSalt = () => saltPromise ??= (async () => {
     const file = path.join(userData, 'codex-scope-salt')
     await fs.mkdir(userData, { recursive: true })
     await fs.writeFile(file, randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 })
       .catch(error => { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error })
     const value = (await fs.readFile(file, 'utf8')).trim()
-    if (!/^[a-f0-9]{64}$/.test(value)) throw Error('Invalid scope salt')
+    if (!/^[a-f0-9]{64}$/.test(value)) throw new Error('Invalid scope salt')
     return value
   })().catch(error => { saltPromise = undefined; throw error })
   const authorized = (event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent) => {
@@ -39,7 +45,7 @@ export function registerCodexUsageIpc(getWindow: () => BrowserWindow | null, use
     event.sender.once('destroyed', cancel)
     event.sender.once('did-start-navigation', cancel)
     try {
-      return await readCodexQuota({ scopeSalt: await salt(), signal: request.controller.signal })
+      return await readCodexQuota({ scopeSalt: await (identity?.getSalt() ?? fallbackSalt()), signal: request.controller.signal })
     } catch { return { ok: false, code: 'UNAVAILABLE' } }
     finally {
       event.sender.removeListener('destroyed', cancel)

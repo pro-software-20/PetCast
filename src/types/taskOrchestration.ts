@@ -165,6 +165,24 @@ export interface TaskResultDraft {
   reviewNote: string
 }
 
+export type AutomaticTaskExecutionState =
+  | 'preparing'
+  | 'running'
+  | 'review'
+  | 'applied'
+  | 'discarded'
+  | 'interrupted'
+
+export interface AutomaticTaskExecutionMetadata {
+  executionId: string
+  model: string
+  state: AutomaticTaskExecutionState
+  pendingFileCount: number
+  safetyStatus: 'pending' | 'safe' | 'rejected'
+  /** Opaque short-lived handle. It becomes invalid when the desktop process restarts. */
+  artifactId?: string
+}
+
 /** Mutable execution state kept separately from the AI-generated task plan. */
 export interface TaskRunRecord {
   taskId: string
@@ -177,6 +195,7 @@ export interface TaskRunRecord {
   startedAt?: string
   completedAt?: string
   result?: TaskExecutionResult
+  automaticExecution?: AutomaticTaskExecutionMetadata
 }
 
 export interface TaskSessionV1 {
