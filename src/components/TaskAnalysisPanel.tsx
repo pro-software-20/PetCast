@@ -7,7 +7,7 @@ import {
   LocalTaskSessionStore,
   type TaskSessionStore,
 } from '../orchestration/TaskSessionStore'
-import { createTaskSession } from '../orchestration/taskSession'
+import { createTaskSession, recoverInterruptedTaskExecutions } from '../orchestration/taskSession'
 import { HeuristicTaskAnalyzer, MAX_TASK_ANALYSIS_PROMPT_LENGTH } from '../task-analysis/HeuristicTaskAnalyzer'
 import { createDefaultPromptOptimizer } from '../task-analysis/RemotePromptOptimizer'
 import {
@@ -32,6 +32,7 @@ export interface TaskAnalysisPanelProps {
   brainProvider?: BrainProvider
   providers?: ProviderProfile[]
   sessionStore?: TaskSessionStore
+  codexExecutionScope?: { scopeId: string; fresh: boolean }
   onClose?: () => void
 }
 
@@ -69,6 +70,7 @@ export function TaskAnalysisPanel({
   brainProvider,
   providers = DEFAULT_PROVIDER_PROFILES,
   sessionStore = defaultSessionStore,
+  codexExecutionScope,
   onClose,
 }: TaskAnalysisPanelProps) {
   const initialFileSelection = mergeTaskAnalysisFiles([], initialFiles)
@@ -118,8 +120,10 @@ export function TaskAnalysisPanel({
         return
       }
       if (!outcome.session) return
-      if (outcome.session.completedAt) setCompletedSession(outcome.session)
-      else showSession(outcome.session)
+      const restored = recoverInterruptedTaskExecutions(outcome.session)
+      if (restored !== outcome.session) void persistSession(restored)
+      if (restored.completedAt) setCompletedSession(restored)
+      else showSession(restored)
     })
     return () => { active = false }
   }, [sessionStore])
@@ -450,6 +454,7 @@ export function TaskAnalysisPanel({
           key={taskSession.id}
           session={taskSession}
           providers={providers}
+          codexExecutionScope={codexExecutionScope}
           onSessionChange={handleSessionChange}
         />
       )}

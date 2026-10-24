@@ -8,6 +8,19 @@ contextBridge.exposeInMainWorld('petcast', {
   ),
   selectTaskWorkspace: (requestId: string) => ipcRenderer.invoke('workspace:select', requestId),
   cancelTaskWorkspace: (requestId: string) => ipcRenderer.send('workspace:cancel', requestId),
+  prepareCodexTaskExecution: (input: import('./taskExecutionProtocol.js').PrepareCodexTaskExecutionRequest) => (
+    ipcRenderer.invoke('task-execution:prepare', input)
+  ),
+  runCodexTaskExecution: (executionId: string) => ipcRenderer.invoke('task-execution:run', executionId),
+  cancelCodexTaskExecution: (executionId: string) => ipcRenderer.send('task-execution:cancel', executionId),
+  readTaskExecutionArtifact: (artifactId: string) => ipcRenderer.invoke('task-execution:artifact-read', artifactId),
+  applyTaskExecutionArtifact: (artifactId: string) => ipcRenderer.invoke('task-execution:artifact-apply', artifactId),
+  discardTaskExecutionArtifact: (artifactId: string) => ipcRenderer.invoke('task-execution:artifact-discard', artifactId),
+  onTaskExecutionEvent: (listener: (event: import('./taskExecutionProtocol.js').TaskExecutionEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, value: import('./taskExecutionProtocol.js').TaskExecutionEvent) => listener(value)
+    ipcRenderer.on('task-execution:event', handler)
+    return () => ipcRenderer.removeListener('task-execution:event', handler)
+  },
   writeExecutionEvent: (event: unknown) => ipcRenderer.invoke('tasks:execution-write', event),
   queryExecutions: (scope: unknown) => ipcRenderer.invoke('tasks:executions', scope),
   reconcileExecutions: (scope: unknown) => ipcRenderer.invoke('tasks:reconcile', scope),

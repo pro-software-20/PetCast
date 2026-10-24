@@ -926,7 +926,33 @@ pnpm build
 git diff --check
 ```
 
-## 22. D 模块后续接入说明
+## 22. B 模块 P2.5：安全的单 Codex 自动执行试点
+
+P2.5 只为 `coding` / `testing` 且选择 Codex 的已就绪任务提供桌面端自动执行；其他任务继续使用人工复制流程。
+
+- 使用本机已登录的 Codex app-server，不在前端保存账号、Token 或 API Key。
+- 页面必须持有 fresh 的真实账号作用域；执行前主进程再次读取账号并校验匿名作用域，不一致时拒绝调用。
+- 工作区绝对路径仅在 Electron 主进程内存中保存，重启后必须重新选择同一工作区。
+- Codex 只在临时隔离副本中运行，关闭网络并使用 `approvalPolicy=never`；同一时间只允许一个自动任务运行。
+- 隔离输入最多 2,000 个文件、总计 50 MiB、单文件 2 MiB，仅接受 UTF-8 文本；符号链接、路径穿越和禁止范围会被拒绝。
+- 删除、重命名、二进制或越权改动会使整次结果失败；原项目不会被自动修改。
+- 执行完成后展示受限 diff；用户明确选择“应用改动”后，主进程才会重新校验原文件哈希并带回滚保护地写回。
+- AI 返回的测试描述不能代替人工验收；应用或丢弃文件产物后，验收项仍保持“未执行”。
+- 自动执行通过现有 `TaskExecutionRecorder` 先写执行意图再调用 Codex，并记录服务商上报的 Token；费用未知时保持 `null`。
+- 执行日志保存失败后禁止自动重跑；重启时遗留的运行/产物状态转为“需要信息”，要求用户先核对账本。
+- 会话只保存执行 ID、模型、状态、文件数量和安全状态，不保存完整 diff、绝对路径、文件正文或临时目录。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+git diff --check
+```
+
+## 23. D 模块后续接入说明
 
 D v4 已提供 `recommendTaskPlan(pendingTask, taskRecords, modelCapacities, now)` 及对应页面。B 可直接传入待办条件与各模型当前资源，获取同一任务的模型 / 时间方案。详见 `docs/D_UNIFIED_PLAN.md`。执行前仍需重新确认资源，不能把 recheck 当成确定排期；D 不负责自动调用或队列资源预留。
 
