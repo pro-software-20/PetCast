@@ -455,7 +455,7 @@ test('sets workspace context and clears old authorization only when the workspac
 
   const changed = mustUpdate(same, { type: 'set-workspace', workspace: workspaceB })
   assert.deepEqual(changed.plan.tasks[0].files, {
-    inputs: [], allowedWritePaths: [], forbiddenPaths: [], outputPaths: [],
+    inputs: [], readPaths: [], allowedWritePaths: [], forbiddenPaths: [], outputPaths: [],
   })
   assert.deepEqual(changed.plan.workspace, workspaceB)
   assert.equal(validateTaskSession(changed).ok, true)
@@ -536,6 +536,7 @@ test('manual task prompts include only display name and authorized relative path
   workspacePlan.workspace = { id: 'd'.repeat(64), displayName: 'Safe Project' }
   workspacePlan.tasks[0].files = {
     inputs: [{ kind: 'workspace', path: 'src/App.tsx' }],
+    readPaths: ['src/components'],
     allowedWritePaths: ['src'],
     forbiddenPaths: ['src/private'],
     outputPaths: ['src/result.ts'],
@@ -543,6 +544,7 @@ test('manual task prompts include only display name and authorized relative path
   const prompt = buildManualTaskPrompt(workspacePlan.tasks[0], workspacePlan, 'codex')
   assert.match(prompt, /Safe Project/)
   assert.match(prompt, /src\/App\.tsx/)
+  assert.match(prompt, /src\/components/)
   assert.match(prompt, /src\/result\.ts/)
   assert.equal(prompt.includes(workspacePlan.workspace.id), false)
   assert.equal(prompt.includes('C:\\'), false)
@@ -553,4 +555,85 @@ test('legacy sessions without workspace metadata remain valid', () => {
   const session = mustCreate()
   assert.equal(session.plan.workspace, undefined)
   assert.equal(validateTaskSession(session).ok, true)
+})
+
+test('applies a global workspace scope atomically and preserves attachments', () => {
+  const source = input()
+  source.plan.tasks[0].files.inputs = [
+    { kind: 'attachment', name: 'brief.pdf', type: 'application/pdf', size: 12 },
+  ]
+  const created = createTaskSession(source, NOW)
+  assert.equal(created.ok, true)
+  let session = mustUpdate(created.session, {
+    type: 'set-workspace',
+    workspace: { id: 'e'.repeat(64), displayName: 'Project' },
+  })
+  const scope = {
+    readPaths: ['src'],
+    allowedWritePaths: ['src'],
+    forbiddenPaths: ['src/private'],
+    outputPaths: ['src/result.ts'],
+  }
+  session = mustUpdate(session, {
+    type: 'set-workspace-default-scope', scope, applyToAll: true,
+  })
+  assert.deepEqual(session.plan.workspace.defaultScope, scope)
+  assert.deepEqual(session.plan.tasks[0].files.inputs, source.plan.tasks[0].files.inputs)
+  assert.deepEqual(session.plan.tasks.map(task => task.files.readPaths), [['src'], ['src']])
+  assert.equal(validateTaskSession(session).ok, true)
+})
+
+test('restores one task to the global scope and locks global edits after start', () => {
+  let session = mustUpdate(mustCreate(), {
+    type: 'set-workspace', workspace: { id: 'f'.repeat(64), displayName: 'Project' },
+  })
+  const scope = {
+    readPaths: ['src'], allowedWritePaths: ['src'], forbiddenPaths: [], outputPaths: ['src/result.ts'],
+  }
+  session = mustUpdate(session, { type: 'set-workspace-default-scope', scope, applyToAll: true })
+  const task = session.plan.tasks[0]
+  session = mustUpdate(session, {
+    type: 'update-task-definition',
+    taskId: task.id,
+    task: {
+      title: task.title,
+      description: task.description,
+      prompt: task.prompt,
+      files: { ...task.files, readPaths: ['docs'], allowedWritePaths: [], outputPaths: [] },
+      expectedDeliverables: task.expectedDeliverables,
+      acceptanceChecks: task.acceptanceChecks,
+      recommendedProviderId: task.recommendedProviderId,
+      providerRecommendation: task.providerRecommendation,
+    },
+  })
+  assert.deepEqual(session.plan.tasks[0].files.readPaths, ['docs'])
+  session = mustUpdate(session, { type: 'apply-workspace-default-scope', taskId: task.id })
+  assert.deepEqual(session.plan.tasks[0].files.readPaths, ['src'])
+
+  const started = mustUpdate(session, { type: 'start', taskId: 'task-1' })
+  const locked = updateTaskSession(started, {
+    type: 'set-workspace-default-scope', scope, applyToAll: true,
+  }, DONE)
+  assert.equal(locked.ok, false)
+  assert.equal(locked.code, 'INVALID_TRANSITION')
+})
+
+test('switching workspaces clears default and task path scopes but keeps attachments', () => {
+  const source = input()
+  source.plan.tasks[0].files.inputs = [
+    { kind: 'attachment', name: 'brief.txt', type: 'text/plain', size: 4 },
+  ]
+  const created = createTaskSession(source, NOW)
+  assert.equal(created.ok, true)
+  let session = mustUpdate(created.session, {
+    type: 'set-workspace', workspace: { id: '1'.repeat(64), displayName: 'One' },
+  })
+  const scope = { readPaths: ['src'], allowedWritePaths: [], forbiddenPaths: [], outputPaths: [] }
+  session = mustUpdate(session, { type: 'set-workspace-default-scope', scope, applyToAll: true })
+  session = mustUpdate(session, {
+    type: 'set-workspace', workspace: { id: '2'.repeat(64), displayName: 'Two' },
+  })
+  assert.equal(session.plan.workspace.defaultScope, undefined)
+  assert.deepEqual(session.plan.tasks[0].files.inputs, source.plan.tasks[0].files.inputs)
+  assert.deepEqual(session.plan.tasks[0].files.readPaths, [])
 })

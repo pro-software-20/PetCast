@@ -68,7 +68,16 @@ export type TaskInputFileReference = AttachmentFileReference | WorkspaceFileRefe
 
 export interface TaskFileScope {
   inputs: TaskInputFileReference[]
+  /** Safe workspace-relative files or directory prefixes that may be read. */
+  readPaths?: string[]
   /** Exact files or directory prefixes relative to the workspace root. */
+  allowedWritePaths: string[]
+  forbiddenPaths: string[]
+  outputPaths: string[]
+}
+
+export interface WorkspacePathScope {
+  readPaths: string[]
   allowedWritePaths: string[]
   forbiddenPaths: string[]
   outputPaths: string[]
@@ -77,6 +86,7 @@ export interface TaskFileScope {
 export interface TaskWorkspaceContext {
   id: string
   displayName: string
+  defaultScope?: WorkspacePathScope
 }
 
 /** Static task definition. Runtime state is kept in TaskRunRecord. */

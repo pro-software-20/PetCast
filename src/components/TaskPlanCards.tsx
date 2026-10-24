@@ -3,6 +3,7 @@ import type { WorkspaceSnapshot } from '../../electron/workspaceProtocol'
 import { buildManualTaskPrompt } from '../orchestration/manualTaskPrompt'
 import { LOCAL_PROVIDER_PROFILE } from '../orchestration/providerProfiles'
 import { generateTaskSessionReport } from '../orchestration/taskReport'
+import { getTaskWorkspacePathScope, workspacePathScopesEqual } from '../orchestration/taskPathScope'
 import {
   canEditTaskDependencies,
   canEditTaskPlan,
@@ -18,6 +19,8 @@ import type {
 } from '../types/taskOrchestration'
 import { copyText } from '../utils/copyText'
 import { TaskDefinitionEditor } from './TaskDefinitionEditor'
+import { WorkspaceScopePicker } from './WorkspaceScopePicker'
+import { WorkspaceScopeSummary } from './WorkspaceScopeSummary'
 
 export interface TaskPlanCardsProps {
   session: TaskSessionV1
@@ -68,10 +71,6 @@ const formatFile = (file: TaskSessionV1['plan']['tasks'][number]['files']['input
     : `${file.name}（${file.type}，${file.size.toLocaleString()} B）`
 )
 
-const displayPaths = (paths: string[], emptyLabel: string) => (
-  paths.length > 0 ? paths.join('、') : emptyLabel
-)
-
 const downloadMarkdown = (markdown: string, fileName: string) => {
   const url = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }))
   const anchor = document.createElement('a')
@@ -91,6 +90,8 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
   const [pendingWorkspace, setPendingWorkspace] = useState<WorkspaceSnapshot | undefined>()
   const [workspaceError, setWorkspaceError] = useState<string | null>(null)
   const [workspaceLoading, setWorkspaceLoading] = useState(false)
+  const [defaultScopeOpen, setDefaultScopeOpen] = useState(false)
+  const [confirmApplyDefault, setConfirmApplyDefault] = useState(false)
   const workspaceRequest = useRef<string | null>(null)
   const manualProviders = providers.filter(provider => provider.executionModes.includes('manual'))
   const selectableProviders = manualProviders.some(provider => provider.id === 'local')
@@ -102,6 +103,10 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
   const planEditable = canEditTaskPlan(session)
   const allTasksDone = completedCount === session.runs.length
   const report = session.completedAt ? generateTaskSessionReport(session) : null
+  const defaultScope = session.plan.workspace?.defaultScope
+  const tasksWithCustomScope = defaultScope
+    ? session.plan.tasks.filter(task => !workspacePathScopesEqual(getTaskWorkspacePathScope(task.files), defaultScope)).length
+    : session.plan.tasks.length
 
   useEffect(() => () => {
     const requestId = workspaceRequest.current
@@ -189,6 +194,25 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
     }
   }
 
+  const saveDefaultScope = (scope: NonNullable<typeof defaultScope>) => {
+    const firstDefault = !defaultScope
+    if (applyAction({ type: 'set-workspace-default-scope', scope, applyToAll: firstDefault })) {
+      setDefaultScopeOpen(false)
+      setConfirmApplyDefault(false)
+    }
+  }
+
+  const applyDefaultToAll = () => {
+    if (!defaultScope) return
+    if (!confirmApplyDefault && tasksWithCustomScope > 0) {
+      setConfirmApplyDefault(true)
+      return
+    }
+    if (applyAction({ type: 'set-workspace-default-scope', scope: defaultScope, applyToAll: true })) {
+      setConfirmApplyDefault(false)
+    }
+  }
+
   return (
     <section className="task-plan-panel" aria-labelledby="task-plan-title">
       <header className="task-plan-header">
@@ -219,6 +243,30 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
           </div>
         )}
       </section>
+
+      {session.plan.workspace && (
+        <section className="task-global-scope">
+          <header>
+            <div>
+              <strong>全局默认文件授权</strong>
+              <span>子任务默认继承，特殊任务可单独调整</span>
+            </div>
+            <button type="button" disabled={!planEditable || !workspace} onClick={() => setDefaultScopeOpen(true)}>
+              {defaultScope ? '修改默认范围' : '设置默认范围'}
+            </button>
+          </header>
+          <WorkspaceScopeSummary scope={defaultScope ?? { readPaths: [], allowedWritePaths: [], forbiddenPaths: [], outputPaths: [] }} />
+          {defaultScope && tasksWithCustomScope > 0 && (
+            <div className="task-global-scope-apply">
+              <span>{tasksWithCustomScope} 个任务使用了单独授权。</span>
+              <button type="button" disabled={!planEditable} onClick={applyDefaultToAll}>
+                {confirmApplyDefault ? '再次点击确认覆盖' : '应用到所有任务'}
+              </button>
+              {confirmApplyDefault && <button type="button" onClick={() => setConfirmApplyDefault(false)}>取消</button>}
+            </div>
+          )}
+        </section>
+      )}
 
       <div className="task-plan-progress" aria-label={`已完成 ${completedCount} / ${session.runs.length}`}>
         <span><strong>{completedCount}</strong> / {session.runs.length} 已完成</span>
@@ -313,6 +361,7 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
                 taskType={session.analysisResult.taskType}
                 providers={providers}
                 workspace={workspace}
+                defaultScope={defaultScope}
                 disabled={!planEditable}
                 onSave={definition => applyAction({
                   type: 'update-task-definition',
@@ -356,11 +405,13 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
 
               <dl className="task-plan-meta">
                 <div><dt>前置依赖</dt><dd>{dependencyNames.length ? dependencyNames.join('、') : '无，可立即开始'}</dd></div>
-                <div><dt>输入文件</dt><dd>{task.files.inputs.length ? task.files.inputs.map(formatFile).join('、') : '未提供'}</dd></div>
-                <div><dt>允许修改</dt><dd>{displayPaths(task.files.allowedWritePaths, '未授权写入；修改前需确认')}</dd></div>
-                <div><dt>禁止修改</dt><dd>{displayPaths(task.files.forbiddenPaths, '未单独指定；仍不得超出允许范围')}</dd></div>
-                <div><dt>输出位置</dt><dd>{displayPaths(task.files.outputPaths, '待用户确认')}</dd></div>
+                <div><dt>浏览器附件</dt><dd>{task.files.inputs.some(file => file.kind === 'attachment') ? task.files.inputs.filter(file => file.kind === 'attachment').map(formatFile).join('、') : '未提供'}</dd></div>
               </dl>
+              <WorkspaceScopeSummary
+                scope={getTaskWorkspacePathScope(task.files)}
+                inherited={Boolean(defaultScope && workspacePathScopesEqual(getTaskWorkspacePathScope(task.files), defaultScope))}
+                compact
+              />
 
               <details className="task-plan-prompt">
                 <summary>查看将要复制的完整 Prompt</summary>
@@ -492,6 +543,16 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
           <ul>{session.plan.assumptions.map(assumption => <li key={assumption}>{assumption}</li>)}</ul>
         </details>
       </section>
+
+      {defaultScopeOpen && workspace && (
+        <WorkspaceScopePicker
+          title="设置全局默认文件范围"
+          workspace={workspace}
+          initialScope={defaultScope ?? { readPaths: [], allowedWritePaths: [], forbiddenPaths: [], outputPaths: [] }}
+          onSave={saveDefaultScope}
+          onClose={() => setDefaultScopeOpen(false)}
+        />
+      )}
     </section>
   )
 }

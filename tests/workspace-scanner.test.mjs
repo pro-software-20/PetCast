@@ -23,10 +23,16 @@ test('workspace scan returns only relative metadata and skips excluded directori
     await mkdir(path.join(root, '.git'), { recursive: true })
     await mkdir(path.join(root, 'node_modules', 'package'), { recursive: true })
     await mkdir(path.join(root, 'dist-client'), { recursive: true })
+    await mkdir(path.join(root, '.android-tools', 'cache'), { recursive: true })
+    await mkdir(path.join(root, '.gradle', 'cache'), { recursive: true })
+    await mkdir(path.join(root, '.venv', 'lib'), { recursive: true })
     await writeFile(path.join(root, 'src', 'app.ts'), 'PRIVATE_FILE_CONTENT')
     await writeFile(path.join(root, '.git', 'config'), 'secret')
     await writeFile(path.join(root, 'node_modules', 'package', 'index.js'), 'secret')
     await writeFile(path.join(root, 'dist-client', 'bundle.js'), 'secret')
+    await writeFile(path.join(root, '.android-tools', 'cache', 'tool.jar'), 'secret')
+    await writeFile(path.join(root, '.gradle', 'cache', 'artifact'), 'secret')
+    await writeFile(path.join(root, '.venv', 'lib', 'module.py'), 'secret')
 
     const result = await scanWorkspace(root)
     assert.deepEqual(result.entries, [
@@ -35,6 +41,20 @@ test('workspace scan returns only relative metadata and skips excluded directori
     ])
     assert.equal(JSON.stringify(result).includes(root), false)
     assert.equal(JSON.stringify(result).includes('PRIVATE_FILE_CONTENT'), false)
+  })
+})
+
+test('workspace scan warns when a large folder has no common project marker', async () => {
+  await withWorkspace(async (root) => {
+    await Promise.all(Array.from({ length: 200 }, (_, index) => (
+      writeFile(path.join(root, `file-${index}.txt`), 'x')
+    )))
+    const result = await scanWorkspace(root)
+    assert.ok(result.warnings.some(warning => warning.includes('项目根目录')))
+
+    await writeFile(path.join(root, 'package.json'), '{}')
+    const marked = await scanWorkspace(root)
+    assert.equal(marked.warnings.some(warning => warning.includes('项目根目录')), false)
   })
 })
 

@@ -1,4 +1,4 @@
-import type { TaskFileScope } from '../types/taskOrchestration'
+import type { TaskFileScope, WorkspacePathScope } from '../types/taskOrchestration'
 
 export const MAX_TASK_SCOPE_PATHS = 200
 
@@ -20,7 +20,7 @@ export const pathContains = (parent: string, child: string) => (
   parent === child || child.startsWith(`${parent}/`)
 )
 
-const normalizePathList = (paths: string[]) => {
+const normalizePathList = (paths: string[] = []) => {
   const result: string[] = []
   for (const path of paths) {
     const normalized = normalizeWorkspacePath(path)
@@ -31,22 +31,62 @@ const normalizePathList = (paths: string[]) => {
 
 export const normalizeTaskFileScope = (scope: TaskFileScope): TaskFileScope => {
   const inputs: TaskFileScope['inputs'] = []
+  const legacyWorkspaceInputs: string[] = []
   for (const input of scope.inputs) {
     if (input.kind === 'attachment') {
       inputs.push({ ...input })
       continue
     }
     const normalized = normalizeWorkspacePath(input.path)
-    if (normalized) inputs.push({ kind: 'workspace', path: normalized })
+    if (normalized) legacyWorkspaceInputs.push(normalized)
   }
 
   return {
     inputs,
+    readPaths: normalizePathList([...(scope.readPaths ?? []), ...legacyWorkspaceInputs]),
     allowedWritePaths: normalizePathList(scope.allowedWritePaths),
     forbiddenPaths: normalizePathList(scope.forbiddenPaths),
     outputPaths: normalizePathList(scope.outputPaths),
   }
 }
+
+export const normalizeWorkspacePathScope = (scope: WorkspacePathScope): WorkspacePathScope => ({
+  readPaths: normalizePathList(scope.readPaths),
+  allowedWritePaths: normalizePathList(scope.allowedWritePaths),
+  forbiddenPaths: normalizePathList(scope.forbiddenPaths),
+  outputPaths: normalizePathList(scope.outputPaths),
+})
+
+export const getTaskWorkspacePathScope = (scope: TaskFileScope): WorkspacePathScope => (
+  normalizeWorkspacePathScope({
+    readPaths: [
+      ...(scope.readPaths ?? []),
+      ...scope.inputs.flatMap(input => input.kind === 'workspace' ? [input.path] : []),
+    ],
+    allowedWritePaths: scope.allowedWritePaths,
+    forbiddenPaths: scope.forbiddenPaths,
+    outputPaths: scope.outputPaths,
+  })
+)
+
+export const applyWorkspacePathScope = (
+  current: TaskFileScope,
+  workspaceScope: WorkspacePathScope,
+): TaskFileScope => {
+  const normalized = normalizeWorkspacePathScope(workspaceScope)
+  return {
+    inputs: current.inputs.filter(input => input.kind === 'attachment').map(input => ({ ...input })),
+    readPaths: normalized.readPaths,
+    allowedWritePaths: normalized.allowedWritePaths,
+    forbiddenPaths: normalized.forbiddenPaths,
+    outputPaths: normalized.outputPaths,
+  }
+}
+
+export const workspacePathScopesEqual = (
+  left: WorkspacePathScope,
+  right: WorkspacePathScope,
+) => JSON.stringify(normalizeWorkspacePathScope(left)) === JSON.stringify(normalizeWorkspacePathScope(right))
 
 export function validateTaskPathScope(
   scope: TaskFileScope,
@@ -54,6 +94,7 @@ export function validateTaskPathScope(
 ): TaskPathScopeIssue[] {
   const issues: TaskPathScopeIssue[] = []
   const lists = [
+    ['readPaths', scope.readPaths ?? []],
     ['allowedWritePaths', scope.allowedWritePaths],
     ['forbiddenPaths', scope.forbiddenPaths],
     ['outputPaths', scope.outputPaths],

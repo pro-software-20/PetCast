@@ -8,8 +8,17 @@ import {
 
 const excludedDirectoryNames = new Set([
   '.git', '.hg', '.svn', '.pnpm', '.next', '.nuxt', '.cache',
-  'node_modules', 'coverage', 'build', 'out', 'target',
+  '.android-tools', '.gradle', '.idea', '.venv', 'venv', 'vendor',
+  '.pytest_cache', '.mypy_cache', '.ruff_cache', '__pycache__',
+  'node_modules', 'coverage', 'build', 'out', 'target', 'tmp', 'temp', 'logs',
 ])
+
+const projectRootMarkers = new Set([
+  '.git', 'package.json', 'pnpm-workspace.yaml', 'pyproject.toml',
+  'Cargo.toml', 'go.mod', 'pom.xml', 'build.gradle',
+])
+
+export const BROAD_WORKSPACE_WARNING_THRESHOLD = 200
 
 const isExcludedDirectory = (name: string) => (
   excludedDirectoryNames.has(name)
@@ -41,6 +50,7 @@ export async function scanWorkspace(
   const entries: WorkspaceEntry[] = []
   const warnings = new Set<string>()
   let truncated = false
+  let projectRootDetected = false
 
   const visit = async (directory: string, depth: number): Promise<void> => {
     throwIfAborted(options.signal)
@@ -60,6 +70,9 @@ export async function scanWorkspace(
       if (left.isDirectory() !== right.isDirectory()) return left.isDirectory() ? -1 : 1
       return left.name.localeCompare(right.name)
     })
+    if (depth === 1) {
+      projectRootDetected = children.some(child => projectRootMarkers.has(child.name))
+    }
 
     for (const child of children) {
       throwIfAborted(options.signal)
@@ -99,5 +112,8 @@ export async function scanWorkspace(
 
   await visit(root, 1)
   if (truncated && entries.length >= maxEntries) warnings.add(`工作区清单最多展示 ${maxEntries} 项。`)
+  if (!projectRootDetected && entries.length >= BROAD_WORKSPACE_WARNING_THRESHOLD) {
+    warnings.add('未检测到常见项目标识；当前文件夹可能是过大的上级目录，建议重新选择项目根目录。')
+  }
   return { entries, truncated, warnings: [...warnings] }
 }

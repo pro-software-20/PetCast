@@ -3,11 +3,14 @@ import test from 'node:test'
 import { loadTs } from './load-ts.mjs'
 
 const {
+  applyWorkspacePathScope,
+  getTaskWorkspacePathScope,
   MAX_TASK_SCOPE_PATHS,
   normalizeTaskFileScope,
   normalizeWorkspacePath,
   pathContains,
   validateTaskPathScope,
+  workspacePathScopesEqual,
 } = await loadTs('../src/orchestration/taskPathScope.ts')
 
 const scope = overrides => ({
@@ -33,7 +36,8 @@ test('normalizes safe relative paths and removes duplicates without mutating inp
   assert.deepEqual(original, before)
   assert.deepEqual(normalized.allowedWritePaths, ['src'])
   assert.deepEqual(normalized.outputPaths, ['src/result.ts'])
-  assert.deepEqual(normalized.inputs[1], { kind: 'workspace', path: 'src/App.tsx' })
+  assert.deepEqual(normalized.inputs, [{ kind: 'attachment', name: 'note.txt', type: 'text/plain', size: 2 }])
+  assert.deepEqual(normalized.readPaths, ['src/App.tsx'])
 })
 
 test('rejects absolute, traversal, empty and malformed workspace paths', () => {
@@ -62,4 +66,22 @@ test('rejects duplicates and path list limits', () => {
     outputPaths: Array.from({ length: MAX_TASK_SCOPE_PATHS + 1 }, (_, index) => `out/${index}.txt`),
   }))
   assert.ok(oversized.some(issue => issue.path === 'outputPaths'))
+})
+
+test('directory read scopes cover descendants and preserve attachments when applied', () => {
+  const taskScope = {
+    inputs: [{ kind: 'attachment', name: 'brief.pdf', type: 'application/pdf', size: 10 }],
+    allowedWritePaths: [], forbiddenPaths: [], outputPaths: [],
+  }
+  const workspaceScope = {
+    readPaths: ['src'],
+    allowedWritePaths: ['src/generated'],
+    forbiddenPaths: ['src/private'],
+    outputPaths: ['src/generated/result.ts'],
+  }
+  const applied = applyWorkspacePathScope(taskScope, workspaceScope)
+  assert.deepEqual(applied.inputs, taskScope.inputs)
+  assert.deepEqual(getTaskWorkspacePathScope(applied), workspaceScope)
+  assert.equal(pathContains(applied.readPaths[0], 'src/components/App.tsx'), true)
+  assert.equal(workspacePathScopesEqual(getTaskWorkspacePathScope(applied), workspaceScope), true)
 })

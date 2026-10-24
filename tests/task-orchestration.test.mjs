@@ -251,3 +251,31 @@ test('rejects malformed workspace identities and unauthorized outputs', () => {
   })
   assert.ok(issueCodes(forbidden).includes('INVALID_PATH'))
 })
+
+test('validates optional workspace defaults while keeping legacy plans valid', () => {
+  assert.equal(validateTaskPlan(plan()).ok, true)
+  const value = plan({
+    workspace: {
+      id: 'd'.repeat(64),
+      displayName: 'Project',
+      defaultScope: {
+        readPaths: ['src'],
+        allowedWritePaths: ['src'],
+        forbiddenPaths: ['src/private'],
+        outputPaths: ['src/generated/result.ts'],
+      },
+    },
+    tasks: [task({
+      files: {
+        inputs: [{ kind: 'workspace', path: 'src/App.tsx' }],
+        readPaths: ['src'],
+        allowedWritePaths: ['src'],
+        forbiddenPaths: ['src/private'],
+        outputPaths: ['src/generated/result.ts'],
+      },
+    })],
+  })
+  assert.equal(validateTaskPlan(value).ok, true)
+  value.workspace.defaultScope.outputPaths = ['docs/result.md']
+  assert.ok(issueCodes(value).includes('INVALID_PATH'))
+})

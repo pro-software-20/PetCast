@@ -222,10 +222,14 @@ const validateTask = (
     pushIssue(issues, 'INVALID_SHAPE', `${path}.files`, '文件范围必须是对象。')
   } else {
     validateInputFiles(value.files.inputs, `${path}.files.inputs`, issues)
+    if (value.files.readPaths !== undefined) {
+      validatePathArray(value.files.readPaths, `${path}.files.readPaths`, issues)
+    }
     validatePathArray(value.files.allowedWritePaths, `${path}.files.allowedWritePaths`, issues)
     validatePathArray(value.files.forbiddenPaths, `${path}.files.forbiddenPaths`, issues)
     validatePathArray(value.files.outputPaths, `${path}.files.outputPaths`, issues)
     if (Array.isArray(value.files.inputs)
+      && (value.files.readPaths === undefined || Array.isArray(value.files.readPaths))
       && Array.isArray(value.files.allowedWritePaths)
       && Array.isArray(value.files.forbiddenPaths)
       && Array.isArray(value.files.outputPaths)) {
@@ -316,6 +320,35 @@ export function validateTaskPlan(value: unknown): TaskPlanValidationResult {
         pushIssue(issues, 'INVALID_SHAPE', 'workspace.id', '工作区标识无效。')
       }
       validateRequiredString(value.workspace.displayName, 'workspace.displayName', issues)
+      if (value.workspace.defaultScope !== undefined) {
+        if (!isRecord(value.workspace.defaultScope)) {
+          pushIssue(issues, 'INVALID_SHAPE', 'workspace.defaultScope', '工作区默认授权必须是对象。')
+        } else {
+          const defaultScope = value.workspace.defaultScope
+          validatePathArray(defaultScope.readPaths, 'workspace.defaultScope.readPaths', issues)
+          validatePathArray(defaultScope.allowedWritePaths, 'workspace.defaultScope.allowedWritePaths', issues)
+          validatePathArray(defaultScope.forbiddenPaths, 'workspace.defaultScope.forbiddenPaths', issues)
+          validatePathArray(defaultScope.outputPaths, 'workspace.defaultScope.outputPaths', issues)
+          if (Array.isArray(defaultScope.readPaths)
+            && Array.isArray(defaultScope.allowedWritePaths)
+            && Array.isArray(defaultScope.forbiddenPaths)
+            && Array.isArray(defaultScope.outputPaths)) {
+            const scopeIssues = validateTaskPathScope({
+              inputs: [],
+              readPaths: defaultScope.readPaths as string[],
+              allowedWritePaths: defaultScope.allowedWritePaths as string[],
+              forbiddenPaths: defaultScope.forbiddenPaths as string[],
+              outputPaths: defaultScope.outputPaths as string[],
+            }, { requireAuthorizedOutputs: true })
+            scopeIssues.forEach(issue => pushIssue(
+              issues,
+              'INVALID_PATH',
+              `workspace.defaultScope.${issue.path}`,
+              issue.message,
+            ))
+          }
+        }
+      }
     }
   }
 

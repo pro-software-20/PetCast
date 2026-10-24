@@ -1,28 +1,30 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import type { WorkspaceSnapshot } from '../../electron/workspaceProtocol'
 import {
+  applyWorkspacePathScope,
+  getTaskWorkspacePathScope,
   normalizeTaskFileScope,
-  normalizeWorkspacePath,
   validateTaskPathScope,
+  workspacePathScopesEqual,
 } from '../orchestration/taskPathScope'
 import { recommendTaskProvider } from '../orchestration/taskRecommendation'
 import type { EditableTaskDefinition } from '../orchestration/taskSession'
-import type { ProviderProfile, TaskNode } from '../types/taskOrchestration'
+import type { ProviderProfile, TaskNode, WorkspacePathScope } from '../types/taskOrchestration'
+import { WorkspaceScopePicker } from './WorkspaceScopePicker'
+import { WorkspaceScopeSummary } from './WorkspaceScopeSummary'
 
 interface TaskDefinitionEditorProps {
   task: TaskNode
   taskType: string
   providers: ProviderProfile[]
   workspace?: WorkspaceSnapshot
+  defaultScope?: WorkspacePathScope
   disabled: boolean
   onSave: (task: EditableTaskDefinition) => boolean
 }
 
-type ScopeKey = 'inputs' | 'allowedWritePaths' | 'forbiddenPaths' | 'outputPaths'
-
 const lines = (value: string) => value.split(/\r?\n/).map(item => item.trim()).filter(Boolean)
 const textList = (value: string[]) => value.join('\n')
-
 const unique = (values: string[]) => [...new Set(values)]
 
 export function TaskDefinitionEditor({
@@ -30,6 +32,7 @@ export function TaskDefinitionEditor({
   taskType,
   providers,
   workspace,
+  defaultScope,
   disabled,
   onSave,
 }: TaskDefinitionEditorProps) {
@@ -40,16 +43,11 @@ export function TaskDefinitionEditor({
   const [deliverables, setDeliverables] = useState(textList(task.expectedDeliverables))
   const [checks, setChecks] = useState(textList(task.acceptanceChecks))
   const [files, setFiles] = useState(() => structuredClone(task.files))
-  const [search, setSearch] = useState('')
-  const [manualOutput, setManualOutput] = useState('')
+  const [scopeOpen, setScopeOpen] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
 
-  const visibleEntries = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase()
-    return (workspace?.entries ?? [])
-      .filter(entry => !query || entry.path.toLocaleLowerCase().includes(query))
-      .slice(0, 120)
-  }, [search, workspace])
+  const currentScope = getTaskWorkspacePathScope(files)
+  const inheritsDefault = Boolean(defaultScope && workspacePathScopesEqual(currentScope, defaultScope))
 
   const reset = () => {
     setTitle(task.title)
@@ -58,49 +56,13 @@ export function TaskDefinitionEditor({
     setDeliverables(textList(task.expectedDeliverables))
     setChecks(textList(task.acceptanceChecks))
     setFiles(structuredClone(task.files))
-    setSearch('')
-    setManualOutput('')
+    setScopeOpen(false)
     setErrors([])
   }
 
   const cancel = () => {
     reset()
     setEditing(false)
-  }
-
-  const hasPath = (key: ScopeKey, path: string) => key === 'inputs'
-    ? files.inputs.some(input => input.kind === 'workspace' && input.path === path)
-    : files[key].includes(path)
-
-  const togglePath = (key: ScopeKey, path: string) => {
-    if (key === 'inputs') {
-      const attachments = files.inputs.filter(input => input.kind === 'attachment')
-      const workspacePaths = files.inputs
-        .filter(input => input.kind === 'workspace')
-        .map(input => input.path)
-      const next = workspacePaths.includes(path)
-        ? workspacePaths.filter(candidate => candidate !== path)
-        : [...workspacePaths, path]
-      setFiles({ ...files, inputs: [...attachments, ...next.map(candidate => ({ kind: 'workspace' as const, path: candidate }))] })
-      return
-    }
-    setFiles({
-      ...files,
-      [key]: files[key].includes(path)
-        ? files[key].filter(candidate => candidate !== path)
-        : [...files[key], path],
-    })
-  }
-
-  const addManualOutput = () => {
-    const normalized = normalizeWorkspacePath(manualOutput)
-    if (!normalized) {
-      setErrors(['输出位置必须是安全的工作区相对路径。'])
-      return
-    }
-    setFiles({ ...files, outputPaths: unique([...files.outputPaths, normalized]) })
-    setManualOutput('')
-    setErrors([])
   }
 
   const save = () => {
@@ -114,15 +76,13 @@ export function TaskDefinitionEditor({
     if (nextDeliverables.length === 0) nextErrors.push('至少需要一项交付物。')
     if (nextChecks.length === 0) nextErrors.push('至少需要一项验收标准。')
     nextErrors.push(...validateTaskPathScope(nextFiles, { requireAuthorizedOutputs: Boolean(workspace) }).map(issue => issue.message))
-    const knownEntries = new Set((workspace?.entries ?? []).map(entry => entry.path))
-    const knownFiles = new Set((workspace?.entries ?? []).filter(entry => entry.kind === 'file').map(entry => entry.path))
-    const unknownInputPath = nextFiles.inputs.flatMap(input => (
-      input.kind === 'workspace' && !knownFiles.has(input.path) ? [input.path] : []
-    ))[0]
-    if (unknownInputPath && workspace) nextErrors.push(`输入文件不在当前工作区清单中：${unknownInputPath}`)
     if (workspace) {
-      const unknownScopePath = [...nextFiles.allowedWritePaths, ...nextFiles.forbiddenPaths]
-        .find(candidate => !knownEntries.has(candidate))
+      const knownEntries = new Set(workspace.entries.map(entry => entry.path))
+      const unknownScopePath = [
+        ...(nextFiles.readPaths ?? []),
+        ...nextFiles.allowedWritePaths,
+        ...nextFiles.forbiddenPaths,
+      ].find(candidate => !knownEntries.has(candidate))
       if (unknownScopePath) nextErrors.push(`文件授权范围不在当前工作区清单中：${unknownScopePath}`)
     }
     if (nextErrors.length > 0) {
@@ -130,12 +90,16 @@ export function TaskDefinitionEditor({
       return
     }
 
+    const recommendationFiles = [
+      ...nextFiles.inputs,
+      ...(nextFiles.readPaths ?? []).map(path => ({ kind: 'workspace' as const, path })),
+    ]
     const recommendation = recommendTaskProvider({
       title: title.trim(),
       description: description.trim(),
       prompt: prompt.trim(),
       globalTaskType: taskType,
-      files: nextFiles.inputs,
+      files: recommendationFiles,
       availableProviders: providers,
     })
     const saved = onSave({
@@ -155,12 +119,7 @@ export function TaskDefinitionEditor({
   }
 
   if (!editing) return (
-    <button
-      type="button"
-      className="task-definition-edit"
-      disabled={disabled}
-      onClick={() => { reset(); setEditing(true) }}
-    >
+    <button type="button" className="task-definition-edit" disabled={disabled} onClick={() => { reset(); setEditing(true) }}>
       {disabled ? '任务已锁定' : '编辑任务与文件授权'}
     </button>
   )
@@ -175,31 +134,16 @@ export function TaskDefinitionEditor({
       <label>验收标准（每行一项）<textarea value={checks} rows={3} onChange={event => setChecks(event.target.value)} /></label>
 
       <div className="task-workspace-scope-editor">
-        <strong>逐任务文件授权</strong>
+        <div className="task-scope-heading">
+          <strong>任务文件授权</strong>
+          {defaultScope && <span>{inheritsDefault ? '继承全局默认' : '已单独调整'}</span>}
+        </div>
+        <WorkspaceScopeSummary scope={currentScope} compact />
         {workspace
-          ? <>
-            <input
-              value={search}
-              onChange={event => setSearch(event.target.value)}
-              placeholder="搜索工作区相对路径"
-              aria-label="搜索工作区路径"
-            />
-            <div className="task-workspace-entry-list">
-              {visibleEntries.map(entry => (
-                <div key={`${entry.kind}:${entry.path}`}>
-                  <span title={entry.path}>{entry.kind === 'directory' ? '目录' : '文件'} · {entry.path}</span>
-                  {entry.kind === 'file' && <button type="button" className={hasPath('inputs', entry.path) ? 'is-selected' : ''} onClick={() => togglePath('inputs', entry.path)}>输入</button>}
-                  <button type="button" className={hasPath('allowedWritePaths', entry.path) ? 'is-selected' : ''} onClick={() => togglePath('allowedWritePaths', entry.path)}>可改</button>
-                  <button type="button" className={hasPath('forbiddenPaths', entry.path) ? 'is-selected' : ''} onClick={() => togglePath('forbiddenPaths', entry.path)}>禁止</button>
-                  <button type="button" className={hasPath('outputPaths', entry.path) ? 'is-selected' : ''} onClick={() => togglePath('outputPaths', entry.path)}>输出</button>
-                </div>
-              ))}
-            </div>
-            <div className="task-manual-output">
-              <input value={manualOutput} onChange={event => setManualOutput(event.target.value)} placeholder="新输出路径，例如 reports/result.md" />
-              <button type="button" onClick={addManualOutput}>添加输出</button>
-            </div>
-          </>
+          ? <div className="task-scope-actions">
+            <button type="button" onClick={() => setScopeOpen(true)}>单独调整</button>
+            {defaultScope && !inheritsDefault && <button type="button" onClick={() => setFiles(applyWorkspacePathScope(files, defaultScope))}>恢复全局默认</button>}
+          </div>
           : <p>请先在任务方案顶部选择项目文件夹；当前仍可编辑任务文字。</p>}
       </div>
 
@@ -208,6 +152,19 @@ export function TaskDefinitionEditor({
         <button type="button" className="is-primary" onClick={save}>保存并重新推荐 AI</button>
         <button type="button" onClick={cancel}>取消编辑</button>
       </div>
+
+      {scopeOpen && workspace && (
+        <WorkspaceScopePicker
+          title={`调整“${title.trim() || task.title}”的文件范围`}
+          workspace={workspace}
+          initialScope={currentScope}
+          onSave={(scope) => {
+            setFiles(applyWorkspacePathScope(files, scope))
+            setScopeOpen(false)
+          }}
+          onClose={() => setScopeOpen(false)}
+        />
+      )}
     </section>
   )
 }
