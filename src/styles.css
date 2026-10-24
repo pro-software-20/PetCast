@@ -367,6 +367,75 @@ button { font: inherit; }
 .task-plan-assignment select { min-width: 0; padding: 5px 7px; border: 1px solid rgba(82,145,151,.38); border-radius: 7px; color: #356672; background: #fff; font: inherit; font-size: 8px; outline: none; }
 .task-plan-assignment select:focus { border-color: #4f9da3; box-shadow: 0 0 0 2px rgba(79,157,163,.14); }
 .task-plan-assignment small { color: #7b999a; font-size: 7px; white-space: nowrap; }
+.task-provider-recommendation { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding-top: 5px; border-top: 1px dashed rgba(82,145,151,.24); }
+.task-provider-recommendation strong { color: #3f7479; font-size: 8px; }
+.task-provider-recommendation em { padding: 2px 5px; border-radius: 99px; color: #8a6439; background: #f8dfae; font-size: 7px; font-style: normal; font-weight: 900; }
+.task-provider-recommendation p { flex-basis: 100%; margin: 0; color: #67898c; font-size: 7px; line-height: 1.45; }
+.task-workspace-selector { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 9px; padding: 8px; border: 1px solid rgba(82,145,151,.25); border-radius: 9px; background: rgba(239,250,247,.88); }
+.task-workspace-selector > div:first-child { display: grid; flex: 1 1 180px; gap: 2px; color: #527d82; font-size: 8px; }
+.task-workspace-selector small, .task-workspace-selector p { flex-basis: 100%; margin: 0; color: #719193; font-size: 7px; line-height: 1.4; }
+.task-workspace-selector button, .task-definition-edit, .task-definition-actions button, .task-workspace-entry-list button, .task-manual-output button { padding: 5px 7px; border: 1px solid rgba(82,145,151,.34); border-radius: 7px; color: #44747b; background: #fff; font: inherit; font-size: 7px; font-weight: 800; cursor: pointer; }
+.task-workspace-selector button:disabled, .task-definition-edit:disabled { cursor: not-allowed; opacity: .55; }
+.task-workspace-switch-warning { display: flex; flex: 1 1 100%; flex-wrap: wrap; align-items: center; gap: 5px; padding: 6px; border-radius: 7px; color: #775932; background: #fff0cf; font-size: 7px; }
+.task-workspace-switch-warning strong { flex: 1 1 180px; }
+.task-definition-edit { margin-top: 8px; }
+.task-definition-editor { display: grid; gap: 7px; margin-top: 8px; padding: 9px; border: 1px solid rgba(82,145,151,.3); border-radius: 9px; background: rgba(239,249,246,.94); }
+.task-definition-editor h3 { margin: 0; color: #42757c; font-size: 9px; }
+.task-definition-editor > label { display: grid; gap: 3px; color: #507d82; font-size: 8px; font-weight: 800; }
+.task-definition-editor input, .task-definition-editor textarea { width: 100%; padding: 6px 7px; border: 1px solid rgba(82,145,151,.3); border-radius: 7px; color: #3f6b72; background: #fff; font: inherit; font-size: 8px; line-height: 1.45; }
+.task-definition-editor textarea { resize: vertical; }
+.task-workspace-scope-editor { display: grid; gap: 5px; }
+.task-workspace-scope-editor > strong { color: #4a7a80; font-size: 8px; }
+.task-workspace-scope-editor > p { margin: 0; color: #718f91; font-size: 7px; }
+.task-workspace-entry-list { display: grid; gap: 3px; max-height: 180px; overflow: auto; padding: 4px; border-radius: 7px; background: rgba(216,238,233,.62); }
+.task-workspace-entry-list > div { display: flex; align-items: center; gap: 3px; min-width: 0; }
+.task-workspace-entry-list span { flex: 1; overflow: hidden; color: #577f83; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.task-workspace-entry-list button.is-selected { color: #fff; border-color: #4f9895; background: #5ca7a2; }
+.task-manual-output { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; }
+.task-definition-errors { margin: 0; padding: 6px 6px 6px 20px; border-radius: 7px; color: #8b4d45; background: #ffe9e4; font-size: 7px; line-height: 1.45; }
+.task-definition-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.task-definition-actions button.is-primary { color: #fff; border-color: #4f9895; background: #5ca7a2; }
+
+.task-global-scope { display: grid; gap: 7px; margin-top: 8px; padding: 9px; border: 1px solid rgba(82,145,151,.28); border-radius: 9px; background: rgba(240,250,247,.92); }
+.task-global-scope > header { display: flex; align-items: center; gap: 8px; }
+.task-global-scope > header > div { display: grid; flex: 1; gap: 2px; color: #527d82; font-size: 7px; }
+.task-global-scope > header strong { font-size: 9px; }
+.task-global-scope button, .task-scope-actions button { padding: 5px 7px; border: 1px solid rgba(82,145,151,.34); border-radius: 7px; color: #44747b; background: #fff; font: inherit; font-size: 7px; font-weight: 800; cursor: pointer; }
+.task-global-scope button:disabled, .task-scope-actions button:disabled { cursor: not-allowed; opacity: .55; }
+.task-global-scope-apply { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; color: #765f37; font-size: 7px; }
+.task-global-scope-apply span { flex: 1 1 150px; }
+.workspace-scope-summary { color: #567e82; font-size: 7px; }
+.workspace-scope-summary > strong { display: block; margin-bottom: 4px; color: #42757c; }
+.workspace-scope-summary dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin: 0; }
+.workspace-scope-summary dl > div { min-width: 0; padding: 5px 6px; border-radius: 6px; background: rgba(219,239,235,.6); }
+.workspace-scope-summary dt { margin-bottom: 2px; font-weight: 800; }
+.workspace-scope-summary dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-scope-summary.is-compact { margin-top: 6px; }
+.task-scope-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: #4a7a80; font-size: 8px; }
+.task-scope-heading span { padding: 2px 5px; border-radius: 99px; color: #4d8582; background: #dcefeb; font-size: 7px; }
+.task-scope-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.workspace-scope-overlay { position: fixed; z-index: 10000; inset: 8px; display: grid; place-items: center; padding: 8px; background: rgba(28,57,61,.36); backdrop-filter: blur(2px); }
+.workspace-scope-dialog { display: grid; grid-template-rows: auto auto auto auto minmax(120px, 1fr) auto auto auto; gap: 7px; width: min(680px, 100%); max-height: 100%; padding: 10px; overflow: hidden; border: 1px solid rgba(69,130,136,.38); border-radius: 12px; color: #416f75; background: #f4fcfa; box-shadow: 0 12px 30px rgba(39,76,82,.24); }
+.workspace-scope-dialog > header { display: flex; align-items: center; gap: 8px; }
+.workspace-scope-dialog > header > div { flex: 1; }
+.workspace-scope-dialog h3 { margin: 1px 0 0; font-size: 12px; }
+.workspace-scope-dialog header small { color: #739195; font-size: 7px; }
+.workspace-scope-dialog button { padding: 5px 7px; border: 1px solid rgba(82,145,151,.34); border-radius: 7px; color: #44747b; background: #fff; font: inherit; font-size: 7px; font-weight: 800; cursor: pointer; }
+.workspace-scope-tabs, .workspace-scope-toolbar, .workspace-manual-output, .workspace-scope-dialog > footer { display: flex; flex-wrap: wrap; gap: 5px; }
+.workspace-scope-tabs button.is-active, .workspace-scope-dialog button.is-primary { color: #fff; border-color: #4f9895; background: #5ca7a2; }
+.workspace-scope-toolbar input, .workspace-manual-output input { flex: 1 1 180px; min-width: 0; padding: 6px 7px; border: 1px solid rgba(82,145,151,.3); border-radius: 7px; color: #3f6b72; background: #fff; font: inherit; font-size: 8px; }
+.workspace-tree { min-height: 120px; overflow: auto; padding: 5px; border-radius: 8px; background: rgba(216,238,233,.62); }
+.workspace-tree > p { margin: 8px; color: #718f91; font-size: 8px; }
+.workspace-tree-row { display: flex; align-items: center; min-height: 25px; border-radius: 5px; }
+.workspace-tree-row:hover { background: rgba(255,255,255,.65); }
+.workspace-tree-toggle { flex: 0 0 22px; padding: 2px !important; border: 0 !important; background: transparent !important; }
+.workspace-tree-spacer { flex: 0 0 22px; }
+.workspace-tree-row label { display: flex; flex: 1; align-items: center; gap: 5px; min-width: 0; cursor: pointer; font-size: 8px; }
+.workspace-tree-row label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-tree-row label small { margin-left: auto; color: #7a9999; font-size: 6px; }
+.workspace-tree-row input:disabled + span { opacity: .7; }
+.workspace-scope-errors { max-height: 60px; margin: 0; padding: 6px 6px 6px 20px; overflow: auto; border-radius: 7px; color: #8b4d45; background: #ffe9e4; font-size: 7px; }
 .task-plan-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin: 8px 0 0; }
 .task-plan-meta div { min-width: 0; padding: 6px 7px; border: 1px solid rgba(82,145,151,.16); border-radius: 7px; background: rgba(238,249,245,.8); }
 .task-plan-meta dt { color: #7a999a; font-size: 7px; }

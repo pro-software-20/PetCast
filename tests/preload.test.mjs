@@ -29,10 +29,14 @@ test('preload runs in a sandbox-style CommonJS environment and exposes only name
   bridge.cancelCodexUsage('request-1')
   const promptInput = { prompt: 'test', taskType: 'general', files: [] }
   await bridge.optimizeTaskPrompt(promptInput)
+  await bridge.selectTaskWorkspace('workspace-1')
+  bridge.cancelTaskWorkspace('workspace-1')
   assert.deepEqual(calls, [
     ['codex:read-usage', 'request-1'],
     ['codex:cancel-usage', 'request-1'],
     ['prompt:optimize', promptInput],
+    ['workspace:select', 'workspace-1'],
+    ['workspace:cancel', 'workspace-1'],
   ])
   assert.equal(typeof bridge.loadGameSave, 'function')
   assert.equal(typeof bridge.beginDrag, 'function')

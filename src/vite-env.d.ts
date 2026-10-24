@@ -7,6 +7,10 @@ interface Window {
     optimizeTaskPrompt: (
       input: import('../electron/promptOptimizationProtocol').PromptOptimizationRequest,
     ) => Promise<import('../electron/promptOptimizationProtocol').PromptOptimizationResult>
+    selectTaskWorkspace: (
+      requestId: string,
+    ) => Promise<import('../electron/workspaceProtocol').WorkspaceSelectionResult>
+    cancelTaskWorkspace: (requestId: string) => void
     beginDrag: () => void
     moveDrag: () => void
     endDrag: () => void

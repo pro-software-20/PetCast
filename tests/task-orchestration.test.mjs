@@ -205,3 +205,77 @@ test('rejects missing required task content and acceptance criteria', () => {
   assert.equal(validateTaskPlan(value).ok, false)
   assert.equal(isTaskPlan(value), false)
 })
+
+test('accepts a workspace-scoped plan with authorized relative outputs', () => {
+  const value = plan({
+    workspace: { id: 'a'.repeat(64), displayName: 'PetCast' },
+    tasks: [task({
+      files: {
+        inputs: [{ kind: 'workspace', path: 'src/App.tsx' }],
+        allowedWritePaths: ['src'],
+        forbiddenPaths: ['src/generated/private'],
+        outputPaths: ['src/generated/result.ts'],
+      },
+    })],
+  })
+  assert.equal(validateTaskPlan(value).ok, true)
+})
+
+test('rejects malformed workspace identities and unauthorized outputs', () => {
+  const malformed = plan({ workspace: { id: 'absolute-C-drive', displayName: '' } })
+  assert.ok(issueCodes(malformed).includes('INVALID_SHAPE'))
+
+  const unauthorized = plan({
+    workspace: { id: 'b'.repeat(64), displayName: 'Project' },
+    tasks: [task({
+      files: {
+        inputs: [],
+        allowedWritePaths: ['src'],
+        forbiddenPaths: ['src/private'],
+        outputPaths: ['docs/result.md'],
+      },
+    })],
+  })
+  assert.ok(issueCodes(unauthorized).includes('INVALID_PATH'))
+
+  const forbidden = plan({
+    workspace: { id: 'c'.repeat(64), displayName: 'Project' },
+    tasks: [task({
+      files: {
+        inputs: [],
+        allowedWritePaths: ['src'],
+        forbiddenPaths: ['src/private'],
+        outputPaths: ['src/private/result.ts'],
+      },
+    })],
+  })
+  assert.ok(issueCodes(forbidden).includes('INVALID_PATH'))
+})
+
+test('validates optional workspace defaults while keeping legacy plans valid', () => {
+  assert.equal(validateTaskPlan(plan()).ok, true)
+  const value = plan({
+    workspace: {
+      id: 'd'.repeat(64),
+      displayName: 'Project',
+      defaultScope: {
+        readPaths: ['src'],
+        allowedWritePaths: ['src'],
+        forbiddenPaths: ['src/private'],
+        outputPaths: ['src/generated/result.ts'],
+      },
+    },
+    tasks: [task({
+      files: {
+        inputs: [{ kind: 'workspace', path: 'src/App.tsx' }],
+        readPaths: ['src'],
+        allowedWritePaths: ['src'],
+        forbiddenPaths: ['src/private'],
+        outputPaths: ['src/generated/result.ts'],
+      },
+    })],
+  })
+  assert.equal(validateTaskPlan(value).ok, true)
+  value.workspace.defaultScope.outputPaths = ['docs/result.md']
+  assert.ok(issueCodes(value).includes('INVALID_PATH'))
+})

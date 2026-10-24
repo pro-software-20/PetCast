@@ -5,6 +5,7 @@ import path from 'node:path'
 import { registerCodexUsageIpc } from './codexIpc.js'
 import { registerUsageHistoryIpc } from './historyIpc.js'
 import { registerPromptOptimizationIpc } from './promptOptimizationIpc.js'
+import { registerWorkspaceIpc } from './workspaceIpc.js'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
 const COMPACT = { width: 300, height: 340 }
@@ -82,6 +83,7 @@ const createWindow = () => {
         `typeof window.petcast?.readCodexUsage === 'function'
           && typeof window.petcast?.cancelCodexUsage === 'function'
           && typeof window.petcast?.optimizeTaskPrompt === 'function'
+          && typeof window.petcast?.selectTaskWorkspace === 'function'
           && typeof window.petcast?.loadGameSave === 'function'`,
       ).then(async ready => {
         if (!ready) { console.error('PETCAST_PRELOAD_FAILED'); app.exit(1); return }
@@ -136,6 +138,7 @@ if (ownsInstance) app.whenReady().then(() => {
     rendererUrl,
     process.env.PETCAST_PROMPT_API_URL ?? '',
   )
+  registerWorkspaceIpc(() => mainWindow, app.getPath('userData'), rendererUrl)
   const savePath = path.join(app.getPath('userData'), 'petcast-save.json')
 
   ipcMain.handle('storage:load', async () => {

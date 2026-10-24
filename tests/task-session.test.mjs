@@ -3,6 +3,7 @@ import test from 'node:test'
 import { loadTs } from './load-ts.mjs'
 
 const {
+  canEditTaskPlan,
   createTaskSession,
   updateTaskSession,
 } = await loadTs('../src/orchestration/taskSession.ts')
@@ -243,6 +244,31 @@ test('blocks invalid starts and provider changes after a task starts', () => {
   assert.equal(updateTaskSession(started, { type: 'assign-provider', taskId: 'task-1', providerId: 'doubao' }, DONE).ok, false)
 })
 
+test('manual provider changes preserve the static recommendation record', () => {
+  const recommendationPlan = plan()
+  recommendationPlan.tasks[0].providerRecommendation = {
+    category: 'planning',
+    requiredCapabilities: ['planning'],
+    confidence: 'high',
+    reason: '需求分析适合结构化规划。',
+  }
+  const created = createTaskSession({ ...input(), plan: recommendationPlan }, NOW)
+  assert.equal(created.ok, true)
+
+  const assigned = mustUpdate(created.session, {
+    type: 'assign-provider',
+    taskId: 'task-1',
+    providerId: 'doubao',
+  })
+
+  assert.equal(assigned.runs[0].assignedProviderId, 'doubao')
+  assert.deepEqual(
+    assigned.plan.tasks[0].providerRecommendation,
+    recommendationPlan.tasks[0].providerRecommendation,
+  )
+  assert.equal(assigned.plan.tasks[0].recommendedProviderId, 'deepseek')
+})
+
 test('requires pasted output and passed checks before unlocking dependencies', () => {
   let session = mustUpdate(mustCreate(), { type: 'start', taskId: 'task-1' })
   assert.equal(updateTaskSession(session, { type: 'submit-result', taskId: 'task-1' }, DONE).ok, false)
@@ -397,4 +423,217 @@ test('completes final verification and generates a summary-only Markdown report'
   assert.equal(report.markdown.includes('FULL_PRIVATE_RESULT'), false)
   assert.equal(report.markdown.includes('SECOND_FULL_PRIVATE_RESULT'), false)
   assert.match(report.fileName, /\.md$/)
+})
+
+test('sets workspace context and clears old authorization only when the workspace changes', () => {
+  const workspaceA = { id: 'a'.repeat(64), displayName: 'Project A' }
+  const workspaceB = { id: 'b'.repeat(64), displayName: 'Project B' }
+  let session = mustUpdate(mustCreate(), { type: 'set-workspace', workspace: workspaceA })
+  const task = session.plan.tasks[0]
+  session = mustUpdate(session, {
+    type: 'update-task-definition',
+    taskId: task.id,
+    task: {
+      title: task.title,
+      description: task.description,
+      prompt: task.prompt,
+      files: {
+        inputs: [{ kind: 'workspace', path: 'src/App.tsx' }],
+        allowedWritePaths: ['src'],
+        forbiddenPaths: ['src/private'],
+        outputPaths: ['src/result.ts'],
+      },
+      expectedDeliverables: task.expectedDeliverables,
+      acceptanceChecks: task.acceptanceChecks,
+      recommendedProviderId: task.recommendedProviderId,
+      providerRecommendation: task.providerRecommendation,
+    },
+  })
+
+  const same = mustUpdate(session, { type: 'set-workspace', workspace: workspaceA })
+  assert.deepEqual(same.plan.tasks[0].files, session.plan.tasks[0].files)
+
+  const changed = mustUpdate(same, { type: 'set-workspace', workspace: workspaceB })
+  assert.deepEqual(changed.plan.tasks[0].files, {
+    inputs: [], readPaths: [], allowedWritePaths: [], forbiddenPaths: [], outputPaths: [],
+  })
+  assert.deepEqual(changed.plan.workspace, workspaceB)
+  assert.equal(validateTaskSession(changed).ok, true)
+})
+
+test('updates an unstarted task, refreshes checks and follows a new recommendation', () => {
+  const original = mustCreate()
+  const before = structuredClone(original)
+  const task = original.plan.tasks[0]
+  const recommendation = {
+    category: 'coding',
+    requiredCapabilities: ['coding'],
+    confidence: 'high',
+    reason: 'The edited task now requires code changes.',
+  }
+  const updated = mustUpdate(original, {
+    type: 'update-task-definition',
+    taskId: task.id,
+    task: {
+      title: 'Implement parser',
+      description: 'Implement the validated parser design.',
+      prompt: 'Edit the parser and run its tests.',
+      files: task.files,
+      expectedDeliverables: ['Parser implementation'],
+      acceptanceChecks: ['Typecheck passes', 'Parser tests pass'],
+      recommendedProviderId: 'codex',
+      providerRecommendation: recommendation,
+    },
+  })
+
+  assert.deepEqual(original, before)
+  assert.equal(updated.plan.tasks[0].title, 'Implement parser')
+  assert.equal(updated.plan.tasks[0].recommendedProviderId, 'codex')
+  assert.deepEqual(updated.plan.tasks[0].providerRecommendation, recommendation)
+  assert.equal(updated.runs[0].assignedProviderId, 'codex')
+  assert.deepEqual(updated.runs[0].draft.verification.map(item => item.label), [
+    'Typecheck passes', 'Parser tests pass',
+  ])
+})
+
+test('task editing preserves an explicit provider override and locks after execution starts', () => {
+  let session = mustUpdate(mustCreate(), {
+    type: 'assign-provider', taskId: 'task-1', providerId: 'doubao',
+  })
+  const task = session.plan.tasks[0]
+  session = mustUpdate(session, {
+    type: 'update-task-definition',
+    taskId: task.id,
+    task: {
+      title: task.title,
+      description: task.description,
+      prompt: `${task.prompt} Add tests.`,
+      files: task.files,
+      expectedDeliverables: task.expectedDeliverables,
+      acceptanceChecks: task.acceptanceChecks,
+      recommendedProviderId: 'codex',
+      providerRecommendation: {
+        category: 'testing', requiredCapabilities: ['testing'], confidence: 'high', reason: 'Tests need execution.',
+      },
+    },
+  })
+  assert.equal(session.runs[0].assignedProviderId, 'doubao')
+  assert.equal(canEditTaskPlan(session), true)
+
+  const started = mustUpdate(session, { type: 'start', taskId: 'task-1' })
+  assert.equal(canEditTaskPlan(started), false)
+  assert.equal(updateTaskSession(started, {
+    type: 'set-workspace',
+    workspace: { id: 'c'.repeat(64), displayName: 'Locked' },
+  }, DONE).code, 'INVALID_TRANSITION')
+  assert.equal(updateTaskSession(started, {
+    type: 'update-task-definition', taskId: task.id, task,
+  }, DONE).code, 'INVALID_TRANSITION')
+})
+
+test('manual task prompts include only display name and authorized relative paths', () => {
+  const workspacePlan = plan()
+  workspacePlan.workspace = { id: 'd'.repeat(64), displayName: 'Safe Project' }
+  workspacePlan.tasks[0].files = {
+    inputs: [{ kind: 'workspace', path: 'src/App.tsx' }],
+    readPaths: ['src/components'],
+    allowedWritePaths: ['src'],
+    forbiddenPaths: ['src/private'],
+    outputPaths: ['src/result.ts'],
+  }
+  const prompt = buildManualTaskPrompt(workspacePlan.tasks[0], workspacePlan, 'codex')
+  assert.match(prompt, /Safe Project/)
+  assert.match(prompt, /src\/App\.tsx/)
+  assert.match(prompt, /src\/components/)
+  assert.match(prompt, /src\/result\.ts/)
+  assert.equal(prompt.includes(workspacePlan.workspace.id), false)
+  assert.equal(prompt.includes('C:\\'), false)
+  assert.equal(prompt.includes('PRIVATE_FILE_CONTENT'), false)
+})
+
+test('legacy sessions without workspace metadata remain valid', () => {
+  const session = mustCreate()
+  assert.equal(session.plan.workspace, undefined)
+  assert.equal(validateTaskSession(session).ok, true)
+})
+
+test('applies a global workspace scope atomically and preserves attachments', () => {
+  const source = input()
+  source.plan.tasks[0].files.inputs = [
+    { kind: 'attachment', name: 'brief.pdf', type: 'application/pdf', size: 12 },
+  ]
+  const created = createTaskSession(source, NOW)
+  assert.equal(created.ok, true)
+  let session = mustUpdate(created.session, {
+    type: 'set-workspace',
+    workspace: { id: 'e'.repeat(64), displayName: 'Project' },
+  })
+  const scope = {
+    readPaths: ['src'],
+    allowedWritePaths: ['src'],
+    forbiddenPaths: ['src/private'],
+    outputPaths: ['src/result.ts'],
+  }
+  session = mustUpdate(session, {
+    type: 'set-workspace-default-scope', scope, applyToAll: true,
+  })
+  assert.deepEqual(session.plan.workspace.defaultScope, scope)
+  assert.deepEqual(session.plan.tasks[0].files.inputs, source.plan.tasks[0].files.inputs)
+  assert.deepEqual(session.plan.tasks.map(task => task.files.readPaths), [['src'], ['src']])
+  assert.equal(validateTaskSession(session).ok, true)
+})
+
+test('restores one task to the global scope and locks global edits after start', () => {
+  let session = mustUpdate(mustCreate(), {
+    type: 'set-workspace', workspace: { id: 'f'.repeat(64), displayName: 'Project' },
+  })
+  const scope = {
+    readPaths: ['src'], allowedWritePaths: ['src'], forbiddenPaths: [], outputPaths: ['src/result.ts'],
+  }
+  session = mustUpdate(session, { type: 'set-workspace-default-scope', scope, applyToAll: true })
+  const task = session.plan.tasks[0]
+  session = mustUpdate(session, {
+    type: 'update-task-definition',
+    taskId: task.id,
+    task: {
+      title: task.title,
+      description: task.description,
+      prompt: task.prompt,
+      files: { ...task.files, readPaths: ['docs'], allowedWritePaths: [], outputPaths: [] },
+      expectedDeliverables: task.expectedDeliverables,
+      acceptanceChecks: task.acceptanceChecks,
+      recommendedProviderId: task.recommendedProviderId,
+      providerRecommendation: task.providerRecommendation,
+    },
+  })
+  assert.deepEqual(session.plan.tasks[0].files.readPaths, ['docs'])
+  session = mustUpdate(session, { type: 'apply-workspace-default-scope', taskId: task.id })
+  assert.deepEqual(session.plan.tasks[0].files.readPaths, ['src'])
+
+  const started = mustUpdate(session, { type: 'start', taskId: 'task-1' })
+  const locked = updateTaskSession(started, {
+    type: 'set-workspace-default-scope', scope, applyToAll: true,
+  }, DONE)
+  assert.equal(locked.ok, false)
+  assert.equal(locked.code, 'INVALID_TRANSITION')
+})
+
+test('switching workspaces clears default and task path scopes but keeps attachments', () => {
+  const source = input()
+  source.plan.tasks[0].files.inputs = [
+    { kind: 'attachment', name: 'brief.txt', type: 'text/plain', size: 4 },
+  ]
+  const created = createTaskSession(source, NOW)
+  assert.equal(created.ok, true)
+  let session = mustUpdate(created.session, {
+    type: 'set-workspace', workspace: { id: '1'.repeat(64), displayName: 'One' },
+  })
+  const scope = { readPaths: ['src'], allowedWritePaths: [], forbiddenPaths: [], outputPaths: [] }
+  session = mustUpdate(session, { type: 'set-workspace-default-scope', scope, applyToAll: true })
+  session = mustUpdate(session, {
+    type: 'set-workspace', workspace: { id: '2'.repeat(64), displayName: 'Two' },
+  })
+  assert.equal(session.plan.workspace.defaultScope, undefined)
+  assert.deepEqual(session.plan.tasks[0].files.inputs, source.plan.tasks[0].files.inputs)
+  assert.deepEqual(session.plan.tasks[0].files.readPaths, [])
 })

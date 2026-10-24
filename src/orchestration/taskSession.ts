@@ -1,11 +1,20 @@
 import { validateTaskSession } from './taskSessionValidation'
+import {
+  applyWorkspacePathScope,
+  normalizeTaskFileScope,
+  normalizeWorkspacePathScope,
+} from './taskPathScope'
 import type {
   ProviderId,
+  TaskFileScope,
+  TaskNode,
   TaskPlan,
+  TaskProviderRecommendation,
   TaskResultDraft,
   TaskRunRecord,
   TaskSessionV1,
   VerificationStatus,
+  WorkspacePathScope,
 } from '../types/taskOrchestration'
 import type { TaskAnalysisInput, TaskAnalysisResult } from '../types/taskAnalysis'
 
@@ -15,9 +24,22 @@ export interface CreateTaskSessionInput {
   plan: TaskPlan
 }
 
+export type EditableTaskDefinition = Pick<
+  TaskNode,
+  'title' | 'description' | 'prompt' | 'expectedDeliverables' | 'acceptanceChecks'
+> & {
+  files: TaskFileScope
+  recommendedProviderId: ProviderId
+  providerRecommendation?: TaskProviderRecommendation
+}
+
 export type TaskSessionAction =
   | { type: 'assign-provider'; taskId: string; providerId: ProviderId }
   | { type: 'set-task-dependencies'; taskId: string; dependsOn: string[] }
+  | { type: 'set-workspace'; workspace: NonNullable<TaskPlan['workspace']> }
+  | { type: 'set-workspace-default-scope'; scope: WorkspacePathScope; applyToAll: boolean }
+  | { type: 'apply-workspace-default-scope'; taskId: string }
+  | { type: 'update-task-definition'; taskId: string; task: EditableTaskDefinition }
   | { type: 'start'; taskId: string }
   | { type: 'update-draft'; taskId: string; draft: Partial<TaskResultDraft> }
   | { type: 'needs-input'; taskId: string; message: string }
@@ -90,6 +112,8 @@ export const canEditTaskDependencies = (session: TaskSessionV1) => session.runs.
   && !run.result
 ))
 
+export const canEditTaskPlan = canEditTaskDependencies
+
 const refreshPreExecutionStatuses = (session: TaskSessionV1) => {
   const statusById = new Map(session.runs.map(run => [run.taskId, run.status]))
   session.runs.forEach((run) => {
@@ -139,7 +163,42 @@ export function updateTaskSession(
   if (current.completedAt) return invalidTransition('已完成的任务会话不能继续修改。')
 
   const session = clone(current)
-  if (action.type === 'set-final-verification') {
+  if (action.type === 'set-workspace') {
+    if (!canEditTaskPlan(session)) return invalidTransition('任务开始后不能更换工作区或修改文件授权。')
+    const changingWorkspace = session.plan.workspace?.id !== action.workspace.id
+    if (changingWorkspace) {
+      session.plan.tasks.forEach((task) => {
+        task.files = {
+          inputs: task.files.inputs.filter(input => input.kind === 'attachment'),
+          readPaths: [],
+          allowedWritePaths: [],
+          forbiddenPaths: [],
+          outputPaths: [],
+        }
+      })
+    }
+    const defaultScope = changingWorkspace
+      ? action.workspace.defaultScope && normalizeWorkspacePathScope(action.workspace.defaultScope)
+      : session.plan.workspace?.defaultScope
+    session.plan.workspace = {
+      ...clone(action.workspace),
+      ...(defaultScope ? { defaultScope } : {}),
+    }
+    session.updatedAt = now
+  } else if (action.type === 'set-workspace-default-scope') {
+    if (!canEditTaskPlan(session)) return invalidTransition('任务开始后不能修改工作区默认授权。')
+    if (!session.plan.workspace) {
+      return { ok: false, code: 'INVALID_DATA', message: '请先选择项目工作区。' }
+    }
+    const scope = normalizeWorkspacePathScope(action.scope)
+    session.plan.workspace.defaultScope = scope
+    if (action.applyToAll) {
+      session.plan.tasks.forEach((task) => {
+        task.files = applyWorkspacePathScope(task.files, scope)
+      })
+    }
+    session.updatedAt = now
+  } else if (action.type === 'set-final-verification') {
     if (!session.runs.every(run => run.status === 'done')) {
       return invalidTransition('所有任务完成后才能进行最终验收。')
     }
@@ -179,6 +238,34 @@ export function updateTaskSession(
         if (!['waiting', 'ready'].includes(run.status)) return invalidTransition('任务开始后不能切换 AI。')
         run.assignedProviderId = action.providerId
         break
+      case 'apply-workspace-default-scope': {
+        if (!canEditTaskPlan(session)) return invalidTransition('任务开始后不能修改文件授权。')
+        const scope = session.plan.workspace?.defaultScope
+        if (!scope) return { ok: false, code: 'INVALID_DATA', message: '尚未设置工作区默认授权。' }
+        task.files = applyWorkspacePathScope(task.files, scope)
+        break
+      }
+      case 'update-task-definition': {
+        if (!canEditTaskPlan(session)) return invalidTransition('任务开始后不能编辑任务定义。')
+        const keepManualProvider = run.assignedProviderId !== task.recommendedProviderId
+        const taskIndex = session.plan.tasks.findIndex(candidate => candidate.id === task.id)
+        session.plan.tasks[taskIndex] = {
+          ...task,
+          title: action.task.title,
+          description: action.task.description,
+          prompt: action.task.prompt,
+          files: normalizeTaskFileScope(action.task.files),
+          expectedDeliverables: [...action.task.expectedDeliverables],
+          acceptanceChecks: [...action.task.acceptanceChecks],
+          recommendedProviderId: action.task.recommendedProviderId,
+          providerRecommendation: action.task.providerRecommendation
+            ? clone(action.task.providerRecommendation)
+            : undefined,
+        }
+        if (!keepManualProvider) run.assignedProviderId = action.task.recommendedProviderId
+        run.draft = emptyDraft(action.task.acceptanceChecks)
+        break
+      }
       case 'start':
         if (run.status !== 'ready') return invalidTransition('只有已就绪任务可以开始。')
         run.status = 'running'
