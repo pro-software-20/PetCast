@@ -1,0 +1,11 @@
+{
+  "fivePetsLoaded": true,
+  "allFramesAdvance": true,
+  "pauseStable": true,
+  "sharkDirectionFlips": true,
+  "idleBlinkAllFive": true,
+  "boundedMovement": true,
+  "speedControl": true,
+  "pageErrors": [],
+  "offlineFileOpens": true
+}

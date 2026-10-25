@@ -17,7 +17,7 @@ export function AppearanceSettings({ value, onChange, onClose }: { value: Appear
   }
   return <section className="appearance-page" aria-label="形象设置">
     <div className="room-art" /><div className="room-nameplate">{value.petName || '布罗艾'}的小屋</div>
-    <section className="appearance-preview"><span>当前形象</span><div className="appearance-preview-pet"><PixelPet petId={value.petId} name={value.petName} /></div><strong>{value.petName || '布罗艾'}</strong></section>
+    <section className="appearance-preview"><span>当前形象</span><div className="appearance-preview-pet"><PixelPet petId={value.petId} name={value.petName} animated /></div><strong>{value.petName || '布罗艾'}</strong></section>
     <div className="appearance-frame"><div className="appearance-paper">
       <header><h1>形象设置</h1><button onClick={onClose} aria-label="关闭形象设置">×</button></header>
       <section className="pet-choice"><h2>形象选择</h2><div className="pet-choice-row">{PETS.map(pet => <button key={pet.id} aria-label={`选择${pet.name}`} aria-pressed={value.petId === pet.id} className={value.petId === pet.id ? 'selected' : ''} onClick={() => update({ petId: pet.id })}><span><PixelPet petId={pet.id} name={value.petName} /></span><strong>{pet.name}</strong>{value.petId === pet.id && <i className="selection-check">✓</i>}</button>)}</div></section>

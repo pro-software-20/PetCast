@@ -1,22 +1,55 @@
 import { useEffect, useState } from 'react'
 import type { PetMood } from './types/usage'
 import { getPet } from './appearance/petRegistry'
-import type { PetAnimation } from './types/appearance'
-type PetProps = { dragging: boolean; expanded: boolean; dragDirection: 'left' | 'right'; mood: PetMood; reaction: 'wave' | 'eat' | null; petId?: string; name?: string }
-export function Pet({ dragging, expanded, dragDirection, mood, reaction, petId = 'shark', name = '布罗艾' }: PetProps) {
-  const definition = getPet(petId)
-  const key: PetAnimation = dragging ? `drag-${dragDirection}` : reaction ?? (mood === 'celebrating' ? 'celebrate' : mood === 'anxious' ? 'anxious' : mood === 'tired' || mood === 'exhausted' ? 'tired' : 'idle')
-  const animation = definition.animations[key] ?? definition.animations.idle!
-  const [index, setIndex] = useState(0)
-  useEffect(() => { setIndex(0); if (animation.frames.length < 2) return; const timer = window.setInterval(() => setIndex(i => (i + 1) % animation.frames.length), animation.frameMs); return () => clearInterval(timer) }, [definition.id, animation])
-  const [column, row] = animation.frames[index % animation.frames.length]
-  const x = definition.columns > 1 ? column / (definition.columns - 1) * 100 : 0
-  const y = definition.rows > 1 ? row / (definition.rows - 1) * 100 : 0
-  return <div className={`pet-wrap configured-pet ${dragging ? 'is-dragging' : ''} ${expanded ? 'is-expanded' : ''}`} aria-label={`${name}，${definition.name}`} data-pet-id={definition.id}>
-    <div className="pet-shadow" /><span className="pet-frame" style={{ backgroundImage: `url("${definition.spriteUrl}")`, backgroundSize: definition.columns === 1 && definition.rows === 1 ? 'contain' : `${definition.columns * 100}% ${definition.rows * 100}%`, backgroundPosition: definition.columns === 1 && definition.rows === 1 ? 'center' : `${x}% ${y}%`, aspectRatio: `${definition.frameWidth} / ${definition.frameHeight}` }} /><span className="pet-hitbox" aria-hidden="true" />
+import type { PetAnimation, PetAnimationClip } from './types/appearance'
+import type { PetFacing } from './appearance/petRoaming'
+
+type PetProps = {
+  dragging: boolean; expanded: boolean; dragDirection: PetFacing; mood: PetMood; reaction: 'wave' | 'eat' | null;
+  petId?: string; name?: string; action?: PetAnimation; facing?: PetFacing;
+}
+
+function PetImage({ petId, name, animation, animated, className }: {
+  petId: string; name: string; animation: PetAnimationClip; animated: boolean; className: string;
+}) {
+  const pet = getPet(petId)
+  const still = animation.stillUrl ?? pet.portraitUrl ?? pet.spriteUrl
+  const source = animated ? animation.imageUrl ?? still : still
+  const [failed, setFailed] = useState<string | null>(null)
+  return <picture className="pet-picture">
+    <source media="(prefers-reduced-motion: reduce)" srcSet={still} />
+    <img className={className} src={failed === source ? still : source} alt={`${name}，${pet.name}`} data-pet-id={pet.id}
+      data-pet-animation={animated ? 'animated' : 'still'} draggable={false} onError={() => setFailed(source)} />
+  </picture>
+}
+
+export function Pet({ dragging, expanded, dragDirection, mood, reaction, petId = 'shark', name = '布罗艾', action, facing = 'right' }: PetProps) {
+  const pet = getPet(petId)
+  useEffect(() => {
+    const images = Object.values(pet.animations).flatMap(clip => {
+      if (!clip?.imageUrl) return []
+      const image = new Image(); image.decoding = 'async'; image.src = clip.imageUrl
+      return [image]
+    })
+    return () => { for (const image of images) image.onload = null }
+  }, [pet])
+  const requested: PetAnimation = action ?? (dragging ? `drag-${dragDirection}` : reaction ??
+    (mood === 'celebrating' ? 'celebrate' : mood === 'anxious' ? 'anxious' : mood === 'tired' || mood === 'exhausted' ? 'tired' : 'idle'))
+  const resolved = pet.animations[requested] ? requested : 'idle'
+  const animation = pet.animations[resolved] ?? pet.animations.idle!
+  return <div className={`pet-wrap configured-pet ${dragging ? 'is-dragging' : ''} ${expanded ? 'is-expanded' : ''}`}
+    aria-label={`${name}，${pet.name}`} data-pet-id={pet.id} data-pet-action={resolved} data-facing={facing}>
+    <div className="pet-shadow" />
+    <div className="pet-facing" style={{ transform: facing === 'left' ? 'scaleX(-1)' : 'scaleX(1)' }}>
+      <PetImage key={`${pet.id}-${resolved}`} petId={pet.id} name={name} animation={animation} animated className="pet-frame" />
+    </div>
+    <span className="pet-hitbox" aria-hidden="true" />
   </div>
 }
-export function PixelPet({ petId, name = '布罗艾', className = '' }: { petId: string; name?: string; className?: string }) {
+
+export function PixelPet({ petId, name = '布罗艾', className = '', animated = false }: {
+  petId: string; name?: string; className?: string; animated?: boolean;
+}) {
   const pet = getPet(petId)
-  return <img className={`pixel-pet ${className}`} src={pet.spriteUrl} alt={`${name}，${pet.name}`} data-pet-id={pet.id} draggable={false} />
+  return <PetImage key={pet.id} petId={pet.id} name={name} animation={pet.animations.idle!} animated={animated} className={`pixel-pet ${className}`} />
 }

@@ -1,0 +1,1694 @@
+{
+  "version": 1,
+  "date": "2026-10-25",
+  "method": "built-in imagegen",
+  "previewOnly": true,
+  "assembly": "Complete sprites located from alpha; original pixels packed by translation only. No per-frame scaling or redrawing.",
+  "pets": [
+    {
+      "id": "cat",
+      "name": "猫",
+      "motionName": "行走",
+      "habitat": "sand",
+      "sheet": "sheets/cat.png",
+      "raw": "raw/cat-generated.png",
+      "frameWidth": 448,
+      "frameHeight": 448,
+      "columns": 4,
+      "rows": 3,
+      "sourceSize": [
+        1448,
+        1086
+      ],
+      "frameCount": 12,
+      "animations": {
+        "idle": {
+          "frames": [
+            [
+              0,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              2,
+              0
+            ],
+            [
+              3,
+              0
+            ]
+          ],
+          "frameMs": 470,
+          "durationsMs": [
+            650,
+            260,
+            120,
+            850
+          ]
+        },
+        "walk": {
+          "frames": [
+            [
+              0,
+              1
+            ],
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              1
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              0,
+              2
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              3,
+              2
+            ]
+          ],
+          "frameMs": 140
+        }
+      },
+      "frames": [
+        {
+          "index": 0,
+          "grid": [
+            0,
+            0
+          ],
+          "sourceBounds": [
+            55,
+            19,
+            357,
+            356
+          ],
+          "exportBounds": [
+            78,
+            68,
+            370,
+            395
+          ],
+          "file": "frames/cat/00.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 1,
+          "grid": [
+            1,
+            0
+          ],
+          "sourceBounds": [
+            412,
+            19,
+            709,
+            356
+          ],
+          "exportBounds": [
+            80,
+            68,
+            367,
+            395
+          ],
+          "file": "frames/cat/01.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 2,
+          "grid": [
+            2,
+            0
+          ],
+          "sourceBounds": [
+            761,
+            19,
+            1067,
+            356
+          ],
+          "exportBounds": [
+            76,
+            68,
+            372,
+            395
+          ],
+          "file": "frames/cat/02.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 3,
+          "grid": [
+            3,
+            0
+          ],
+          "sourceBounds": [
+            1112,
+            19,
+            1410,
+            356
+          ],
+          "exportBounds": [
+            80,
+            68,
+            368,
+            395
+          ],
+          "file": "frames/cat/03.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 4,
+          "grid": [
+            0,
+            1
+          ],
+          "sourceBounds": [
+            44,
+            377,
+            359,
+            709
+          ],
+          "exportBounds": [
+            71,
+            73,
+            376,
+            395
+          ],
+          "file": "frames/cat/04.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 5,
+          "grid": [
+            1,
+            1
+          ],
+          "sourceBounds": [
+            397,
+            364,
+            719,
+            712
+          ],
+          "exportBounds": [
+            68,
+            57,
+            380,
+            395
+          ],
+          "file": "frames/cat/05.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 6,
+          "grid": [
+            2,
+            1
+          ],
+          "sourceBounds": [
+            753,
+            373,
+            1072,
+            710
+          ],
+          "exportBounds": [
+            69,
+            68,
+            378,
+            395
+          ],
+          "file": "frames/cat/06.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 7,
+          "grid": [
+            3,
+            1
+          ],
+          "sourceBounds": [
+            1110,
+            376,
+            1425,
+            709
+          ],
+          "exportBounds": [
+            71,
+            72,
+            376,
+            395
+          ],
+          "file": "frames/cat/07.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 8,
+          "grid": [
+            0,
+            2
+          ],
+          "sourceBounds": [
+            54,
+            730,
+            363,
+            1057
+          ],
+          "exportBounds": [
+            74,
+            78,
+            373,
+            395
+          ],
+          "file": "frames/cat/08.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 9,
+          "grid": [
+            1,
+            2
+          ],
+          "sourceBounds": [
+            393,
+            735,
+            709,
+            1057
+          ],
+          "exportBounds": [
+            71,
+            83,
+            377,
+            395
+          ],
+          "file": "frames/cat/09.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 10,
+          "grid": [
+            2,
+            2
+          ],
+          "sourceBounds": [
+            748,
+            730,
+            1064,
+            1057
+          ],
+          "exportBounds": [
+            71,
+            78,
+            377,
+            395
+          ],
+          "file": "frames/cat/10.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 11,
+          "grid": [
+            3,
+            2
+          ],
+          "sourceBounds": [
+            1104,
+            726,
+            1420,
+            1057
+          ],
+          "exportBounds": [
+            71,
+            74,
+            377,
+            395
+          ],
+          "file": "frames/cat/11.png",
+          "hopLiftPx": 0
+        }
+      ]
+    },
+    {
+      "id": "dog",
+      "name": "狗",
+      "motionName": "行走",
+      "habitat": "sand",
+      "sheet": "sheets/dog.png",
+      "raw": "raw/dog-generated.png",
+      "frameWidth": 448,
+      "frameHeight": 448,
+      "columns": 4,
+      "rows": 3,
+      "sourceSize": [
+        1448,
+        1086
+      ],
+      "frameCount": 12,
+      "animations": {
+        "idle": {
+          "frames": [
+            [
+              0,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              2,
+              0
+            ],
+            [
+              3,
+              0
+            ]
+          ],
+          "frameMs": 470,
+          "durationsMs": [
+            650,
+            260,
+            120,
+            850
+          ]
+        },
+        "walk": {
+          "frames": [
+            [
+              0,
+              1
+            ],
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              1
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              0,
+              2
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              3,
+              2
+            ]
+          ],
+          "frameMs": 140
+        }
+      },
+      "frames": [
+        {
+          "index": 0,
+          "grid": [
+            0,
+            0
+          ],
+          "sourceBounds": [
+            22,
+            42,
+            347,
+            369
+          ],
+          "exportBounds": [
+            66,
+            78,
+            381,
+            395
+          ],
+          "file": "frames/dog/00.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 1,
+          "grid": [
+            1,
+            0
+          ],
+          "sourceBounds": [
+            386,
+            42,
+            710,
+            369
+          ],
+          "exportBounds": [
+            67,
+            78,
+            381,
+            395
+          ],
+          "file": "frames/dog/01.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 2,
+          "grid": [
+            2,
+            0
+          ],
+          "sourceBounds": [
+            749,
+            46,
+            1075,
+            369
+          ],
+          "exportBounds": [
+            66,
+            82,
+            382,
+            395
+          ],
+          "file": "frames/dog/02.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 3,
+          "grid": [
+            3,
+            0
+          ],
+          "sourceBounds": [
+            1113,
+            42,
+            1433,
+            369
+          ],
+          "exportBounds": [
+            69,
+            78,
+            379,
+            395
+          ],
+          "file": "frames/dog/03.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 4,
+          "grid": [
+            0,
+            1
+          ],
+          "sourceBounds": [
+            30,
+            396,
+            369,
+            716
+          ],
+          "exportBounds": [
+            59,
+            85,
+            388,
+            395
+          ],
+          "file": "frames/dog/04.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 5,
+          "grid": [
+            1,
+            1
+          ],
+          "sourceBounds": [
+            387,
+            397,
+            726,
+            716
+          ],
+          "exportBounds": [
+            59,
+            86,
+            388,
+            395
+          ],
+          "file": "frames/dog/05.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 6,
+          "grid": [
+            2,
+            1
+          ],
+          "sourceBounds": [
+            738,
+            397,
+            1082,
+            708
+          ],
+          "exportBounds": [
+            57,
+            94,
+            391,
+            395
+          ],
+          "file": "frames/dog/06.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 7,
+          "grid": [
+            3,
+            1
+          ],
+          "sourceBounds": [
+            1109,
+            397,
+            1433,
+            716
+          ],
+          "exportBounds": [
+            67,
+            86,
+            381,
+            395
+          ],
+          "file": "frames/dog/07.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 8,
+          "grid": [
+            0,
+            2
+          ],
+          "sourceBounds": [
+            32,
+            739,
+            366,
+            1037
+          ],
+          "exportBounds": [
+            62,
+            107,
+            386,
+            395
+          ],
+          "file": "frames/dog/08.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 9,
+          "grid": [
+            1,
+            2
+          ],
+          "sourceBounds": [
+            384,
+            739,
+            714,
+            1053
+          ],
+          "exportBounds": [
+            64,
+            91,
+            384,
+            395
+          ],
+          "file": "frames/dog/09.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 10,
+          "grid": [
+            2,
+            2
+          ],
+          "sourceBounds": [
+            744,
+            737,
+            1072,
+            1055
+          ],
+          "exportBounds": [
+            65,
+            87,
+            383,
+            395
+          ],
+          "file": "frames/dog/10.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 11,
+          "grid": [
+            3,
+            2
+          ],
+          "sourceBounds": [
+            1105,
+            739,
+            1433,
+            1055
+          ],
+          "exportBounds": [
+            65,
+            89,
+            383,
+            395
+          ],
+          "file": "frames/dog/11.png",
+          "hopLiftPx": 0
+        }
+      ]
+    },
+    {
+      "id": "shark",
+      "name": "鲨鱼",
+      "motionName": "游动",
+      "habitat": "water",
+      "sheet": "sheets/shark.png",
+      "raw": "raw/shark-generated.png",
+      "frameWidth": 464,
+      "frameHeight": 464,
+      "columns": 4,
+      "rows": 3,
+      "sourceSize": [
+        1448,
+        1086
+      ],
+      "frameCount": 12,
+      "animations": {
+        "idle": {
+          "frames": [
+            [
+              0,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              2,
+              0
+            ],
+            [
+              3,
+              0
+            ]
+          ],
+          "frameMs": 470,
+          "durationsMs": [
+            650,
+            260,
+            120,
+            850
+          ]
+        },
+        "swim": {
+          "frames": [
+            [
+              0,
+              1
+            ],
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              1
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              0,
+              2
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              3,
+              2
+            ]
+          ],
+          "frameMs": 170
+        }
+      },
+      "frames": [
+        {
+          "index": 0,
+          "grid": [
+            0,
+            0
+          ],
+          "sourceBounds": [
+            14,
+            92,
+            365,
+            358
+          ],
+          "exportBounds": [
+            61,
+            155,
+            402,
+            411
+          ],
+          "file": "frames/shark/00.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 1,
+          "grid": [
+            1,
+            0
+          ],
+          "sourceBounds": [
+            367,
+            92,
+            725,
+            358
+          ],
+          "exportBounds": [
+            58,
+            155,
+            406,
+            411
+          ],
+          "file": "frames/shark/01.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 2,
+          "grid": [
+            2,
+            0
+          ],
+          "sourceBounds": [
+            727,
+            92,
+            1081,
+            358
+          ],
+          "exportBounds": [
+            60,
+            155,
+            404,
+            411
+          ],
+          "file": "frames/shark/02.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 3,
+          "grid": [
+            3,
+            0
+          ],
+          "sourceBounds": [
+            1081,
+            92,
+            1438,
+            357
+          ],
+          "exportBounds": [
+            58,
+            156,
+            405,
+            411
+          ],
+          "file": "frames/shark/03.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 4,
+          "grid": [
+            0,
+            1
+          ],
+          "sourceBounds": [
+            29,
+            428,
+            368,
+            688
+          ],
+          "exportBounds": [
+            67,
+            161,
+            396,
+            411
+          ],
+          "file": "frames/shark/04.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 5,
+          "grid": [
+            1,
+            1
+          ],
+          "sourceBounds": [
+            366,
+            426,
+            726,
+            673
+          ],
+          "exportBounds": [
+            57,
+            174,
+            407,
+            411
+          ],
+          "file": "frames/shark/05.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 6,
+          "grid": [
+            2,
+            1
+          ],
+          "sourceBounds": [
+            737,
+            426,
+            1085,
+            687
+          ],
+          "exportBounds": [
+            63,
+            160,
+            401,
+            411
+          ],
+          "file": "frames/shark/06.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 7,
+          "grid": [
+            3,
+            1
+          ],
+          "sourceBounds": [
+            1093,
+            427,
+            1436,
+            690
+          ],
+          "exportBounds": [
+            65,
+            158,
+            398,
+            411
+          ],
+          "file": "frames/shark/07.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 8,
+          "grid": [
+            0,
+            2
+          ],
+          "sourceBounds": [
+            13,
+            773,
+            368,
+            1031
+          ],
+          "exportBounds": [
+            59,
+            163,
+            404,
+            411
+          ],
+          "file": "frames/shark/08.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 9,
+          "grid": [
+            1,
+            2
+          ],
+          "sourceBounds": [
+            380,
+            761,
+            728,
+            1022
+          ],
+          "exportBounds": [
+            63,
+            160,
+            401,
+            411
+          ],
+          "file": "frames/shark/09.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 10,
+          "grid": [
+            2,
+            2
+          ],
+          "sourceBounds": [
+            753,
+            761,
+            1090,
+            1027
+          ],
+          "exportBounds": [
+            68,
+            155,
+            400,
+            411
+          ],
+          "file": "frames/shark/10.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 11,
+          "grid": [
+            3,
+            2
+          ],
+          "sourceBounds": [
+            1081,
+            770,
+            1439,
+            1030
+          ],
+          "exportBounds": [
+            53,
+            161,
+            406,
+            411
+          ],
+          "file": "frames/shark/11.png",
+          "hopLiftPx": 0
+        }
+      ]
+    },
+    {
+      "id": "chicken",
+      "name": "鸡",
+      "motionName": "行走",
+      "habitat": "sand",
+      "sheet": "sheets/chicken.png",
+      "raw": "raw/chicken-generated.png",
+      "frameWidth": 448,
+      "frameHeight": 448,
+      "columns": 4,
+      "rows": 3,
+      "sourceSize": [
+        1448,
+        1086
+      ],
+      "frameCount": 12,
+      "animations": {
+        "idle": {
+          "frames": [
+            [
+              0,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              2,
+              0
+            ],
+            [
+              3,
+              0
+            ]
+          ],
+          "frameMs": 470,
+          "durationsMs": [
+            650,
+            260,
+            120,
+            850
+          ]
+        },
+        "walk": {
+          "frames": [
+            [
+              0,
+              1
+            ],
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              1
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              0,
+              2
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              3,
+              2
+            ]
+          ],
+          "frameMs": 140
+        }
+      },
+      "frames": [
+        {
+          "index": 0,
+          "grid": [
+            0,
+            0
+          ],
+          "sourceBounds": [
+            36,
+            21,
+            322,
+            353
+          ],
+          "exportBounds": [
+            86,
+            73,
+            362,
+            395
+          ],
+          "file": "frames/chicken/00.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 1,
+          "grid": [
+            1,
+            0
+          ],
+          "sourceBounds": [
+            396,
+            21,
+            681,
+            353
+          ],
+          "exportBounds": [
+            86,
+            73,
+            361,
+            395
+          ],
+          "file": "frames/chicken/01.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 2,
+          "grid": [
+            2,
+            0
+          ],
+          "sourceBounds": [
+            755,
+            21,
+            1041,
+            353
+          ],
+          "exportBounds": [
+            86,
+            73,
+            362,
+            395
+          ],
+          "file": "frames/chicken/02.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 3,
+          "grid": [
+            3,
+            0
+          ],
+          "sourceBounds": [
+            1117,
+            21,
+            1400,
+            353
+          ],
+          "exportBounds": [
+            87,
+            73,
+            360,
+            395
+          ],
+          "file": "frames/chicken/03.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 4,
+          "grid": [
+            0,
+            1
+          ],
+          "sourceBounds": [
+            54,
+            364,
+            335,
+            702
+          ],
+          "exportBounds": [
+            88,
+            67,
+            359,
+            395
+          ],
+          "file": "frames/chicken/04.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 5,
+          "grid": [
+            1,
+            1
+          ],
+          "sourceBounds": [
+            399,
+            379,
+            689,
+            702
+          ],
+          "exportBounds": [
+            84,
+            82,
+            364,
+            395
+          ],
+          "file": "frames/chicken/05.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 6,
+          "grid": [
+            2,
+            1
+          ],
+          "sourceBounds": [
+            761,
+            392,
+            1051,
+            702
+          ],
+          "exportBounds": [
+            84,
+            95,
+            364,
+            395
+          ],
+          "file": "frames/chicken/06.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 7,
+          "grid": [
+            3,
+            1
+          ],
+          "sourceBounds": [
+            1124,
+            370,
+            1417,
+            702
+          ],
+          "exportBounds": [
+            82,
+            73,
+            365,
+            395
+          ],
+          "file": "frames/chicken/07.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 8,
+          "grid": [
+            0,
+            2
+          ],
+          "sourceBounds": [
+            41,
+            728,
+            323,
+            1050
+          ],
+          "exportBounds": [
+            88,
+            83,
+            360,
+            395
+          ],
+          "file": "frames/chicken/08.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 9,
+          "grid": [
+            1,
+            2
+          ],
+          "sourceBounds": [
+            397,
+            734,
+            687,
+            1050
+          ],
+          "exportBounds": [
+            84,
+            89,
+            364,
+            395
+          ],
+          "file": "frames/chicken/09.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 10,
+          "grid": [
+            2,
+            2
+          ],
+          "sourceBounds": [
+            757,
+            733,
+            1051,
+            1050
+          ],
+          "exportBounds": [
+            82,
+            88,
+            366,
+            395
+          ],
+          "file": "frames/chicken/10.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 11,
+          "grid": [
+            3,
+            2
+          ],
+          "sourceBounds": [
+            1127,
+            726,
+            1412,
+            1049
+          ],
+          "exportBounds": [
+            86,
+            82,
+            361,
+            395
+          ],
+          "file": "frames/chicken/11.png",
+          "hopLiftPx": 0
+        }
+      ]
+    },
+    {
+      "id": "rabbit",
+      "name": "兔子",
+      "motionName": "轻跳",
+      "habitat": "sand",
+      "sheet": "sheets/rabbit.png",
+      "raw": "raw/rabbit-generated.png",
+      "frameWidth": 336,
+      "frameHeight": 336,
+      "columns": 4,
+      "rows": 3,
+      "sourceSize": [
+        1448,
+        1086
+      ],
+      "frameCount": 12,
+      "animations": {
+        "idle": {
+          "frames": [
+            [
+              0,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              2,
+              0
+            ],
+            [
+              3,
+              0
+            ]
+          ],
+          "frameMs": 470,
+          "durationsMs": [
+            650,
+            260,
+            120,
+            850
+          ]
+        },
+        "hop": {
+          "frames": [
+            [
+              0,
+              1
+            ],
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              1
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              0,
+              2
+            ],
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              3,
+              2
+            ]
+          ],
+          "frameMs": 170
+        }
+      },
+      "frames": [
+        {
+          "index": 0,
+          "grid": [
+            0,
+            0
+          ],
+          "sourceBounds": [
+            86,
+            100,
+            295,
+            329
+          ],
+          "exportBounds": [
+            68,
+            64,
+            267,
+            283
+          ],
+          "file": "frames/rabbit/00.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 1,
+          "grid": [
+            1,
+            0
+          ],
+          "sourceBounds": [
+            447,
+            100,
+            658,
+            329
+          ],
+          "exportBounds": [
+            67,
+            64,
+            268,
+            283
+          ],
+          "file": "frames/rabbit/01.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 2,
+          "grid": [
+            2,
+            0
+          ],
+          "sourceBounds": [
+            808,
+            99,
+            1018,
+            329
+          ],
+          "exportBounds": [
+            68,
+            63,
+            268,
+            283
+          ],
+          "file": "frames/rabbit/02.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 3,
+          "grid": [
+            3,
+            0
+          ],
+          "sourceBounds": [
+            1170,
+            99,
+            1382,
+            329
+          ],
+          "exportBounds": [
+            67,
+            63,
+            269,
+            283
+          ],
+          "file": "frames/rabbit/03.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 4,
+          "grid": [
+            0,
+            1
+          ],
+          "sourceBounds": [
+            75,
+            441,
+            305,
+            662
+          ],
+          "exportBounds": [
+            58,
+            72,
+            278,
+            283
+          ],
+          "file": "frames/rabbit/04.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 5,
+          "grid": [
+            1,
+            1
+          ],
+          "sourceBounds": [
+            442,
+            428,
+            664,
+            658
+          ],
+          "exportBounds": [
+            62,
+            59,
+            274,
+            279
+          ],
+          "file": "frames/rabbit/05.png",
+          "hopLiftPx": 4
+        },
+        {
+          "index": 6,
+          "grid": [
+            2,
+            1
+          ],
+          "sourceBounds": [
+            794,
+            420,
+            1021,
+            651
+          ],
+          "exportBounds": [
+            59,
+            50,
+            276,
+            271
+          ],
+          "file": "frames/rabbit/06.png",
+          "hopLiftPx": 12
+        },
+        {
+          "index": 7,
+          "grid": [
+            3,
+            1
+          ],
+          "sourceBounds": [
+            1156,
+            442,
+            1389,
+            663
+          ],
+          "exportBounds": [
+            56,
+            54,
+            279,
+            265
+          ],
+          "file": "frames/rabbit/07.png",
+          "hopLiftPx": 18
+        },
+        {
+          "index": 8,
+          "grid": [
+            0,
+            2
+          ],
+          "sourceBounds": [
+            76,
+            765,
+            305,
+            995
+          ],
+          "exportBounds": [
+            58,
+            51,
+            277,
+            271
+          ],
+          "file": "frames/rabbit/08.png",
+          "hopLiftPx": 12
+        },
+        {
+          "index": 9,
+          "grid": [
+            1,
+            2
+          ],
+          "sourceBounds": [
+            437,
+            768,
+            665,
+            994
+          ],
+          "exportBounds": [
+            59,
+            63,
+            277,
+            279
+          ],
+          "file": "frames/rabbit/09.png",
+          "hopLiftPx": 4
+        },
+        {
+          "index": 10,
+          "grid": [
+            2,
+            2
+          ],
+          "sourceBounds": [
+            794,
+            755,
+            1023,
+            992
+          ],
+          "exportBounds": [
+            58,
+            56,
+            277,
+            283
+          ],
+          "file": "frames/rabbit/10.png",
+          "hopLiftPx": 0
+        },
+        {
+          "index": 11,
+          "grid": [
+            3,
+            2
+          ],
+          "sourceBounds": [
+            1161,
+            767,
+            1390,
+            998
+          ],
+          "exportBounds": [
+            58,
+            62,
+            277,
+            283
+          ],
+          "file": "frames/rabbit/11.png",
+          "hopLiftPx": 0
+        }
+      ]
+    }
+  ]
+}

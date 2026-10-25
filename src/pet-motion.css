@@ -1,0 +1,9 @@
+/* Pixel artwork has native looping PNG clips; movement and facing are independent. */
+.petcast-warm .pet-picture { display:contents; }
+.petcast-warm .pet-facing { position:absolute; inset:0; transform-origin:center; pointer-events:none; }
+.petcast-warm .configured-pet .pet-frame { position:absolute; inset:0; width:100%; height:100%; max-width:none; max-height:none; object-fit:contain; object-position:center bottom; display:block; background:none; animation:none; image-rendering:pixelated; aspect-ratio:auto; }
+.petcast-warm .pet-in-water .pet-frame,.petcast-warm .device-pet-viewport .pixel-pet { animation:none; }
+.petcast-warm .roaming-pet { will-change:left; }
+.petcast-warm .roaming-pet.pet-on-sand { top:50.5%; }
+.petcast-warm .roaming-pet.pet-in-water { top:77.5%; height:76px; }
+@media(prefers-reduced-motion:reduce) { .petcast-warm .roaming-pet { will-change:auto; } }

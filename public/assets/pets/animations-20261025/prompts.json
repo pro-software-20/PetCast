@@ -1,0 +1,102 @@
+{
+  "date": "2026-10-25",
+  "method": "built-in imagegen",
+  "layout": {
+    "columns": 4,
+    "rows": 3,
+    "idleFrames": [
+      [
+        0,
+        0
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        2,
+        0
+      ],
+      [
+        3,
+        0
+      ]
+    ],
+    "locomotionFrames": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        2,
+        1
+      ],
+      [
+        3,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        2
+      ],
+      [
+        3,
+        2
+      ]
+    ]
+  },
+  "specs": [
+    {
+      "id": "cat",
+      "name": "猫",
+      "motion": "walk",
+      "detail": "Orange tabby cat with the EXACT original forehead and back stripes, cream muzzle/chest/toe tips, pink nose and ear interiors, glossy dark eyes and one upright curled tail with a cream tip. Four feline legs only. Locomotion is a natural eight-phase gentle quadruped walk: alternating front and rear paws with subtle shoulder/hip motion and a softly swaying single tail. Preserve the small original muzzle; do not turn it into a generic chibi cat.",
+      "reference": "D:\\download\\PetCast-main (1)\\PetCast-main\\public\\assets\\pets\\cat.png",
+      "prompt": "Use case: identity-preserve. Asset type: PetCast game animation sprite sheet for the EXISTING referenced pixel animal.\nInput image 1 is the exact existing PetCast character and identity reference; it is not a generic style suggestion. Preserve its face, eye shape, proportions, silhouette, markings, palette and chunky pixel clusters, with no redesign.\nDeliver one genuine transparent RGBA PNG sprite atlas, ideally 1536 x 1152 pixels. EXACTLY 4 equal columns and 3 equal rows: 12 separate full-body sprites in a strict invisible regular grid. Each cell is 384 x 384 pixels at that resolution. No drawn grid, no panel backgrounds, no labels, no numbers, no lettering, no watermark, no floor, no cast shadows and no extra objects.\nAll 12 characters must be the SAME individual at the SAME scale, facing the same RIGHT-FACING THREE-QUARTER direction as the reference, with a fixed camera and matching body/head registration. Every sprite, including ears/tail/fins, must be completely inside its own cell with at least 24 pixels of clear padding. Never clip or overlap cells.\nAnimation order is row-major: ROW 1 is a four-frame looping idle animation: neutral eyes open, a tiny breath with slight tail motion, a brief blink, return to eyes open. ROWS 2 and 3 together are a single EIGHT-FRAME looping locomotion cycle, four frames per row, continuing in temporal order. It is an in-place cycle: do not translate the whole animal across the sheet. The pose must actually change coherently, not eight identical stills. First and last phases must connect smoothly.\nPixel art only, matching the reference's detailed friendly game sprite aesthetic. Keep crisp square pixel steps, stable pixel size, restrained highlights, warm dark outlines and the original colors. Do not smooth into vector art, 3D or realistic painting. Maintain anatomical consistency in every frame.\nSubject-specific identity and movement constraints:\nOrange tabby cat with the EXACT original forehead and back stripes, cream muzzle/chest/toe tips, pink nose and ear interiors, glossy dark eyes and one upright curled tail with a cream tip. Four feline legs only. Locomotion is a natural eight-phase gentle quadruped walk: alternating front and rear paws with subtle shoulder/hip motion and a softly swaying single tail. Preserve the small original muzzle; do not turn it into a generic chibi cat."
+    },
+    {
+      "id": "dog",
+      "name": "狗",
+      "motion": "walk",
+      "detail": "Honey-golden puppy with the EXACT original long caramel floppy ears, cream muzzle/chest/toes, black rounded nose, dark glossy eyes and one raised curved tail. Four canine legs only. Eight-phase gentle puppy walk: alternating fore/rear paws, tiny ear bounce and tail sway. Do not change the breed, ears, face or body proportions.",
+      "reference": "D:\\download\\PetCast-main (1)\\PetCast-main\\public\\assets\\pets\\dog.png",
+      "prompt": "Use case: identity-preserve. Asset type: PetCast game animation sprite sheet for the EXISTING referenced pixel animal.\nInput image 1 is the exact existing PetCast character and identity reference; it is not a generic style suggestion. Preserve its face, eye shape, proportions, silhouette, markings, palette and chunky pixel clusters, with no redesign.\nDeliver one genuine transparent RGBA PNG sprite atlas, ideally 1536 x 1152 pixels. EXACTLY 4 equal columns and 3 equal rows: 12 separate full-body sprites in a strict invisible regular grid. Each cell is 384 x 384 pixels at that resolution. No drawn grid, no panel backgrounds, no labels, no numbers, no lettering, no watermark, no floor, no cast shadows and no extra objects.\nAll 12 characters must be the SAME individual at the SAME scale, facing the same RIGHT-FACING THREE-QUARTER direction as the reference, with a fixed camera and matching body/head registration. Every sprite, including ears/tail/fins, must be completely inside its own cell with at least 24 pixels of clear padding. Never clip or overlap cells.\nAnimation order is row-major: ROW 1 is a four-frame looping idle animation: neutral eyes open, a tiny breath with slight tail motion, a brief blink, return to eyes open. ROWS 2 and 3 together are a single EIGHT-FRAME looping locomotion cycle, four frames per row, continuing in temporal order. It is an in-place cycle: do not translate the whole animal across the sheet. The pose must actually change coherently, not eight identical stills. First and last phases must connect smoothly.\nPixel art only, matching the reference's detailed friendly game sprite aesthetic. Keep crisp square pixel steps, stable pixel size, restrained highlights, warm dark outlines and the original colors. Do not smooth into vector art, 3D or realistic painting. Maintain anatomical consistency in every frame.\nSubject-specific identity and movement constraints:\nHoney-golden puppy with the EXACT original long caramel floppy ears, cream muzzle/chest/toes, black rounded nose, dark glossy eyes and one raised curved tail. Four canine legs only. Eight-phase gentle puppy walk: alternating fore/rear paws, tiny ear bounce and tail sway. Do not change the breed, ears, face or body proportions."
+    },
+    {
+      "id": "shark",
+      "name": "鲨鱼",
+      "motion": "swim",
+      "detail": "The EXACT original round slate/ocean-blue shark with a large dorsal fin, upright asymmetric tail fin on its left, cream belly and muzzle, three blue gill marks, dark glossy visible eye, and the tiny friendly toothy smile. It is a SHARK, not a humanoid: no legs, no feet, no hands, no arms. Preserve its real fish-like paired pectoral fins as fins. Idle uses tiny breathing/blink and fin motion. Eight-phase locomotion is an in-place swimming tail beat with a slight body curve, gentle fin adjustment and stable head registration. No water or bubbles in the atlas; transparency only.",
+      "reference": "D:\\download\\PetCast-main (1)\\PetCast-main\\public\\assets\\pets\\shark.png",
+      "prompt": "Use case: identity-preserve. Asset type: PetCast game animation sprite sheet for the EXISTING referenced pixel animal.\nInput image 1 is the exact existing PetCast character and identity reference; it is not a generic style suggestion. Preserve its face, eye shape, proportions, silhouette, markings, palette and chunky pixel clusters, with no redesign.\nDeliver one genuine transparent RGBA PNG sprite atlas, ideally 1536 x 1152 pixels. EXACTLY 4 equal columns and 3 equal rows: 12 separate full-body sprites in a strict invisible regular grid. Each cell is 384 x 384 pixels at that resolution. No drawn grid, no panel backgrounds, no labels, no numbers, no lettering, no watermark, no floor, no cast shadows and no extra objects.\nAll 12 characters must be the SAME individual at the SAME scale, facing the same RIGHT-FACING THREE-QUARTER direction as the reference, with a fixed camera and matching body/head registration. Every sprite, including ears/tail/fins, must be completely inside its own cell with at least 24 pixels of clear padding. Never clip or overlap cells.\nAnimation order is row-major: ROW 1 is a four-frame looping idle animation: neutral eyes open, a tiny breath with slight tail motion, a brief blink, return to eyes open. ROWS 2 and 3 together are a single EIGHT-FRAME looping locomotion cycle, four frames per row, continuing in temporal order. It is an in-place cycle: do not translate the whole animal across the sheet. The pose must actually change coherently, not eight identical stills. First and last phases must connect smoothly.\nPixel art only, matching the reference's detailed friendly game sprite aesthetic. Keep crisp square pixel steps, stable pixel size, restrained highlights, warm dark outlines and the original colors. Do not smooth into vector art, 3D or realistic painting. Maintain anatomical consistency in every frame.\nSubject-specific identity and movement constraints:\nThe EXACT original round slate/ocean-blue shark with a large dorsal fin, upright asymmetric tail fin on its left, cream belly and muzzle, three blue gill marks, dark glossy visible eye, and the tiny friendly toothy smile. It is a SHARK, not a humanoid: no legs, no feet, no hands, no arms. Preserve its real fish-like paired pectoral fins as fins. Idle uses tiny breathing/blink and fin motion. Eight-phase locomotion is an in-place swimming tail beat with a slight body curve, gentle fin adjustment and stable head registration. No water or bubbles in the atlas; transparency only."
+    },
+    {
+      "id": "chicken",
+      "name": "鸡",
+      "motion": "walk",
+      "detail": "The EXACT original cream-white chicken, deep red comb and wattle, golden-yellow beak and two golden-yellow scaly feet, warm brown pixel outline, small dark eye and short raised feather tail. Exactly TWO legs and bird wings, no arms or four-legged anatomy. Eight-phase walking cycle alternates the two bird feet, with small natural head bob and wing/feather settling. Keep the reference's chicken body and comb silhouette, not a baby chick.",
+      "reference": "D:\\download\\PetCast-main (1)\\PetCast-main\\public\\assets\\pets\\chicken.png",
+      "prompt": "Use case: identity-preserve. Asset type: PetCast game animation sprite sheet for the EXISTING referenced pixel animal.\nInput image 1 is the exact existing PetCast character and identity reference; it is not a generic style suggestion. Preserve its face, eye shape, proportions, silhouette, markings, palette and chunky pixel clusters, with no redesign.\nDeliver one genuine transparent RGBA PNG sprite atlas, ideally 1536 x 1152 pixels. EXACTLY 4 equal columns and 3 equal rows: 12 separate full-body sprites in a strict invisible regular grid. Each cell is 384 x 384 pixels at that resolution. No drawn grid, no panel backgrounds, no labels, no numbers, no lettering, no watermark, no floor, no cast shadows and no extra objects.\nAll 12 characters must be the SAME individual at the SAME scale, facing the same RIGHT-FACING THREE-QUARTER direction as the reference, with a fixed camera and matching body/head registration. Every sprite, including ears/tail/fins, must be completely inside its own cell with at least 24 pixels of clear padding. Never clip or overlap cells.\nAnimation order is row-major: ROW 1 is a four-frame looping idle animation: neutral eyes open, a tiny breath with slight tail motion, a brief blink, return to eyes open. ROWS 2 and 3 together are a single EIGHT-FRAME looping locomotion cycle, four frames per row, continuing in temporal order. It is an in-place cycle: do not translate the whole animal across the sheet. The pose must actually change coherently, not eight identical stills. First and last phases must connect smoothly.\nPixel art only, matching the reference's detailed friendly game sprite aesthetic. Keep crisp square pixel steps, stable pixel size, restrained highlights, warm dark outlines and the original colors. Do not smooth into vector art, 3D or realistic painting. Maintain anatomical consistency in every frame.\nSubject-specific identity and movement constraints:\nThe EXACT original cream-white chicken, deep red comb and wattle, golden-yellow beak and two golden-yellow scaly feet, warm brown pixel outline, small dark eye and short raised feather tail. Exactly TWO legs and bird wings, no arms or four-legged anatomy. Eight-phase walking cycle alternates the two bird feet, with small natural head bob and wing/feather settling. Keep the reference's chicken body and comb silhouette, not a baby chick."
+    },
+    {
+      "id": "rabbit",
+      "name": "兔子",
+      "motion": "hop",
+      "detail": "The EXACT original cream-white rabbit with the two very long ears in the original uneven ear pose, pale pink inner ears and tiny pink nose, glossy dark visible eye, fluffy round tail and compact four-pawed body. Eight-phase locomotion is a gentle low bunny hopping cycle: front paws reach, hind legs compress and extend, short lift, landing and recovery. Keep a fixed ground anchor within each cell; only the small natural hop moves the body vertically. Do not shorten the ears, add clothing, change face shape or lose any paw.",
+      "reference": "D:\\download\\PetCast-main (1)\\PetCast-main\\public\\assets\\pets\\rabbit.png",
+      "prompt": "Use case: identity-preserve. Asset type: PetCast game animation sprite sheet for the EXISTING referenced pixel animal.\nInput image 1 is the exact existing PetCast character and identity reference; it is not a generic style suggestion. Preserve its face, eye shape, proportions, silhouette, markings, palette and chunky pixel clusters, with no redesign.\nDeliver one genuine transparent RGBA PNG sprite atlas, ideally 1536 x 1152 pixels. EXACTLY 4 equal columns and 3 equal rows: 12 separate full-body sprites in a strict invisible regular grid. Each cell is 384 x 384 pixels at that resolution. No drawn grid, no panel backgrounds, no labels, no numbers, no lettering, no watermark, no floor, no cast shadows and no extra objects.\nAll 12 characters must be the SAME individual at the SAME scale, facing the same RIGHT-FACING THREE-QUARTER direction as the reference, with a fixed camera and matching body/head registration. Every sprite, including ears/tail/fins, must be completely inside its own cell with at least 24 pixels of clear padding. Never clip or overlap cells.\nAnimation order is row-major: ROW 1 is a four-frame looping idle animation: neutral eyes open, a tiny breath with slight tail motion, a brief blink, return to eyes open. ROWS 2 and 3 together are a single EIGHT-FRAME looping locomotion cycle, four frames per row, continuing in temporal order. It is an in-place cycle: do not translate the whole animal across the sheet. The pose must actually change coherently, not eight identical stills. First and last phases must connect smoothly.\nPixel art only, matching the reference's detailed friendly game sprite aesthetic. Keep crisp square pixel steps, stable pixel size, restrained highlights, warm dark outlines and the original colors. Do not smooth into vector art, 3D or realistic painting. Maintain anatomical consistency in every frame.\nSubject-specific identity and movement constraints:\nThe EXACT original cream-white rabbit with the two very long ears in the original uneven ear pose, pale pink inner ears and tiny pink nose, glossy dark visible eye, fluffy round tail and compact four-pawed body. Eight-phase locomotion is a gentle low bunny hopping cycle: front paws reach, hind legs compress and extend, short lift, landing and recovery. Keep a fixed ground anchor within each cell; only the small natural hop moves the body vertically. Do not shorten the ears, add clothing, change face shape or lose any paw."
+    }
+  ]
+}

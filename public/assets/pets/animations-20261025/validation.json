@@ -1,0 +1,98 @@
+{
+  "animals": {
+    "cat": {
+      "frames": 12,
+      "uniqueIdleFrames": 4,
+      "uniqueMotionFrames": 8,
+      "frameSide": 448,
+      "sourceSize": [
+        1448,
+        1086
+      ],
+      "alphaExtrema": [
+        0,
+        255
+      ],
+      "fullCharacterIslands": 12,
+      "allExportMarginsAtLeast24px": true,
+      "pngOpenChecksPassed": true,
+      "sourcePixelsRescaled": false
+    },
+    "dog": {
+      "frames": 12,
+      "uniqueIdleFrames": 4,
+      "uniqueMotionFrames": 8,
+      "frameSide": 448,
+      "sourceSize": [
+        1448,
+        1086
+      ],
+      "alphaExtrema": [
+        0,
+        255
+      ],
+      "fullCharacterIslands": 12,
+      "allExportMarginsAtLeast24px": true,
+      "pngOpenChecksPassed": true,
+      "sourcePixelsRescaled": false
+    },
+    "shark": {
+      "frames": 12,
+      "uniqueIdleFrames": 4,
+      "uniqueMotionFrames": 8,
+      "frameSide": 464,
+      "sourceSize": [
+        1448,
+        1086
+      ],
+      "alphaExtrema": [
+        0,
+        255
+      ],
+      "fullCharacterIslands": 12,
+      "allExportMarginsAtLeast24px": true,
+      "pngOpenChecksPassed": true,
+      "sourcePixelsRescaled": false
+    },
+    "chicken": {
+      "frames": 12,
+      "uniqueIdleFrames": 4,
+      "uniqueMotionFrames": 8,
+      "frameSide": 448,
+      "sourceSize": [
+        1448,
+        1086
+      ],
+      "alphaExtrema": [
+        0,
+        255
+      ],
+      "fullCharacterIslands": 12,
+      "allExportMarginsAtLeast24px": true,
+      "pngOpenChecksPassed": true,
+      "sourcePixelsRescaled": false
+    },
+    "rabbit": {
+      "frames": 12,
+      "uniqueIdleFrames": 4,
+      "uniqueMotionFrames": 8,
+      "frameSide": 336,
+      "sourceSize": [
+        1448,
+        1086
+      ],
+      "alphaExtrema": [
+        0,
+        255
+      ],
+      "fullCharacterIslands": 12,
+      "allExportMarginsAtLeast24px": true,
+      "pngOpenChecksPassed": true,
+      "sourcePixelsRescaled": false
+    }
+  },
+  "notes": [
+    "Whole-character extraction avoids generated grid spacing errors.",
+    "Rabbit framing corrected with built-in imagegen. GIF is an opaque viewing copy; PNG retains alpha."
+  ]
+}
