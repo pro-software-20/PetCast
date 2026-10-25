@@ -4,6 +4,8 @@ export type ChatGptAuthErrorCode =
   | 'TIMEOUT'
   | 'SCOPE_MISSING'
   | 'REAUTH_REQUIRED'
+  | 'AUTHORIZATION_RETRY_REQUIRED'
+  | 'REGION_UNSUPPORTED'
   | 'NETWORK_UNAVAILABLE'
   | 'STORAGE_UNAVAILABLE'
   | 'UNAVAILABLE'
@@ -48,6 +50,8 @@ export const CHATGPT_AUTH_MESSAGES: Record<ChatGptAuthErrorCode, string> = {
   TIMEOUT: 'ChatGPT 登录等待超时，请重新尝试。',
   SCOPE_MISSING: '账号已登录，但尚未授权 PetCast 使用 ChatGPT 计划。请重新连接并同意授权。',
   REAUTH_REQUIRED: 'ChatGPT 登录已失效，请重新连接。',
+  AUTHORIZATION_RETRY_REQUIRED: '首次注册已完成，但本次授权码无法继续使用。请重新授权。',
+  REGION_UNSUPPORTED: '当前地区无法使用 ChatGPT 授权。你仍可复制任务 Prompt，前往可用的 AI 手动执行。',
   NETWORK_UNAVAILABLE: '暂时无法连接 ChatGPT 登录服务，请检查网络后重试。',
   STORAGE_UNAVAILABLE: '系统安全存储不可用，PetCast 不会以明文保存登录凭据。',
   UNAVAILABLE: 'ChatGPT 登录服务暂时不可用，请稍后重试。',

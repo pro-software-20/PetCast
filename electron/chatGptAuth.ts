@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import { createServer, type Server } from 'node:http'
+import { createServer, type Server, type ServerResponse } from 'node:http'
 import path from 'node:path'
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
 import type { CodexScopeIdentity } from './codexScopeIdentity.js'
@@ -131,6 +131,22 @@ const safeJson = async (response: Response, maxBytes = 128 * 1024) => {
   if (Buffer.byteLength(text) > maxBytes) throw new ChatGptAuthError('INVALID_RESPONSE')
   try { return JSON.parse(text) as unknown }
   catch { throw new ChatGptAuthError('INVALID_RESPONSE') }
+}
+
+const oauthErrorCode = (value: unknown) => {
+  if (!isRecord(value)) return undefined
+  const direct = stringField(value.error, 200)
+  if (direct) return direct
+  if (isRecord(value.error)) return stringField(value.error.code, 200)
+  return stringField(value.code, 200)
+}
+
+const tokenExchangeError = (value: unknown) => {
+  const code = oauthErrorCode(value)
+  if (code === 'invalid_grant') return new ChatGptAuthError('AUTHORIZATION_RETRY_REQUIRED')
+  if (code === 'unsupported_country_region_territory') return new ChatGptAuthError('REGION_UNSUPPORTED')
+  if (code === 'invalid_client') return new ChatGptAuthError('INVALID_RESPONSE')
+  return new ChatGptAuthError('UNAVAILABLE')
 }
 
 const invalidRefreshCodes = new Set([
@@ -377,6 +393,19 @@ export class ChatGptAuthService {
     }
     const cancel = () => finish(() => reject(new ChatGptAuthError('CANCELLED')))
     signal.addEventListener('abort', cancel, { once: true })
+    const callbackPage = (title: string, message: string) => (
+      '<!doctype html><meta charset="utf-8"><title>PetCast</title>'
+      + '<style>body{font:16px system-ui;padding:3rem;color:#244}main{max-width:34rem;margin:auto}</style>'
+      + `<main><h1>${title}</h1><p>${message}</p></main>`
+    )
+    const respond = (response: ServerResponse, status: number, title: string, message: string) => {
+      response.writeHead(status, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
+      })
+      response.end(callbackPage(title, message))
+    }
     const server = createServer((request, response) => {
       let url: URL
       try { url = new URL(request.url ?? '/', 'http://127.0.0.1') }
@@ -385,21 +414,31 @@ export class ChatGptAuthService {
         response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found')
         return
       }
-      response.writeHead(200, {
-        'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'no-store',
-        'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
-      })
-      response.end('<!doctype html><meta charset="utf-8"><title>PetCast</title><style>body{font:16px system-ui;padding:3rem;color:#244}main{max-width:34rem;margin:auto}</style><main><h1>可以返回 PetCast 了</h1><p>登录结果已安全交给桌面应用，此页面可以关闭。</p></main>')
       finish(() => {
-        if (url.searchParams.get('state') !== state) return reject(new ChatGptAuthError('INVALID_RESPONSE'))
-        if (url.searchParams.get('error')) return reject(new ChatGptAuthError('CANCELLED'))
-        const code = url.searchParams.get('code')
-        if (!code || code.length > 8_192) return reject(new ChatGptAuthError('INVALID_RESPONSE'))
-        const clientId = url.searchParams.get('client_id') ?? undefined
-        if (clientId && (clientId.length > 500 || !/^oaiapp_[A-Za-z0-9_-]+$/.test(clientId))) {
+        if (url.searchParams.get('state') !== state) {
+          respond(response, 400, '授权结果无效', '请返回 PetCast 后重新尝试。')
           return reject(new ChatGptAuthError('INVALID_RESPONSE'))
         }
+        const oauthError = url.searchParams.get('error')
+        if (oauthError === 'access_denied') {
+          respond(response, 200, '授权已取消', '可以关闭此页面并返回 PetCast。')
+          return reject(new ChatGptAuthError('CANCELLED'))
+        }
+        if (oauthError) {
+          respond(response, 400, '授权结果无效', '请返回 PetCast 后重新尝试。')
+          return reject(new ChatGptAuthError('INVALID_RESPONSE'))
+        }
+        const code = url.searchParams.get('code')
+        if (!code || code.length > 8_192) {
+          respond(response, 400, '授权结果无效', '请返回 PetCast 后重新尝试。')
+          return reject(new ChatGptAuthError('INVALID_RESPONSE'))
+        }
+        const clientId = url.searchParams.get('client_id') ?? undefined
+        if (clientId && (clientId.length > 500 || !/^oaiapp_[A-Za-z0-9_-]+$/.test(clientId))) {
+          respond(response, 400, '授权结果无效', '请返回 PetCast 后重新尝试。')
+          return reject(new ChatGptAuthError('INVALID_RESPONSE'))
+        }
+        respond(response, 200, '授权结果已收到', 'PetCast 正在完成安全验证，此页面可以关闭。')
         settle({ code, ...(clientId ? { clientId } : {}) })
       })
     })
@@ -441,8 +480,13 @@ export class ChatGptAuthService {
         redirect: 'error',
       })
     } catch (error) { throw mapNetworkError(error) }
-    const value = await safeJson(response)
-    if (!response.ok) throw new ChatGptAuthError('UNAVAILABLE')
+    let value: unknown
+    try { value = await safeJson(response) }
+    catch (error) {
+      if (!response.ok && response.status >= 500) throw new ChatGptAuthError('UNAVAILABLE')
+      throw error
+    }
+    if (!response.ok) throw tokenExchangeError(value)
     return tokenResponse(value, this.now()).credentials
   }
 

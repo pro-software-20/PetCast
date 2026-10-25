@@ -425,7 +425,7 @@ export function TaskAnalysisPanel({
             <button type="button" onClick={() => void signOutChatGpt()}>断开连接</button>
           </> : chatGptAuth.status !== 'browser' ? (
             <button type="button" className="chatgpt-continue" onClick={() => void signInWithChatGpt()}>
-              Continue with ChatGPT
+              {chatGptAuthPresentation.actionLabel}
             </button>
           ) : null}
         </div>
