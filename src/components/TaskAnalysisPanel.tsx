@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { BrainProvider } from '../orchestration/BrainProvider'
 import { LocalBrainProvider } from '../orchestration/LocalBrainProvider'
@@ -24,6 +24,14 @@ import type {
 import type { ProviderProfile, TaskSessionV1 } from '../types/taskOrchestration'
 import { copyText } from '../utils/copyText'
 import { TaskPlanCards } from './TaskPlanCards'
+import {
+  describeCodexEnvironment,
+  type CodexEnvironmentState,
+} from '../codex/codexEnvironment'
+import {
+  MINIMUM_CODEX_VERSION,
+  type CodexEnvironmentResult,
+} from '../../electron/codexEnvironmentProtocol'
 
 export interface TaskAnalysisPanelProps {
   analyzer?: TaskAnalyzer
@@ -70,7 +78,6 @@ export function TaskAnalysisPanel({
   brainProvider,
   providers = DEFAULT_PROVIDER_PROFILES,
   sessionStore = defaultSessionStore,
-  codexExecutionScope,
   onClose,
 }: TaskAnalysisPanelProps) {
   const initialFileSelection = mergeTaskAnalysisFiles([], initialFiles)
@@ -90,6 +97,47 @@ export function TaskAnalysisPanel({
   const analysisRequestId = useRef(0)
   const planningController = useRef<AbortController | null>(null)
   const restoreRequestId = useRef(0)
+  const codexEnvironmentRequest = useRef<string | null>(null)
+  const [codexEnvironment, setCodexEnvironment] = useState<CodexEnvironmentState>(() => (
+    window.petcast?.checkCodexEnvironment ? { status: 'checking' } : { status: 'browser' }
+  ))
+
+  const checkCodex = useCallback(async () => {
+    if (!window.petcast?.checkCodexEnvironment) {
+      setCodexEnvironment({ status: 'browser' })
+      return
+    }
+    const previous = codexEnvironmentRequest.current
+    if (previous) window.petcast.cancelCodexEnvironment(previous)
+    const requestId = `environment-${globalThis.crypto.randomUUID()}`
+    codexEnvironmentRequest.current = requestId
+    setCodexEnvironment({ status: 'checking' })
+    try {
+      const result = await window.petcast.checkCodexEnvironment(requestId)
+      if (codexEnvironmentRequest.current !== requestId) return
+      setCodexEnvironment(result.ok ? { status: 'ready', result } : { status: 'error', result })
+    } catch {
+      if (codexEnvironmentRequest.current !== requestId) return
+      const result: Extract<CodexEnvironmentResult, { ok: false }> = {
+        ok: false,
+        code: 'UNAVAILABLE',
+        checkedAt: new Date().toISOString(),
+        minimumVersion: MINIMUM_CODEX_VERSION,
+      }
+      setCodexEnvironment({ status: 'error', result })
+    } finally {
+      if (codexEnvironmentRequest.current === requestId) codexEnvironmentRequest.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    void checkCodex()
+    return () => {
+      const requestId = codexEnvironmentRequest.current
+      codexEnvironmentRequest.current = null
+      if (requestId) window.petcast?.cancelCodexEnvironment?.(requestId)
+    }
+  }, [checkCodex])
 
   const persistSession = async (session: TaskSessionV1) => {
     const outcome = await sessionStore.save(session)
@@ -288,6 +336,7 @@ export function TaskAnalysisPanel({
 
   const sessionStarted = Boolean(taskSession?.runs.some(run => run.attempt > 0 || !['waiting', 'ready'].includes(run.status)))
   const sessionLocked = sessionStarted || Boolean(completedSession) || storageBlocked
+  const codexEnvironmentPresentation = describeCodexEnvironment(codexEnvironment)
 
   return (
     <section
@@ -304,6 +353,21 @@ export function TaskAnalysisPanel({
       {onClose && (
         <button type="button" className="task-analysis-close" onClick={onClose} aria-label="关闭任务分析">×</button>
       )}
+
+      <section className={`codex-environment-status is-${codexEnvironmentPresentation.tone}`} role="status">
+        <div>
+          <strong>{codexEnvironmentPresentation.title}</strong>
+          <p>{codexEnvironmentPresentation.message}</p>
+          {codexEnvironmentPresentation.version && (
+            <small>当前版本：{codexEnvironmentPresentation.version}；最低支持：{MINIMUM_CODEX_VERSION}</small>
+          )}
+        </div>
+        {codexEnvironment.status !== 'browser' && (
+          <button type="button" disabled={codexEnvironment.status === 'checking'} onClick={() => void checkCodex()}>
+            {codexEnvironment.status === 'checking' ? '检查中…' : '重新检查'}
+          </button>
+        )}
+      </section>
 
       {completedSession && !taskSession && (
         <div className="task-session-restore" role="status">
@@ -454,7 +518,7 @@ export function TaskAnalysisPanel({
           key={taskSession.id}
           session={taskSession}
           providers={providers}
-          codexExecutionScope={codexExecutionScope}
+          codexEnvironment={codexEnvironment}
           onSessionChange={handleSessionChange}
         />
       )}

@@ -982,6 +982,29 @@ pnpm check:codex
 git diff --check
 ```
 
+## 22.2. B 模块 P2.6.1：Codex 环境自检与人工回退
+
+任务分析页在桌面版打开时自动检查本机 Codex 环境，不再通过“真实额度是否读取成功”间接判断自动执行能力。
+
+- 自检检查 Codex CLI 是否存在、版本是否不低于 `0.163.0`，并通过短生命周期 app-server 核对 ChatGPT 登录和匿名账号作用域。
+- 自检只调用只读账号接口，不创建线程、不启动 `turn`，因此不会产生推理 Token。
+- 额度响应只用于取得账号工作区标识，不解析 5 小时或周额度窗口；额度页面失败不会单独禁用自动执行。
+- Renderer 只接收版本、检查时间、结构化状态和安装级 HMAC 生成的匿名 `scopeId`，不会收到邮箱、账号 ID、Codex 路径、stderr 或凭据。
+- 未安装、版本过低、未登录、账号类型不支持、超时和协议异常均显示对应处理建议，并始终保留人工复制 Prompt 流程。
+- 浏览器模式明确提示自动执行仅桌面版可用；页面关闭、重新检查或导航时会取消旧检查，迟到结果不会覆盖新状态。
+- 本机 Codex 登录复用仍属于本地试验能力；正式公开发行仍需另行接入官方 OAuth、令牌刷新和应用注册。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm check:codex
+git diff --check
+```
+
 ## 23. D 模块后续接入说明
 
 D v4 已提供 `recommendTaskPlan(pendingTask, taskRecords, modelCapacities, now)` 及对应页面。B 可直接传入待办条件与各模型当前资源，获取同一任务的模型 / 时间方案。详见 `docs/D_UNIFIED_PLAN.md`。执行前仍需重新确认资源，不能把 recheck 当成确定排期；D 不负责自动调用或队列资源预留。

@@ -3,6 +3,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promises as fs, mkdtempSync } from 'node:fs'
 import path from 'node:path'
 import { registerCodexUsageIpc } from './codexIpc.js'
+import { registerCodexEnvironmentIpc } from './codexEnvironmentIpc.js'
 import { registerUsageHistoryIpc } from './historyIpc.js'
 import { registerPromptOptimizationIpc } from './promptOptimizationIpc.js'
 import { registerWorkspaceIpc } from './workspaceIpc.js'
@@ -85,6 +86,8 @@ const createWindow = () => {
       void mainWindow?.webContents.executeJavaScript(
         `typeof window.petcast?.readCodexUsage === 'function'
           && typeof window.petcast?.cancelCodexUsage === 'function'
+          && typeof window.petcast?.checkCodexEnvironment === 'function'
+          && typeof window.petcast?.cancelCodexEnvironment === 'function'
           && typeof window.petcast?.optimizeTaskPrompt === 'function'
           && typeof window.petcast?.selectTaskWorkspace === 'function'
           && typeof window.petcast?.prepareCodexTaskExecution === 'function'
@@ -138,6 +141,7 @@ if (ownsInstance) app.whenReady().then(() => {
   const workspaceRegistry = new WorkspaceRegistry()
   const codexIdentity = createCodexScopeIdentity(app.getPath('userData'))
   registerCodexUsageIpc(() => mainWindow, app.getPath('userData'), rendererUrl, codexIdentity)
+  registerCodexEnvironmentIpc({ getWindow: () => mainWindow, rendererUrl, identity: codexIdentity })
   registerUsageHistoryIpc(() => mainWindow, app.getPath('userData'), rendererUrl)
   registerPromptOptimizationIpc(
     () => mainWindow,

@@ -27,6 +27,8 @@ test('preload runs in a sandbox-style CommonJS environment and exposes only name
   assert.equal(bridge.exec, undefined)
   await bridge.readCodexUsage('request-1')
   bridge.cancelCodexUsage('request-1')
+  await bridge.checkCodexEnvironment('environment-1')
+  bridge.cancelCodexEnvironment('environment-1')
   const promptInput = { prompt: 'test', taskType: 'general', files: [] }
   await bridge.optimizeTaskPrompt(promptInput)
   await bridge.selectTaskWorkspace('workspace-1')
@@ -41,6 +43,8 @@ test('preload runs in a sandbox-style CommonJS environment and exposes only name
   assert.deepEqual(calls, [
     ['codex:read-usage', 'request-1'],
     ['codex:cancel-usage', 'request-1'],
+    ['codex:check-environment', 'environment-1'],
+    ['codex:cancel-environment', 'environment-1'],
     ['prompt:optimize', promptInput],
     ['workspace:select', 'workspace-1'],
     ['workspace:cancel', 'workspace-1'],

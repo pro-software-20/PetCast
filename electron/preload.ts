@@ -3,6 +3,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 contextBridge.exposeInMainWorld('petcast', {
   readCodexUsage: (requestId: string) => ipcRenderer.invoke('codex:read-usage', requestId),
   cancelCodexUsage: (requestId: string) => ipcRenderer.send('codex:cancel-usage', requestId),
+  checkCodexEnvironment: (requestId: string) => ipcRenderer.invoke('codex:check-environment', requestId),
+  cancelCodexEnvironment: (requestId: string) => ipcRenderer.send('codex:cancel-environment', requestId),
   optimizeTaskPrompt: (input: import('./promptOptimizationProtocol.js').PromptOptimizationRequest) => (
     ipcRenderer.invoke('prompt:optimize', input)
   ),
