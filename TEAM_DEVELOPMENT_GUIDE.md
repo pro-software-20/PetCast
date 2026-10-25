@@ -1040,6 +1040,29 @@ pnpm test:desktop
 git diff --check
 ```
 
+## 22.4. B 模块 P2.7：端到端验收与收尾
+
+P2.7 新增 `pnpm test:task-ui`，在隐藏 Electron 窗口中使用临时项目、临时存储和固定 IPC fixture 验证 B 模块完整闭环。测试主动拦截所有 HTTP/HTTPS 请求，不打开 OAuth 页面、不调用真实模型，也不产生推理 Token。
+
+- 覆盖空输入、输入变化失效、混合任务拆解、逐任务 AI 推荐、并行根任务和局部依赖。
+- 覆盖 OAuth 地区限制、Codex 不可用时的人工 Prompt 回退，以及人工结果、逐项验收和最终报告。
+- 覆盖工作区目录授权、模拟 Codex prepare/run、受限 diff、应用改动和供应商 Token 账本记录。
+- 覆盖未完成/已完成会话恢复、自动执行中断恢复和损坏存档的显式清理。
+- 验收发现整页刷新不保证触发 React 卸载清理；任务执行 IPC 已增加 Renderer 导航/销毁取消，防止后台 Codex 继续运行。
+
+本轮 365 项契约测试全部通过；详细验收矩阵、人工视觉检查和限制见 `docs/B_P27_ACCEPTANCE.md`。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
+
 ## 23. D 模块后续接入说明
 
 D v4 已提供 `recommendTaskPlan(pendingTask, taskRecords, modelCapacities, now)` 及对应页面。B 可直接传入待办条件与各模型当前资源，获取同一任务的模型 / 时间方案。详见 `docs/D_UNIFIED_PLAN.md`。执行前仍需重新确认资源，不能把 recheck 当成确定排期；D 不负责自动调用或队列资源预留。
