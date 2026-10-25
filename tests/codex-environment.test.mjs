@@ -103,12 +103,50 @@ test('ready check reads account scope without requiring quota window shapes', as
   assert.equal(result.ok, true)
   assert.equal(result.cliVersion, '0.163.0')
   assert.equal(result.scopeId, `codex-${'a'.repeat(64)}`)
+  assert.equal(result.authMode, 'local-codex-experimental')
   assert.deepEqual(identityCalls.at(-1), ['private@example.com', 'workspace-a'])
   assert.deepEqual(fake.calls.map(args => args[0]), ['--version', 'app-server'])
   assert.deepEqual(fake.rpcMethods, ['initialize', 'account/read', 'account/rateLimits/read', 'account/read'])
   assert.ok(!fake.rpcMethods.some(method => method === 'thread/start' || method === 'turn/start'))
   const serialized = JSON.stringify(result)
   assert.doesNotMatch(serialized, /private@example|C:\\private/)
+})
+
+test('connected ChatGPT OAuth session makes the environment ready without reading local account data', async () => {
+  const fake = fakeLaunch()
+  const scopeId = `codex-${'d'.repeat(64)}`
+  const result = await run(fake, {
+    readOAuthSession: async () => ({
+      ok: true,
+      status: 'connected',
+      sharing: true,
+      checkedAt: '2026-10-25T00:00:00.000Z',
+      scopeId,
+    }),
+  })
+  assert.equal(result.ok, true)
+  assert.equal(result.scopeId, scopeId)
+  assert.equal(result.authMode, 'chatgpt-oauth')
+  assert.deepEqual(fake.calls.map(args => args[0]), ['--version'])
+  assert.deepEqual(fake.rpcMethods, [])
+})
+
+test('OAuth is required unless the explicit local-login experiment is enabled', async () => {
+  const fake = fakeLaunch()
+  const readOAuthSession = async () => ({
+    ok: true,
+    status: 'disconnected',
+    sharing: false,
+    checkedAt: '2026-10-25T00:00:00.000Z',
+  })
+  const required = await run(fake, { readOAuthSession })
+  assert.equal(required.code, 'AUTH_REQUIRED')
+  assert.deepEqual(fake.calls.map(args => args[0]), ['--version'])
+
+  const fallbackFake = fakeLaunch()
+  const fallback = await run(fallbackFake, { readOAuthSession, experimentalLocalAuth: true })
+  assert.equal(fallback.ok, true)
+  assert.equal(fallback.authMode, 'local-codex-experimental')
 })
 
 test('old version is rejected before app-server starts', async () => {

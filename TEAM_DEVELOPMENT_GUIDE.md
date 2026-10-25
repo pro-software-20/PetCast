@@ -1005,6 +1005,30 @@ pnpm check:codex
 git diff --check
 ```
 
+## 22.3. B 模块 P2.6.2：Continue with ChatGPT 与 OAuth 执行授权
+
+P2.6.2 将公开版 Codex 自动执行的账号来源从“复用本机 Codex 登录”调整为用户明确触发的 **Continue with ChatGPT** 授权。
+
+- Electron 主进程按 OpenAI 公开协议实现动态客户端注册、PKCE、`state` / `nonce`、回环回调、ID Token 校验、刷新令牌轮换和断开时的远程撤销。
+- 系统安全存储不可用时拒绝持久化登录，不降级为明文存储。本机文件只保存密文与非敏感 host ID。
+- Renderer 只获得连接状态、脱敏身份、匿名 `scopeId` 和安全错误码；访问令牌、刷新令牌、ID Token、完整邮箱和 OAuth 响应均不进入页面、任务会话或 D 模块日志。
+- 自动执行前主进程取得当前有效 Token 并核对匿名账号作用域，然后仅通过 app-server 子进程的 `ACCESS_TOKEN` 环境变量传入；任务 IPC 不包含 Token。
+- 旧的本机 Codex 登录复用仅在 `PETCAST_EXPERIMENTAL_LOCAL_CODEX_AUTH=1` 时启用，默认公开构建不使用该回退。
+- 页面支持连接、取消登录、管理用量和断开连接；授权失败时 Codex 自动执行禁用，人工复制 Prompt 始终可用。
+- 当前实现使用 MIT 许可的 `jose` 做 OIDC/JWT 验证，没有复制非 MIT 开发包代码；仓库增加 MIT `LICENSE`。
+
+自动测试覆盖加密持久化、脱敏返回、刷新令牌轮换、作用域不匹配、取消/超时、撤销、可信主 frame IPC、OAuth 环境自检和 Token 主进程注入。正式发布前还需完成 OpenAI 应用注册、隐私政策、多电脑登录和安装包验收。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+git diff --check
+```
+
 ## 23. D 模块后续接入说明
 
 D v4 已提供 `recommendTaskPlan(pendingTask, taskRecords, modelCapacities, now)` 及对应页面。B 可直接传入待办条件与各模型当前资源，获取同一任务的模型 / 时间方案。详见 `docs/D_UNIFIED_PLAN.md`。执行前仍需重新确认资源，不能把 recheck 当成确定排期；D 不负责自动调用或队列资源预留。

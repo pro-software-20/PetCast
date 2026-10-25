@@ -7,7 +7,7 @@
 | 模块 | 分工 | 当前状态 |
 | --- | --- | --- |
 | [A](#a真实-codex-额度模块) | 真实 Codex 额度读取 | 本机通路验证通过；组员反馈安装后数值正常，异机完整验收待完成 |
-| [B](#b任务分析与-prompt-优化) | 任务分析、Prompt 优化与人工多 AI 编排 | 本地规则、可选 DeepSeek 优化和人工任务闭环已接入；精确估算与自动执行待开发 |
+| [B](#b任务分析与-prompt-优化) | 任务分析、Prompt 优化与多 AI 编排 | 本地规则、可选 DeepSeek 优化、人工任务闭环和受限 Codex 自动执行试点已接入 |
 | [C](#c宠物场景主程序整合与-exe) | 宠物、场景、主程序整合与 EXE | 桌宠、场景及现有模块入口已具备；换宠物、换场景和安装包待完成 |
 | [D](#d历史记录与周月报) | 历史记录、周报、月报与习惯建议 | 历史与报告已接入；真实任务统计仍需执行器提供调用记录 |
 
@@ -50,6 +50,17 @@ pnpm dev
 ```
 
 本机验证可在被 Git 忽略的 `.env.local` 中设置 `DEEPSEEK_API_KEY`，再运行 `pnpm dev:ai`。服务只接收 Prompt 和文件名、MIME、大小，不读取或上传附件内容。API Key 不会进入 React 页面、构建产物或 EXE；调用失败、超时或限流时自动回退本地规则。公网部署必须使用 HTTPS、持久化限流目录和服务端消费上限。
+
+### ChatGPT 连接与 Codex 自动执行（试点）
+
+桌面版任务分析页可通过 **Continue with ChatGPT** 在系统浏览器中完成授权。PetCast 使用 PKCE 和回环回调，访问凭据仅在 Electron 主进程中使用，并通过操作系统安全存储加密；React 页面、任务存档和执行日志不会收到 Token。
+
+- 只有已授权工作区内的 `coding` / `testing` 任务可进入 Codex 自动执行；其他 AI 仍使用人工复制 Prompt。
+- Codex 始终先在隔离副本中工作，用户审查 diff 并明确确认后才能写回原项目。
+- 断开连接时会尝试远程撤销可续期会话，并清除本机凭据；页面也可打开 ChatGPT 用量设置。
+- 开发者如需回退到旧的本机 Codex 登录复用，可显式设置 `PETCAST_EXPERIMENTAL_LOCAL_CODEX_AUTH=1`；公开版默认禁用此回退。
+
+该接入按 OpenAI 公开的 Sign in with ChatGPT 协议和 app-server `ACCESS_TOKEN` 方式实现。发布前仍需完成应用注册、隐私政策、异机登录以及安装包验收。
 
 
 ## 已完成的桌宠与演示功能
@@ -100,6 +111,8 @@ pnpm dev
 - 严格校验的任务图支持 Codex、DeepSeek、豆包和本地规则推荐，并允许执行前调整依赖
 - 人工任务卡支持复制 Prompt、结果回收、逐项验收、会话恢复和 Markdown 报告
 - `TaskAnalysisPanel` 已接入主程序，支持文件选择、结果展示和结构化错误提示
+- 桌面版支持 Continue with ChatGPT、加密会话、自动刷新、断开连接与匿名账号作用域核对
+- 符合条件的 Codex 编程/测试任务可在隔离副本中执行，并经 diff 预览和人工确认后安全应用
 
 ## 团队接口与开发状态
 
@@ -140,8 +153,8 @@ pnpm check:codex
 - `LocalBrainProvider` 会生成经过严格 DAG 校验的 `TaskPlan`，按编程、研究、写作和测试能力推荐 Codex、DeepSeek、豆包或本地规则。
 - 人工任务卡支持逐卡切换 AI、复制专属 Prompt、粘贴外部结果、逐项验收、依赖解锁和执行前人工调整依赖。
 - 最近一次任务会话独立保存；全部任务与最终验收通过后，可复制或下载不含完整 AI 正文的 Markdown 摘要报告。
-- 附件只使用名称、MIME 和大小，不读取文件正文，也不会伪造工作区路径或自动修改文件。
-- 当前不会自动调用外部 AI，也不把启发式 Token 估算当作 D 模块的真实账单。未来执行器应按 D 的接口记录调用 ID、实际耗时、供应商 Token / 费用和结果。
+- 浏览器附件只使用名称、MIME 和大小，不读取文件正文；桌面工作区只在用户授权后向隔离副本复制受限 UTF-8 文本。
+- 当前仅 Codex 编程/测试任务支持受限自动执行；DeepSeek、豆包和其他任务仍需人工复制。启发式 Token 估算不作为账单，真实 Codex 执行按 D 接口记录供应商上报 Token，费用未知时保持 `null`。
 - 核心实现位于 `src/task-analysis/`、`src/orchestration/` 和 `src/components/TaskAnalysisPanel.tsx`。
 
 验收时可输入包含多个独立及依赖子任务的 Prompt，检查 AI 推荐、并行根任务、依赖解锁、会话恢复和报告导出；同时执行 `pnpm test:contracts`、`pnpm typecheck` 和 `pnpm build`。
@@ -187,7 +200,7 @@ pnpm check:codex
 - 另一台电脑的完整验收（休眠恢复、断网、切换账号及安装升级）、最终 EXE 安装包；已有“安装后额度正常”的用户反馈
 - 真实 X/Tibo 数据读取与 Windows 系统通知
 - 真实 Tokenizer 和基于文件内容的精确 Token 估算
-- 自动调用外部 AI、自动文件操作及真实执行器
+- DeepSeek、豆包等多 AI 的自动执行，以及 Codex 依赖链自动调度和自动提交 Git
 - DeepSeek Prompt 服务的正式用户认证、多实例分布式限流和生产部署
 - 任务分析模块的浏览器组件自动化测试
 

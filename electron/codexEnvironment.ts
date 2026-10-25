@@ -6,6 +6,7 @@ import {
   type CodexEnvironmentErrorCode,
   type CodexEnvironmentResult,
 } from './codexEnvironmentProtocol.js'
+import type { ChatGptSessionResult } from './chatGptAuthProtocol.js'
 
 type Launch = (executable: string, args: string[]) => ChildProcessWithoutNullStreams
 
@@ -182,6 +183,8 @@ const readAccountScope = (
 
 export async function checkCodexEnvironment(options: {
   identity: CodexScopeIdentity
+  readOAuthSession?: () => Promise<ChatGptSessionResult>
+  experimentalLocalAuth?: boolean
   signal?: AbortSignal
   timeoutMs?: number
   resolveExecutable?: typeof resolveCodexExecutable
@@ -207,13 +210,40 @@ export async function checkCodexEnvironment(options: {
     if (!isSupportedCodexVersion(cliVersion)) {
       return { ok: false, code: 'VERSION_UNSUPPORTED', checkedAt: checkedAt(), cliVersion, minimumVersion: MINIMUM_CODEX_VERSION }
     }
+    if (options.readOAuthSession) {
+      const session = await options.readOAuthSession()
+      if (session.ok && session.status === 'connected') {
+        return {
+          ok: true,
+          checkedAt: checkedAt(),
+          cliVersion,
+          minimumVersion: MINIMUM_CODEX_VERSION,
+          scopeId: session.scopeId,
+          authMode: 'chatgpt-oauth',
+        }
+      }
+      if (!options.experimentalLocalAuth) {
+        const code: CodexEnvironmentErrorCode = session.ok
+          ? 'AUTH_REQUIRED'
+          : session.code === 'SCOPE_MISSING' || session.code === 'REAUTH_REQUIRED'
+            || session.code === 'STORAGE_UNAVAILABLE' ? session.code : 'AUTH_REQUIRED'
+        return { ok: false, code, checkedAt: checkedAt(), cliVersion, minimumVersion: MINIMUM_CODEX_VERSION }
+      }
+    }
     const scopeId = await readAccountScope(
       resolved.executable,
       controller.signal,
       options.identity,
       options.launch ?? defaultLaunch,
     )
-    return { ok: true, checkedAt: checkedAt(), cliVersion, minimumVersion: MINIMUM_CODEX_VERSION, scopeId }
+    return {
+      ok: true,
+      checkedAt: checkedAt(),
+      cliVersion,
+      minimumVersion: MINIMUM_CODEX_VERSION,
+      scopeId,
+      authMode: 'local-codex-experimental',
+    }
   } catch (error) {
     let code: CodexEnvironmentErrorCode = 'UNAVAILABLE'
     if (controller.signal.aborted) code = options.signal?.aborted ? 'CANCELLED' : 'TIMEOUT'

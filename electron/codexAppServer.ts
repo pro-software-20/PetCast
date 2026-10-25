@@ -18,16 +18,23 @@ interface CodexRunResult {
   usage: { inputTokens: number; outputTokens: number; cachedInputTokens: number | null } | null
 }
 
+export type CodexAppServerAuth =
+  | { mode: 'chatgpt-oauth'; accessToken: string }
+  | { mode: 'local-codex-experimental' }
+
 const object = (value: unknown): Record<string, unknown> | undefined => (
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 )
 
-const childEnvironment = () => {
+const childEnvironment = (accessToken?: string) => {
   const allowed = new Set([
     'PATH', 'PATHEXT', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'USERPROFILE', 'HOME',
     'APPDATA', 'LOCALAPPDATA', 'CODEX_HOME', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'TERM',
   ])
-  return Object.fromEntries(Object.entries(process.env).filter(([key]) => allowed.has(key.toUpperCase())))
+  return {
+    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => allowed.has(key.toUpperCase()))),
+    ...(accessToken ? { ACCESS_TOKEN: accessToken } : {}),
+  }
 }
 
 export class CodexAppServerSession {
@@ -49,7 +56,12 @@ export class CodexAppServerSession {
     private readonly cwd: string,
     private readonly identity: CodexScopeIdentity,
     private readonly onProgress: (message: string) => void,
-    private readonly launch?: (executable: string, cwd: string) => ChildProcessWithoutNullStreams,
+    private readonly launch?: (
+      executable: string,
+      cwd: string,
+      args: string[],
+      environment: NodeJS.ProcessEnv,
+    ) => ChildProcessWithoutNullStreams,
     private readonly resolveExecutable: typeof resolveCodexExecutable = resolveCodexExecutable,
   ) {}
 
@@ -162,14 +174,27 @@ export class CodexAppServerSession {
     if (method.includes('command') || method.includes('tool')) this.onProgress('Codex 正在隔离副本中检查和修改文件…')
   }
 
-  async prepare(expectedScopeId: string) {
+  async prepare(expectedScopeId: string, auth: CodexAppServerAuth = { mode: 'local-codex-experimental' }) {
     const executable = (await this.resolveExecutable()).executable
-    this.child = this.launch?.(executable, this.cwd) ?? spawn(executable, ['app-server', '--listen', 'stdio://'], {
+    const args = auth.mode === 'chatgpt-oauth'
+      ? [
+          'app-server', '--listen', 'stdio://',
+          '-c', 'model_provider="openai_chatgpt_plan"',
+          '-c', 'model_providers.openai_chatgpt_plan.name="ChatGPT plan"',
+          '-c', 'model_providers.openai_chatgpt_plan.base_url="https://api.openai.com/v1"',
+          '-c', 'model_providers.openai_chatgpt_plan.env_key="ACCESS_TOKEN"',
+          '-c', 'model_providers.openai_chatgpt_plan.wire_api="responses"',
+          '-c', 'model_providers.openai_chatgpt_plan.requires_openai_auth=false',
+          '-c', 'model_providers.openai_chatgpt_plan.supports_websockets=false',
+        ]
+      : ['app-server', '--listen', 'stdio://']
+    const environment = childEnvironment(auth.mode === 'chatgpt-oauth' ? auth.accessToken : undefined)
+    this.child = this.launch?.(executable, this.cwd, args, environment) ?? spawn(executable, args, {
       cwd: this.cwd,
       windowsHide: true,
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: childEnvironment(),
+      env: environment,
     })
     this.child.stdout.setEncoding('utf8')
     this.child.stdout.on('data', (chunk: string) => {
@@ -192,16 +217,20 @@ export class CodexAppServerSession {
       capabilities: null,
     })
     this.send({ method: 'initialized', params: {} })
-    this.onProgress('Codex 服务已连接，正在核对本机登录…')
-    const account = object(await this.request('account/read', { refreshToken: false }))
-    const accountValue = object(account?.account)
-    if (accountValue?.type !== 'chatgpt' || typeof accountValue.email !== 'string') {
-      throw new CodexAppServerError('CODEX_UNAVAILABLE')
+    if (auth.mode === 'local-codex-experimental') {
+      this.onProgress('Codex 服务已连接，正在核对本机登录…')
+      const account = object(await this.request('account/read', { refreshToken: false }))
+      const accountValue = object(account?.account)
+      if (accountValue?.type !== 'chatgpt' || typeof accountValue.email !== 'string') {
+        throw new CodexAppServerError('CODEX_UNAVAILABLE')
+      }
+      const limits = object(await this.request('account/rateLimits/read', {}))
+      const accountId = typeof limits?.accountId === 'string' && limits.accountId.trim() ? limits.accountId : undefined
+      const actualScopeId = await this.identity.hashAccount(accountValue.email, accountId)
+      if (actualScopeId !== expectedScopeId) throw new CodexAppServerError('ACCOUNT_MISMATCH')
+    } else {
+      this.onProgress('ChatGPT 授权已核对，正在创建隔离线程…')
     }
-    const limits = object(await this.request('account/rateLimits/read', {}))
-    const accountId = typeof limits?.accountId === 'string' && limits.accountId.trim() ? limits.accountId : undefined
-    const actualScopeId = await this.identity.hashAccount(accountValue.email, accountId)
-    if (actualScopeId !== expectedScopeId) throw new CodexAppServerError('ACCOUNT_MISMATCH')
     this.onProgress('Codex 账号已核对，正在创建隔离线程…')
     const thread = object(await this.request('thread/start', {
       cwd: this.cwd,

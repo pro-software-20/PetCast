@@ -5,6 +5,11 @@ contextBridge.exposeInMainWorld('petcast', {
   cancelCodexUsage: (requestId: string) => ipcRenderer.send('codex:cancel-usage', requestId),
   checkCodexEnvironment: (requestId: string) => ipcRenderer.invoke('codex:check-environment', requestId),
   cancelCodexEnvironment: (requestId: string) => ipcRenderer.send('codex:cancel-environment', requestId),
+  readChatGptSession: () => ipcRenderer.invoke('chatgpt-auth:read'),
+  signInWithChatGpt: (requestId: string) => ipcRenderer.invoke('chatgpt-auth:sign-in', requestId),
+  cancelChatGptSignIn: (requestId: string) => ipcRenderer.send('chatgpt-auth:cancel', requestId),
+  signOutChatGpt: () => ipcRenderer.invoke('chatgpt-auth:sign-out'),
+  openChatGptUsage: () => ipcRenderer.invoke('chatgpt-auth:open-usage'),
   optimizeTaskPrompt: (input: import('./promptOptimizationProtocol.js').PromptOptimizationRequest) => (
     ipcRenderer.invoke('prompt:optimize', input)
   ),

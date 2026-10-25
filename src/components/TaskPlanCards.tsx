@@ -217,6 +217,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
         taskId,
         workspaceId: current.plan.workspace.id,
         expectedScopeId: codexExecutionAccess.scopeId,
+        authMode: codexExecutionAccess.authMode ?? 'chatgpt-oauth',
         prompt,
         category,
         scope,
@@ -788,7 +789,9 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
                     <div className="task-codex-confirm" role="dialog" aria-label="确认 Codex 自动执行">
                       <strong>执行前确认</strong>
                       <p>模型：{preparedExecution.prepared.model}；隔离文件：{preparedExecution.prepared.preparedFileCount} 个；网络关闭；不会自动应用改动。</p>
-                      <p>使用本机 Codex 登录，仅供本地试验；面向所有用户的正式版本需要使用 OAuth 登录。</p>
+                      <p>{codexExecutionAccess.authMode === 'chatgpt-oauth'
+                        ? '使用已连接的 ChatGPT 计划；访问令牌不会发送到页面或写入任务记录。'
+                        : '使用本机 Codex 登录实验回退；公开使用时建议连接 ChatGPT。'}</p>
                       <WorkspaceScopeSummary scope={getTaskWorkspacePathScope(task.files)} compact />
                       <details><summary>实际发送给 Codex 的 Prompt</summary><pre>{preparedExecution.prompt}</pre></details>
                       <button type="button" className="is-primary" disabled={executionBusy || !codexExecutionAccess.available} onClick={() => void runPreparedExecution()}>确认并开始</button>

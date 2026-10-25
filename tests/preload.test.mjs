@@ -29,6 +29,11 @@ test('preload runs in a sandbox-style CommonJS environment and exposes only name
   bridge.cancelCodexUsage('request-1')
   await bridge.checkCodexEnvironment('environment-1')
   bridge.cancelCodexEnvironment('environment-1')
+  await bridge.readChatGptSession()
+  await bridge.signInWithChatGpt('auth-1')
+  bridge.cancelChatGptSignIn('auth-1')
+  await bridge.signOutChatGpt()
+  await bridge.openChatGptUsage()
   const promptInput = { prompt: 'test', taskType: 'general', files: [] }
   await bridge.optimizeTaskPrompt(promptInput)
   await bridge.selectTaskWorkspace('workspace-1')
@@ -45,6 +50,11 @@ test('preload runs in a sandbox-style CommonJS environment and exposes only name
     ['codex:cancel-usage', 'request-1'],
     ['codex:check-environment', 'environment-1'],
     ['codex:cancel-environment', 'environment-1'],
+    ['chatgpt-auth:read'],
+    ['chatgpt-auth:sign-in', 'auth-1'],
+    ['chatgpt-auth:cancel', 'auth-1'],
+    ['chatgpt-auth:sign-out'],
+    ['chatgpt-auth:open-usage'],
     ['prompt:optimize', promptInput],
     ['workspace:select', 'workspace-1'],
     ['workspace:cancel', 'workspace-1'],

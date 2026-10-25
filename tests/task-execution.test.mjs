@@ -25,6 +25,7 @@ const managerRequest = workspaceId => ({
   taskId: 'task-1',
   workspaceId,
   expectedScopeId: `codex-${'b'.repeat(64)}`,
+  authMode: 'local-codex-experimental',
   prompt: '修改授权代码',
   category: 'coding',
   scope: { readPaths: ['src'], allowedWritePaths: ['src'], forbiddenPaths: [], outputPaths: [] },
@@ -35,6 +36,7 @@ test('execution request accepts only metadata, safe paths and coding/testing cat
   const request = {
     requestId: 'prepare-1', taskId: 'task-1', workspaceId: 'a'.repeat(64),
     expectedScopeId: `codex-${'b'.repeat(64)}`, prompt: '修复代码', category: 'coding',
+    authMode: 'local-codex-experimental',
     scope, dependencySummaries: ['前置任务已完成'], unknown: 'stripped only by rejection boundary',
   }
   const checked = protocol.validatePrepareCodexTaskExecutionRequest(request)
@@ -141,6 +143,32 @@ test('app-server performs handshake, verifies scope and reports streamed output 
   session.close()
 })
 
+test('OAuth app-server receives the access token only through its child environment', async () => {
+  const messages = []
+  const launches = []
+  const expectedScope = `codex-${'f'.repeat(64)}`
+  const session = new CodexAppServerSession(
+    'C:/isolated',
+    { getSalt: async () => 'salt', hashAccount: async () => expectedScope },
+    () => {},
+    (_executable, _cwd, args, environment) => {
+      launches.push({ args, environment })
+      return fakeChild(messages)
+    },
+    async () => ({ executable: 'fake', source: 'explicit' }),
+  )
+  assert.equal(await session.prepare(expectedScope, {
+    mode: 'chatgpt-oauth',
+    accessToken: 'oauth-secret-token',
+  }), 'gpt-test')
+  assert.equal(launches[0].environment.ACCESS_TOKEN, 'oauth-secret-token')
+  assert.equal(launches[0].args.some(value => value.includes('openai_chatgpt_plan')), true)
+  assert.equal(messages.some(message => message.method === 'account/read'), false)
+  assert.equal(messages.some(message => message.method === 'account/rateLimits/read'), false)
+  assert.doesNotMatch(JSON.stringify(messages), /oauth-secret-token/)
+  session.close()
+})
+
 function statusChild(status, lateStatus) {
   const child = new EventEmitter()
   child.stdin = new PassThrough()
@@ -201,6 +229,7 @@ test('manager cancels preparation by request id and rejects a late prepared resu
     {},
     event => events.push(event),
     {
+      experimentalLocalAuth: true,
       stageWorkspace: ({ stagedRoot: nextRoot, signal }) => new Promise((resolve, reject) => {
         stagedRoot = nextRoot
         stageStarted()
@@ -221,6 +250,50 @@ test('manager cancels preparation by request id and rejects a late prepared resu
   assert.equal(events.some(event => event.executionId === 'prepare-test' && event.code === 'CANCELLED'), true)
 })
 
+test('manager obtains OAuth credentials in the main process and never returns the token', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'petcast-manager-source-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await mkdir(path.join(root, 'src'), { recursive: true })
+  await writeFile(path.join(root, 'src', 'app.ts'), 'before\n')
+  const workspaceId = '9'.repeat(64)
+  const expectedScopeId = `codex-${'8'.repeat(64)}`
+  const calls = []
+  const manager = new TaskExecutionManager(
+    { get: id => id === workspaceId ? root : undefined },
+    {},
+    () => {},
+    {
+      auth: {
+        getAccessToken: async scopeId => {
+          calls.push(['token', scopeId])
+          return { accessToken: 'main-process-secret', scopeId }
+        },
+      },
+      createServer: () => ({
+        prepare: async (scopeId, auth) => {
+          calls.push(['prepare', scopeId, auth])
+          return 'gpt-test'
+        },
+        run: async () => ({ outputText: '', usage: null }),
+        interrupt: async () => {},
+        close: () => {},
+      }),
+    },
+  )
+  t.after(() => manager.dispose())
+  const result = await manager.prepare({
+    ...managerRequest(workspaceId),
+    expectedScopeId,
+    authMode: 'chatgpt-oauth',
+  })
+  assert.equal(result.ok, true)
+  assert.deepEqual(calls, [
+    ['token', expectedScopeId],
+    ['prepare', expectedScopeId, { mode: 'chatgpt-oauth', accessToken: 'main-process-secret' }],
+  ])
+  assert.doesNotMatch(JSON.stringify(result), /main-process-secret/)
+})
+
 async function createManagerArtifact(t, options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'petcast-manager-source-'))
   await mkdir(path.join(root, 'src'), { recursive: true })
@@ -232,6 +305,7 @@ async function createManagerArtifact(t, options = {}) {
     {},
     event => events.push(event),
     {
+      experimentalLocalAuth: true,
       artifactTtlMs: options.artifactTtlMs ?? 60_000,
       cleanupRetryDelaysMs: options.cleanupRetryDelaysMs ?? [],
       createServer: stagedRoot => ({

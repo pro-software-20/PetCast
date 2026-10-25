@@ -30,7 +30,9 @@ export function describeCodexEnvironment(state: CodexEnvironmentState): CodexEnv
   if (state.status === 'ready') return {
     tone: 'ready',
     title: 'Codex 已就绪',
-    message: '已安装并登录，可以在隔离副本中试验自动执行；人工复制仍然可用。',
+    message: state.result.authMode === 'chatgpt-oauth'
+      ? '已连接 ChatGPT，可以使用自己的计划在隔离副本中执行；人工复制仍然可用。'
+      : '正在使用本机 Codex 登录实验回退；人工复制仍然可用。',
     version: state.result.cliVersion,
   }
   return {
@@ -44,11 +46,13 @@ export function describeCodexEnvironment(state: CodexEnvironmentState): CodexEnv
 export function getCodexExecutionAccess(state: CodexEnvironmentState): {
   available: boolean
   scopeId?: string
+  authMode?: 'chatgpt-oauth' | 'local-codex-experimental'
   message: string
 } {
   if (state.status === 'ready') return {
     available: true,
     scopeId: state.result.scopeId,
+    authMode: state.result.authMode,
     message: `Codex ${state.result.cliVersion} 已通过环境自检。`,
   }
   if (state.status === 'checking') return { available: false, message: '正在检查本机 Codex，请稍候。' }

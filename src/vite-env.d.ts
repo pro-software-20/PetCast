@@ -8,6 +8,13 @@ interface Window {
       requestId: string,
     ) => Promise<import('../electron/codexEnvironmentProtocol').CodexEnvironmentResult>
     cancelCodexEnvironment: (requestId: string) => void
+    readChatGptSession: () => Promise<import('../electron/chatGptAuthProtocol').ChatGptSessionResult>
+    signInWithChatGpt: (
+      requestId: string,
+    ) => Promise<import('../electron/chatGptAuthProtocol').ChatGptSessionResult>
+    cancelChatGptSignIn: (requestId: string) => void
+    signOutChatGpt: () => Promise<import('../electron/chatGptAuthProtocol').ChatGptSessionResult>
+    openChatGptUsage: () => Promise<boolean>
     optimizeTaskPrompt: (
       input: import('../electron/promptOptimizationProtocol').PromptOptimizationRequest,
     ) => Promise<import('../electron/promptOptimizationProtocol').PromptOptimizationResult>

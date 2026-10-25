@@ -5,6 +5,7 @@ import {
   type CodexEnvironmentResult,
 } from './codexEnvironmentProtocol.js'
 import type { CodexScopeIdentity } from './codexScopeIdentity.js'
+import type { ChatGptAuthService } from './chatGptAuth.js'
 
 const unavailable = (): CodexEnvironmentResult => ({
   ok: false,
@@ -17,6 +18,8 @@ export function registerCodexEnvironmentIpc(options: {
   getWindow: () => BrowserWindow | null
   rendererUrl: string
   identity: CodexScopeIdentity
+  auth: ChatGptAuthService
+  experimentalLocalAuth: boolean
 }) {
   let active: { id: string; controller: AbortController } | undefined
   const authorized = (event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent) => {
@@ -39,7 +42,12 @@ export function registerCodexEnvironmentIpc(options: {
     event.sender.once('destroyed', cancel)
     event.sender.once('did-start-navigation', cancel)
     try {
-      return await checkCodexEnvironment({ identity: options.identity, signal: request.controller.signal })
+      return await checkCodexEnvironment({
+        identity: options.identity,
+        signal: request.controller.signal,
+        readOAuthSession: () => options.auth.readSession(),
+        experimentalLocalAuth: options.experimentalLocalAuth,
+      })
     } catch { return unavailable() }
     finally {
       event.sender.removeListener('destroyed', cancel)

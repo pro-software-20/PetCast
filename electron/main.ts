@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, safeStorage, screen, shell } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promises as fs, mkdtempSync } from 'node:fs'
 import path from 'node:path'
@@ -10,6 +10,8 @@ import { registerWorkspaceIpc } from './workspaceIpc.js'
 import { WorkspaceRegistry } from './workspaceRegistry.js'
 import { createCodexScopeIdentity } from './codexScopeIdentity.js'
 import { registerTaskExecutionIpc } from './taskExecutionIpc.js'
+import { ChatGptAuthService } from './chatGptAuth.js'
+import { registerChatGptAuthIpc } from './chatGptAuthIpc.js'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
 const COMPACT = { width: 300, height: 340 }
@@ -88,6 +90,9 @@ const createWindow = () => {
           && typeof window.petcast?.cancelCodexUsage === 'function'
           && typeof window.petcast?.checkCodexEnvironment === 'function'
           && typeof window.petcast?.cancelCodexEnvironment === 'function'
+          && typeof window.petcast?.readChatGptSession === 'function'
+          && typeof window.petcast?.signInWithChatGpt === 'function'
+          && typeof window.petcast?.signOutChatGpt === 'function'
           && typeof window.petcast?.optimizeTaskPrompt === 'function'
           && typeof window.petcast?.selectTaskWorkspace === 'function'
           && typeof window.petcast?.prepareCodexTaskExecution === 'function'
@@ -140,8 +145,31 @@ if (ownsInstance) app.whenReady().then(() => {
     ?? pathToFileURL(path.join(currentDir, '../dist/index.html')).href
   const workspaceRegistry = new WorkspaceRegistry()
   const codexIdentity = createCodexScopeIdentity(app.getPath('userData'))
+  const chatGptAuth = new ChatGptAuthService(
+    path.join(app.getPath('userData'), 'chatgpt'),
+    codexIdentity,
+    {
+      protection: {
+        isAvailable: () => safeStorage.isEncryptionAvailable(),
+        encrypt: value => safeStorage.encryptString(value),
+        decrypt: value => safeStorage.decryptString(value),
+      },
+      openExternal: async url => {
+        const target = new URL(url)
+        if (target.origin !== 'https://auth.openai.com') throw new Error('Unexpected sign-in destination')
+        await shell.openExternal(target.href)
+      },
+    },
+  )
+  registerChatGptAuthIpc({ getWindow: () => mainWindow, rendererUrl, auth: chatGptAuth })
   registerCodexUsageIpc(() => mainWindow, app.getPath('userData'), rendererUrl, codexIdentity)
-  registerCodexEnvironmentIpc({ getWindow: () => mainWindow, rendererUrl, identity: codexIdentity })
+  registerCodexEnvironmentIpc({
+    getWindow: () => mainWindow,
+    rendererUrl,
+    identity: codexIdentity,
+    auth: chatGptAuth,
+    experimentalLocalAuth: process.env.PETCAST_EXPERIMENTAL_LOCAL_CODEX_AUTH === '1',
+  })
   registerUsageHistoryIpc(() => mainWindow, app.getPath('userData'), rendererUrl)
   registerPromptOptimizationIpc(
     () => mainWindow,
@@ -155,12 +183,15 @@ if (ownsInstance) app.whenReady().then(() => {
     rendererUrl,
     workspaces: workspaceRegistry,
     identity: codexIdentity,
+    auth: chatGptAuth,
+    experimentalLocalAuth: process.env.PETCAST_EXPERIMENTAL_LOCAL_CODEX_AUTH === '1',
   })
   let taskExecutionCleanupStarted = false
   app.on('before-quit', (event) => {
     if (taskExecutionCleanupStarted) return
     taskExecutionCleanupStarted = true
     event.preventDefault()
+    chatGptAuth.dispose()
     void taskExecutionManager.dispose().finally(() => app.quit())
   })
   const savePath = path.join(app.getPath('userData'), 'petcast-save.json')
