@@ -1,10 +1,14 @@
 import {
   BUILT_IN_PROVIDER_IDS,
   EXECUTION_MODES,
+  PROVIDER_CAPABILITIES,
+  RECOMMENDATION_CONFIDENCES,
+  TASK_WORK_CATEGORIES,
   type ProviderId,
   type TaskNode,
   type TaskPlan,
 } from '../types/taskOrchestration'
+import { normalizeWorkspacePath, validateTaskPathScope } from './taskPathScope'
 
 export const MAX_TASK_PLAN_TASKS = 50
 export const MAX_TASK_PLAN_TEXT_LENGTH = 12_000
@@ -35,6 +39,9 @@ const PLAN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 const CUSTOM_PROVIDER_ID_PATTERN = /^custom:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
 const builtInProviderIds = new Set<string>(BUILT_IN_PROVIDER_IDS)
 const executionModes = new Set<string>(EXECUTION_MODES)
+const providerCapabilities = new Set<string>(PROVIDER_CAPABILITIES)
+const recommendationConfidences = new Set<string>(RECOMMENDATION_CONFIDENCES)
+const taskWorkCategories = new Set<string>(TASK_WORK_CATEGORIES)
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -46,9 +53,7 @@ const isProviderId = (value: unknown): value is ProviderId => (
 )
 
 const isSafeWorkspacePath = (value: unknown): value is string => {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.includes('\0')) return false
-  if (value.includes(':') || /^[\\/]/.test(value)) return false
-  return !value.split(/[\\/]+/).includes('..')
+  return typeof value === 'string' && normalizeWorkspacePath(value) === value
 }
 
 const pushIssue = (
@@ -152,10 +157,43 @@ const validateInputFiles = (
 
 type DependencyTask = Pick<TaskNode, 'id' | 'dependsOn'>
 
+const validateProviderRecommendation = (
+  value: unknown,
+  path: string,
+  issues: TaskPlanValidationIssue[],
+) => {
+  if (!isRecord(value)) {
+    pushIssue(issues, 'INVALID_SHAPE', path, 'Provider 推荐信息必须是对象。')
+    return
+  }
+  if (typeof value.category !== 'string' || !taskWorkCategories.has(value.category)) {
+    pushIssue(issues, 'INVALID_SHAPE', `${path}.category`, '任务工作类型不受支持。')
+  }
+  if (typeof value.confidence !== 'string' || !recommendationConfidences.has(value.confidence)) {
+    pushIssue(issues, 'INVALID_SHAPE', `${path}.confidence`, '推荐可信度必须是 high、medium 或 low。')
+  }
+  validateRequiredString(value.reason, `${path}.reason`, issues)
+  if (!Array.isArray(value.requiredCapabilities) || value.requiredCapabilities.length === 0) {
+    pushIssue(issues, 'INVALID_SHAPE', `${path}.requiredCapabilities`, '至少需要一项 Provider 能力。')
+    return
+  }
+  const seen = new Set<string>()
+  value.requiredCapabilities.forEach((capability, index) => {
+    const capabilityPath = `${path}.requiredCapabilities[${index}]`
+    if (typeof capability !== 'string' || !providerCapabilities.has(capability)) {
+      pushIssue(issues, 'INVALID_SHAPE', capabilityPath, 'Provider 能力不受支持。')
+    } else if (seen.has(capability)) {
+      pushIssue(issues, 'INVALID_SHAPE', capabilityPath, 'Provider 能力不能重复。')
+    }
+    if (typeof capability === 'string') seen.add(capability)
+  })
+}
+
 const validateTask = (
   value: unknown,
   path: string,
   issues: TaskPlanValidationIssue[],
+  requireAuthorizedOutputs: boolean,
 ): value is DependencyTask => {
   if (!isRecord(value)) {
     pushIssue(issues, 'INVALID_SHAPE', path, '任务必须是对象。')
@@ -173,6 +211,9 @@ const validateTask = (
   if (!isProviderId(value.recommendedProviderId)) {
     pushIssue(issues, 'INVALID_PROVIDER_ID', `${path}.recommendedProviderId`, 'Provider ID 不受支持。')
   }
+  if (value.providerRecommendation !== undefined) {
+    validateProviderRecommendation(value.providerRecommendation, `${path}.providerRecommendation`, issues)
+  }
   if (typeof value.executionMode !== 'string' || !executionModes.has(value.executionMode)) {
     pushIssue(issues, 'INVALID_SHAPE', `${path}.executionMode`, '执行模式必须是 manual、api 或 local-agent。')
   }
@@ -181,9 +222,20 @@ const validateTask = (
     pushIssue(issues, 'INVALID_SHAPE', `${path}.files`, '文件范围必须是对象。')
   } else {
     validateInputFiles(value.files.inputs, `${path}.files.inputs`, issues)
+    if (value.files.readPaths !== undefined) {
+      validatePathArray(value.files.readPaths, `${path}.files.readPaths`, issues)
+    }
     validatePathArray(value.files.allowedWritePaths, `${path}.files.allowedWritePaths`, issues)
     validatePathArray(value.files.forbiddenPaths, `${path}.files.forbiddenPaths`, issues)
     validatePathArray(value.files.outputPaths, `${path}.files.outputPaths`, issues)
+    if (Array.isArray(value.files.inputs)
+      && (value.files.readPaths === undefined || Array.isArray(value.files.readPaths))
+      && Array.isArray(value.files.allowedWritePaths)
+      && Array.isArray(value.files.forbiddenPaths)
+      && Array.isArray(value.files.outputPaths)) {
+      const scopeIssues = validateTaskPathScope(value.files as unknown as TaskNode['files'], { requireAuthorizedOutputs })
+      scopeIssues.forEach(issue => pushIssue(issues, 'INVALID_PATH', `${path}.files.${issue.path}`, issue.message))
+    }
   }
 
   return validId && validDependencies
@@ -259,6 +311,47 @@ export function validateTaskPlan(value: unknown): TaskPlanValidationResult {
   validateStringArray(value.assumptions, 'assumptions', issues, false)
   validateStringArray(value.finalAcceptanceChecks, 'finalAcceptanceChecks', issues, true)
 
+  const hasWorkspace = value.workspace !== undefined
+  if (hasWorkspace) {
+    if (!isRecord(value.workspace)) {
+      pushIssue(issues, 'INVALID_SHAPE', 'workspace', '工作区信息必须是对象。')
+    } else {
+      if (typeof value.workspace.id !== 'string' || !/^[0-9a-f]{64}$/.test(value.workspace.id)) {
+        pushIssue(issues, 'INVALID_SHAPE', 'workspace.id', '工作区标识无效。')
+      }
+      validateRequiredString(value.workspace.displayName, 'workspace.displayName', issues)
+      if (value.workspace.defaultScope !== undefined) {
+        if (!isRecord(value.workspace.defaultScope)) {
+          pushIssue(issues, 'INVALID_SHAPE', 'workspace.defaultScope', '工作区默认授权必须是对象。')
+        } else {
+          const defaultScope = value.workspace.defaultScope
+          validatePathArray(defaultScope.readPaths, 'workspace.defaultScope.readPaths', issues)
+          validatePathArray(defaultScope.allowedWritePaths, 'workspace.defaultScope.allowedWritePaths', issues)
+          validatePathArray(defaultScope.forbiddenPaths, 'workspace.defaultScope.forbiddenPaths', issues)
+          validatePathArray(defaultScope.outputPaths, 'workspace.defaultScope.outputPaths', issues)
+          if (Array.isArray(defaultScope.readPaths)
+            && Array.isArray(defaultScope.allowedWritePaths)
+            && Array.isArray(defaultScope.forbiddenPaths)
+            && Array.isArray(defaultScope.outputPaths)) {
+            const scopeIssues = validateTaskPathScope({
+              inputs: [],
+              readPaths: defaultScope.readPaths as string[],
+              allowedWritePaths: defaultScope.allowedWritePaths as string[],
+              forbiddenPaths: defaultScope.forbiddenPaths as string[],
+              outputPaths: defaultScope.outputPaths as string[],
+            }, { requireAuthorizedOutputs: true })
+            scopeIssues.forEach(issue => pushIssue(
+              issues,
+              'INVALID_PATH',
+              `workspace.defaultScope.${issue.path}`,
+              issue.message,
+            ))
+          }
+        }
+      }
+    }
+  }
+
   const validTasks: DependencyTask[] = []
   if (!Array.isArray(value.tasks)) {
     pushIssue(issues, 'INVALID_SHAPE', 'tasks', '任务列表必须是数组。')
@@ -270,7 +363,7 @@ export function validateTaskPlan(value: unknown): TaskPlanValidationResult {
       pushIssue(issues, 'LIMIT_EXCEEDED', 'tasks', `任务数量不能超过 ${MAX_TASK_PLAN_TASKS}。`)
     }
     value.tasks.forEach((task, index) => {
-      if (validateTask(task, `tasks[${index}]`, issues)) validTasks.push(task)
+        if (validateTask(task, `tasks[${index}]`, issues, hasWorkspace)) validTasks.push(task)
     })
   }
 

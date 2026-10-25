@@ -29,10 +29,27 @@ test('preload runs in a sandbox-style CommonJS environment and exposes only name
   bridge.cancelCodexUsage('request-1')
   const promptInput = { prompt: 'test', taskType: 'general', files: [] }
   await bridge.optimizeTaskPrompt(promptInput)
+  await bridge.selectTaskWorkspace('workspace-1')
+  bridge.cancelTaskWorkspace('workspace-1')
+  const executionInput = { requestId: 'prepare-1' }
+  await bridge.prepareCodexTaskExecution(executionInput)
+  await bridge.runCodexTaskExecution('execution-1')
+  bridge.cancelCodexTaskExecution('execution-1')
+  await bridge.readTaskExecutionArtifact('artifact-1')
+  await bridge.applyTaskExecutionArtifact('artifact-1')
+  await bridge.discardTaskExecutionArtifact('artifact-1')
   assert.deepEqual(calls, [
     ['codex:read-usage', 'request-1'],
     ['codex:cancel-usage', 'request-1'],
     ['prompt:optimize', promptInput],
+    ['workspace:select', 'workspace-1'],
+    ['workspace:cancel', 'workspace-1'],
+    ['task-execution:prepare', executionInput],
+    ['task-execution:run', 'execution-1'],
+    ['task-execution:cancel', 'execution-1'],
+    ['task-execution:artifact-read', 'artifact-1'],
+    ['task-execution:artifact-apply', 'artifact-1'],
+    ['task-execution:artifact-discard', 'artifact-1'],
   ])
   assert.equal(typeof bridge.loadGameSave, 'function')
   assert.equal(typeof bridge.beginDrag, 'function')

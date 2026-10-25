@@ -1,9 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { WorkspaceSnapshot } from '../../electron/workspaceProtocol'
+import type { PreparedCodexTaskExecution, TaskExecutionArtifactView } from '../../electron/taskExecutionProtocol'
 import { buildManualTaskPrompt } from '../orchestration/manualTaskPrompt'
 import { LOCAL_PROVIDER_PROFILE } from '../orchestration/providerProfiles'
 import { generateTaskSessionReport } from '../orchestration/taskReport'
+import { getTaskWorkspacePathScope, workspacePathScopesEqual } from '../orchestration/taskPathScope'
 import {
   canEditTaskDependencies,
+  canEditTaskPlan,
   updateTaskSession,
   type TaskSessionAction,
 } from '../orchestration/taskSession'
@@ -15,11 +19,17 @@ import type {
   VerificationStatus,
 } from '../types/taskOrchestration'
 import { copyText } from '../utils/copyText'
+import { createTaskLedger } from '../history/TaskLedger'
+import { TaskExecutionRecorder, TaskPersistenceError } from '../history/TaskExecutionRecorder'
+import { TaskDefinitionEditor } from './TaskDefinitionEditor'
+import { WorkspaceScopePicker } from './WorkspaceScopePicker'
+import { WorkspaceScopeSummary } from './WorkspaceScopeSummary'
 
 export interface TaskPlanCardsProps {
   session: TaskSessionV1
   providers: ProviderProfile[]
   onSessionChange: (session: TaskSessionV1, persistImmediately?: boolean) => void
+  codexExecutionScope?: { scopeId: string; fresh: boolean }
 }
 
 type CopyStatus = 'idle' | 'success' | 'error'
@@ -41,14 +51,28 @@ const verificationLabels: Record<VerificationStatus, string> = {
   'not-run': '未执行',
 }
 
+const categoryLabels = {
+  planning: '方案规划',
+  coding: '代码实现',
+  testing: '测试验证',
+  research: '资料研究',
+  analysis: '分析推理',
+  writing: '内容写作',
+  review: '复核润色',
+  vision: '视觉理解',
+  general: '通用任务',
+} as const
+
+const confidenceLabels = {
+  high: '高可信',
+  medium: '中可信',
+  low: '低可信',
+} as const
+
 const formatFile = (file: TaskSessionV1['plan']['tasks'][number]['files']['inputs'][number]) => (
   file.kind === 'workspace'
     ? file.path
     : `${file.name}（${file.type}，${file.size.toLocaleString()} B）`
-)
-
-const displayPaths = (paths: string[], emptyLabel: string) => (
-  paths.length > 0 ? paths.join('、') : emptyLabel
 )
 
 const downloadMarkdown = (markdown: string, fileName: string) => {
@@ -62,29 +86,335 @@ const downloadMarkdown = (markdown: string, fileName: string) => {
   URL.revokeObjectURL(url)
 }
 
-export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanCardsProps) {
+export function TaskPlanCards({ session, providers, onSessionChange, codexExecutionScope }: TaskPlanCardsProps) {
   const [copyStatuses, setCopyStatuses] = useState<Record<string, CopyStatus>>({})
   const [actionError, setActionError] = useState<string | null>(null)
   const [reportCopyStatus, setReportCopyStatus] = useState<CopyStatus>('idle')
+  const [workspace, setWorkspace] = useState<WorkspaceSnapshot | undefined>()
+  const [pendingWorkspace, setPendingWorkspace] = useState<WorkspaceSnapshot | undefined>()
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null)
+  const [workspaceLoading, setWorkspaceLoading] = useState(false)
+  const [defaultScopeOpen, setDefaultScopeOpen] = useState(false)
+  const [confirmApplyDefault, setConfirmApplyDefault] = useState(false)
+  const workspaceRequest = useRef<string | null>(null)
+  const sessionRef = useRef(session)
+  sessionRef.current = session
+  const ledger = useMemo(() => createTaskLedger(window.petcast), [])
+  const [preparedExecution, setPreparedExecution] = useState<{
+    taskId: string
+    prompt: string
+    prepared: PreparedCodexTaskExecution
+  } | null>(null)
+  const [preparingExecution, setPreparingExecution] = useState<{
+    taskId: string
+    requestId: string
+  } | null>(null)
+  const [executionProgress, setExecutionProgress] = useState<string | null>(null)
+  const [executionBusy, setExecutionBusy] = useState(false)
+  const [artifactViews, setArtifactViews] = useState<Record<string, TaskExecutionArtifactView>>({})
+  const cancelRequested = useRef(new Set<string>())
+  const preparingRequest = useRef<string | null>(null)
+  const preparedExecutionRef = useRef(preparedExecution)
+  const executionSessionId = useRef(session.id)
+  preparedExecutionRef.current = preparedExecution
   const manualProviders = providers.filter(provider => provider.executionModes.includes('manual'))
   const selectableProviders = manualProviders.some(provider => provider.id === 'local')
     ? manualProviders
     : [LOCAL_PROVIDER_PROFILE, ...manualProviders]
   const completedCount = session.runs.filter(run => run.status === 'done').length
   const readyCount = session.runs.filter(run => run.status === 'ready').length
-  const dependenciesEditable = canEditTaskDependencies(session)
+  const dependenciesEditable = canEditTaskDependencies(session) && !preparedExecution && !preparingExecution
+  const planEditable = canEditTaskPlan(session) && !preparedExecution && !preparingExecution
   const allTasksDone = completedCount === session.runs.length
   const report = session.completedAt ? generateTaskSessionReport(session) : null
+  const defaultScope = session.plan.workspace?.defaultScope
+  const tasksWithCustomScope = defaultScope
+    ? session.plan.tasks.filter(task => !workspacePathScopesEqual(getTaskWorkspacePathScope(task.files), defaultScope)).length
+    : session.plan.tasks.length
+
+  useEffect(() => () => {
+    const requestId = workspaceRequest.current
+    workspaceRequest.current = null
+    if (requestId) window.petcast?.cancelTaskWorkspace?.(requestId)
+  }, [])
+
+  useEffect(() => {
+    if (executionSessionId.current === session.id) return
+    const requestId = preparingRequest.current
+    if (requestId) window.petcast?.cancelCodexTaskExecution?.(requestId)
+    const prepared = preparedExecutionRef.current
+    if (prepared) window.petcast?.cancelCodexTaskExecution?.(prepared.prepared.executionId)
+    preparingRequest.current = null
+    setPreparingExecution(null)
+    setPreparedExecution(null)
+    setExecutionBusy(false)
+    setExecutionProgress(null)
+    executionSessionId.current = session.id
+  }, [session.id])
 
   const applyAction = (action: TaskSessionAction, persistImmediately = true) => {
-    const outcome = updateTaskSession(session, action)
+    const outcome = updateTaskSession(sessionRef.current, action)
     if (!outcome.ok) {
       setActionError(outcome.message)
       return false
     }
     setActionError(null)
+    sessionRef.current = outcome.session
     onSessionChange(outcome.session, persistImmediately)
     return true
+  }
+
+  useEffect(() => window.petcast?.onTaskExecutionEvent?.((event) => {
+    if (preparedExecutionRef.current?.prepared.executionId === event.executionId
+      || preparingRequest.current === event.executionId) {
+      setExecutionProgress(event.message)
+    }
+    if (event.code !== 'ARTIFACT_EXPIRED') return
+    const run = sessionRef.current.runs.find(candidate => (
+      candidate.automaticExecution?.executionId === event.executionId
+    ))
+    if (!run || run.automaticExecution?.state !== 'review') return
+    setArtifactViews(current => {
+      const next = { ...current }
+      delete next[run.taskId]
+      return next
+    })
+    applyAction({ type: 'interrupt-automatic', taskId: run.taskId, message: event.message })
+    setActionError(event.message)
+  }), [])
+
+  useEffect(() => () => {
+    const requestId = preparingRequest.current
+    if (requestId) window.petcast?.cancelCodexTaskExecution?.(requestId)
+    const prepared = preparedExecutionRef.current
+    if (prepared) window.petcast?.cancelCodexTaskExecution?.(prepared.prepared.executionId)
+  }, [])
+
+  const prepareAutomaticExecution = async (
+    taskId: string,
+    prompt: string,
+    category: 'coding' | 'testing',
+  ) => {
+    const current = sessionRef.current
+    const task = current.plan.tasks.find(candidate => candidate.id === taskId)
+    if (!task || !current.plan.workspace || !codexExecutionScope?.fresh || !window.petcast?.prepareCodexTaskExecution) return
+    const requestId = `prepare-${globalThis.crypto.randomUUID()}`
+    preparingRequest.current = requestId
+    setPreparingExecution({ taskId, requestId })
+    setExecutionBusy(true)
+    setActionError(null)
+    setExecutionProgress('正在准备隔离副本…')
+    try {
+      const scope = getTaskWorkspacePathScope(task.files)
+      const outcome = await window.petcast.prepareCodexTaskExecution({
+        requestId,
+        taskId,
+        workspaceId: current.plan.workspace.id,
+        expectedScopeId: codexExecutionScope.scopeId,
+        prompt,
+        category,
+        scope,
+        dependencySummaries: task.dependsOn.flatMap(dependencyId => {
+          const result = current.runs.find(run => run.taskId === dependencyId)?.result
+          return result ? [result.summary] : []
+        }),
+      })
+      if (preparingRequest.current !== requestId) {
+        if (outcome.ok) window.petcast.cancelCodexTaskExecution?.(outcome.value.executionId)
+        return
+      }
+      if (!outcome.ok) {
+        setActionError(outcome.message)
+        return
+      }
+      setPreparedExecution({ taskId, prompt, prepared: outcome.value })
+      setExecutionProgress('隔离副本和账号已验证；确认后才会调用 Codex。')
+    } catch {
+      if (preparingRequest.current === requestId) setActionError('Codex 准备失败，请稍后重试。')
+    } finally {
+      if (preparingRequest.current === requestId) {
+        preparingRequest.current = null
+        setPreparingExecution(null)
+        setExecutionBusy(false)
+      }
+    }
+  }
+
+  const cancelPreparingExecution = () => {
+    const requestId = preparingRequest.current
+    if (!requestId) return
+    preparingRequest.current = null
+    window.petcast?.cancelCodexTaskExecution?.(requestId)
+    setPreparingExecution(null)
+    setExecutionBusy(false)
+    setExecutionProgress('已取消准备。')
+  }
+
+  const cancelPreparedExecution = () => {
+    if (!preparedExecution) return
+    window.petcast?.cancelCodexTaskExecution?.(preparedExecution.prepared.executionId)
+    setPreparedExecution(null)
+    setExecutionProgress(null)
+  }
+
+  const runPreparedExecution = async () => {
+    if (!preparedExecution || !codexExecutionScope || !window.petcast?.runCodexTaskExecution) return
+    const { taskId, prepared } = preparedExecution
+    const current = sessionRef.current
+    const task = current.plan.tasks.find(candidate => candidate.id === taskId)
+    const run = current.runs.find(candidate => candidate.taskId === taskId)
+    if (!task || !run || !applyAction({ type: 'start-automatic', taskId, executionId: prepared.executionId, model: prepared.model })) return
+    setExecutionBusy(true)
+    setExecutionProgress('正在写入执行账本…')
+    const recorder = new TaskExecutionRecorder(ledger, {
+      source: 'real',
+      scopeId: codexExecutionScope.scopeId,
+      id: `auto-${current.id}-${taskId}-${run.attempt + 1}`.replace(/[^a-zA-Z0-9:._-]/g, '-'),
+      label: task.title.slice(0, 100),
+      category: task.providerRecommendation?.category ?? 'coding',
+    })
+    let providerResult: Awaited<ReturnType<NonNullable<typeof window.petcast>['runCodexTaskExecution']>> | undefined
+    try {
+      const value = await recorder.call({
+        id: prepared.executionId,
+        provider: 'codex',
+        model: prepared.model,
+        attempt: run.attempt + 1,
+      }, async () => {
+        providerResult = await window.petcast!.runCodexTaskExecution(prepared.executionId)
+        if (!providerResult.ok) throw new Error(providerResult.message)
+        const usage = providerResult.value.usage
+        return {
+          value: providerResult.value,
+          usage: usage ? { ...usage, basis: 'provider-reported' as const } : null,
+          cost: null,
+        }
+      })
+      await recorder.finish('succeeded')
+      let cleanupWarning: string | undefined
+      if (!value.changedFiles.length) {
+        try {
+          const cleanup = await window.petcast.discardTaskExecutionArtifact(value.artifactId)
+          if (!cleanup.ok) cleanupWarning = cleanup.message
+        } catch {
+          cleanupWarning = 'Codex 已完成且未修改文件，但临时副本清理失败；应用退出时会再次清理。'
+        }
+      }
+      const completed = applyAction({
+        type: 'complete-automatic',
+        taskId,
+        ...(value.changedFiles.length ? { artifactId: value.artifactId } : {}),
+        summary: value.summary,
+        outputText: value.outputText || value.summary,
+        changedFiles: value.changedFiles,
+        ...(value.usage ? { usage: { inputTokens: value.usage.inputTokens, outputTokens: value.usage.outputTokens } } : {}),
+      })
+      if (!completed) {
+        if (value.changedFiles.length) {
+          try { await window.petcast.discardTaskExecutionArtifact(value.artifactId) }
+          catch { /* the main process keeps failed cleanup retryable */ }
+        }
+        applyAction({
+          type: 'interrupt-automatic',
+          taskId,
+          message: '执行结果未能写入当前会话，文件产物已丢弃；请人工核对执行账本。',
+        })
+        setActionError('执行结果未能写入当前会话，未保留待应用改动。')
+        setPreparedExecution(null)
+        return
+      }
+      if (value.changedFiles.length) {
+        try {
+          const artifact = await window.petcast.readTaskExecutionArtifact(value.artifactId)
+          if (artifact.ok) setArtifactViews(currentViews => ({ ...currentViews, [taskId]: artifact.value }))
+          else setActionError(artifact.message)
+        } catch {
+          setActionError('读取 Codex 文件差异失败，请稍后重试。')
+        }
+      }
+      setPreparedExecution(null)
+      setExecutionProgress('执行完成；AI 验证结果不会替代人工验收。')
+      if (cleanupWarning) setActionError(cleanupWarning)
+    } catch (error) {
+      const cancelled = cancelRequested.current.delete(prepared.executionId)
+      if (providerResult?.ok) {
+        try { await window.petcast?.discardTaskExecutionArtifact?.(providerResult.value.artifactId) }
+        catch { /* keep the original safe error */ }
+      } else {
+        window.petcast?.cancelCodexTaskExecution?.(prepared.executionId)
+      }
+      try { await recorder.finish(cancelled ? 'cancelled' : 'failed') } catch { /* preserve first error */ }
+      applyAction({
+        type: 'interrupt-automatic',
+        taskId,
+        message: error instanceof TaskPersistenceError
+          ? error.message
+          : cancelled ? 'Codex 执行已取消。' : '自动执行未完成；请核对执行账本后再决定是否重试。',
+      })
+      setActionError(error instanceof TaskPersistenceError
+        ? error.message
+        : providerResult && !providerResult.ok ? providerResult.message : 'Codex 自动执行失败。')
+      setPreparedExecution(null)
+    } finally {
+      setExecutionBusy(false)
+    }
+  }
+
+  const cancelRunningExecution = (executionId: string) => {
+    cancelRequested.current.add(executionId)
+    window.petcast?.cancelCodexTaskExecution?.(executionId)
+    setExecutionProgress('正在安全中断 Codex…')
+  }
+
+  const resolveArtifact = async (taskId: string, apply: boolean) => {
+    const run = sessionRef.current.runs.find(candidate => candidate.taskId === taskId)
+    const artifactId = run?.automaticExecution?.artifactId
+    if (!artifactId || !window.petcast) return
+    setExecutionBusy(true)
+    setActionError(null)
+    try {
+      const outcome = apply
+        ? await window.petcast.applyTaskExecutionArtifact(artifactId)
+        : await window.petcast.discardTaskExecutionArtifact(artifactId)
+      if (!outcome.ok) {
+        setActionError(outcome.message)
+        if (outcome.code === 'ARTIFACT_EXPIRED') {
+          applyAction({ type: 'interrupt-automatic', taskId, message: outcome.message })
+        }
+        return
+      }
+      applyAction({ type: apply ? 'apply-automatic' : 'discard-automatic', taskId })
+      setArtifactViews(current => {
+        const next = { ...current }
+        delete next[taskId]
+        return next
+      })
+    } catch {
+      setActionError(apply ? '应用 Codex 改动失败，请确认原文件未变化后重试。' : '丢弃 Codex 改动失败，请稍后重试。')
+    } finally {
+      setExecutionBusy(false)
+    }
+  }
+
+  const readArtifact = async (taskId: string, artifactId: string) => {
+    if (!window.petcast) return
+    setExecutionBusy(true)
+    setActionError(null)
+    try {
+      const outcome = await window.petcast.readTaskExecutionArtifact(artifactId)
+      if (!outcome.ok) {
+        setActionError(outcome.message)
+        if (outcome.code === 'ARTIFACT_EXPIRED') {
+          applyAction({ type: 'interrupt-automatic', taskId, message: outcome.message })
+        }
+        return
+      }
+      setArtifactViews(current => ({ ...current, [taskId]: outcome.value }))
+    } catch {
+      setActionError('读取 Codex 文件差异失败，请稍后重试。')
+    } finally {
+      setExecutionBusy(false)
+    }
   }
 
   const copyTaskPrompt = async (taskId: string, text: string, status: TaskStatus) => {
@@ -96,6 +426,10 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
   const updateVerification = (taskId: string, index: number, status: VerificationStatus) => {
     const run = session.runs.find(candidate => candidate.taskId === taskId)
     if (!run) return
+    if (run.status === 'review' && run.automaticExecution && run.automaticExecution.state !== 'review') {
+      applyAction({ type: 'set-automatic-verification', taskId, index, status })
+      return
+    }
     const verification = run.draft.verification.map((item, itemIndex) => (
       itemIndex === index ? { ...item, status } : item
     ))
@@ -107,6 +441,74 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
     setReportCopyStatus(await copyText(report.markdown) ? 'success' : 'error')
   }
 
+  const selectWorkspace = async () => {
+    if (!window.petcast?.selectTaskWorkspace) {
+      setWorkspaceError('工作区选择仅桌面版可用。')
+      return
+    }
+    const requestId = `workspace-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
+    workspaceRequest.current = requestId
+    setWorkspaceLoading(true)
+    setWorkspaceError(null)
+    try {
+      const outcome = await window.petcast.selectTaskWorkspace(requestId)
+      if (workspaceRequest.current !== requestId) return
+      if (!outcome.ok) {
+        if (outcome.code !== 'CANCELLED') setWorkspaceError(outcome.message)
+        return
+      }
+      if (session.plan.workspace && session.plan.workspace.id !== outcome.workspace.workspaceId) {
+        setPendingWorkspace(outcome.workspace)
+        return
+      }
+      if (applyAction({
+        type: 'set-workspace',
+        workspace: { id: outcome.workspace.workspaceId, displayName: outcome.workspace.displayName },
+      })) {
+        setWorkspace(outcome.workspace)
+      }
+    } finally {
+      if (workspaceRequest.current === requestId) {
+        workspaceRequest.current = null
+        setWorkspaceLoading(false)
+      }
+    }
+  }
+
+  const cancelWorkspaceScan = () => {
+    if (workspaceRequest.current) window.petcast?.cancelTaskWorkspace?.(workspaceRequest.current)
+  }
+
+  const confirmWorkspaceSwitch = () => {
+    if (!pendingWorkspace) return
+    if (applyAction({
+      type: 'set-workspace',
+      workspace: { id: pendingWorkspace.workspaceId, displayName: pendingWorkspace.displayName },
+    })) {
+      setWorkspace(pendingWorkspace)
+      setPendingWorkspace(undefined)
+    }
+  }
+
+  const saveDefaultScope = (scope: NonNullable<typeof defaultScope>) => {
+    const firstDefault = !defaultScope
+    if (applyAction({ type: 'set-workspace-default-scope', scope, applyToAll: firstDefault })) {
+      setDefaultScopeOpen(false)
+      setConfirmApplyDefault(false)
+    }
+  }
+
+  const applyDefaultToAll = () => {
+    if (!defaultScope) return
+    if (!confirmApplyDefault && tasksWithCustomScope > 0) {
+      setConfirmApplyDefault(true)
+      return
+    }
+    if (applyAction({ type: 'set-workspace-default-scope', scope: defaultScope, applyToAll: true })) {
+      setConfirmApplyDefault(false)
+    }
+  }
+
   return (
     <section className="task-plan-panel" aria-labelledby="task-plan-title">
       <header className="task-plan-header">
@@ -114,6 +516,53 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
         <h2 id="task-plan-title">人工 AI 任务方案</h2>
         <p>{session.plan.title}</p>
       </header>
+
+      <section className="task-workspace-selector">
+        <div>
+          <strong>项目工作区</strong>
+          <span>{session.plan.workspace?.displayName ?? '尚未选择；不会读取文件内容'}</span>
+          {workspace && <small>{workspace.entries.length} 项路径元信息{workspace.truncated ? '（清单已截断）' : ''}</small>}
+        </div>
+        <button type="button" disabled={!planEditable || workspaceLoading} onClick={() => void selectWorkspace()}>
+          {workspaceLoading ? '正在扫描…' : session.plan.workspace ? '重新选择' : '选择项目文件夹'}
+        </button>
+        {workspaceLoading && <button type="button" onClick={cancelWorkspaceScan}>取消扫描</button>}
+        {!window.petcast?.selectTaskWorkspace && <p>工作区选择仅桌面版可用。</p>}
+        {workspaceError && <p role="alert">{workspaceError}</p>}
+        {workspace?.warnings.map(warning => <p key={warning}>{warning}</p>)}
+        {session.plan.workspace && !workspace && <p>已恢复相对路径授权；重新选择同一工作区后可以继续浏览文件清单。</p>}
+        {pendingWorkspace && (
+          <div className="task-workspace-switch-warning" role="alert">
+            <strong>切换为“{pendingWorkspace.displayName}”会清空所有任务的旧工作区路径授权。</strong>
+            <button type="button" onClick={confirmWorkspaceSwitch}>确认切换并清空</button>
+            <button type="button" onClick={() => setPendingWorkspace(undefined)}>取消</button>
+          </div>
+        )}
+      </section>
+
+      {session.plan.workspace && (
+        <section className="task-global-scope">
+          <header>
+            <div>
+              <strong>全局默认文件授权</strong>
+              <span>子任务默认继承，特殊任务可单独调整</span>
+            </div>
+            <button type="button" disabled={!planEditable || !workspace} onClick={() => setDefaultScopeOpen(true)}>
+              {defaultScope ? '修改默认范围' : '设置默认范围'}
+            </button>
+          </header>
+          <WorkspaceScopeSummary scope={defaultScope ?? { readPaths: [], allowedWritePaths: [], forbiddenPaths: [], outputPaths: [] }} />
+          {defaultScope && tasksWithCustomScope > 0 && (
+            <div className="task-global-scope-apply">
+              <span>{tasksWithCustomScope} 个任务使用了单独授权。</span>
+              <button type="button" disabled={!planEditable} onClick={applyDefaultToAll}>
+                {confirmApplyDefault ? '再次点击确认覆盖' : '应用到所有任务'}
+              </button>
+              {confirmApplyDefault && <button type="button" onClick={() => setConfirmApplyDefault(false)}>取消</button>}
+            </div>
+          )}
+        </section>
+      )}
 
       <div className="task-plan-progress" aria-label={`已完成 ${completedCount} / ${session.runs.length}`}>
         <span><strong>{completedCount}</strong> / {session.runs.length} 已完成</span>
@@ -142,6 +591,10 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
           if (!run) return null
           const selectedProviderId = run.assignedProviderId
           const selectedKnown = selectableProviders.some(provider => provider.id === selectedProviderId)
+          const recommendedProviderName = selectableProviders.find(
+            provider => provider.id === task.recommendedProviderId,
+          )?.displayName ?? task.recommendedProviderId
+          const manuallyOverridden = selectedProviderId !== task.recommendedProviderId
           const dependencyResults = task.dependsOn.flatMap(dependencyId => {
             const result = session.runs.find(candidate => candidate.taskId === dependencyId)?.result
             return result ? [result] : []
@@ -153,7 +606,21 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
           ))
           const earlierTasks = session.plan.tasks.slice(0, index)
           const editable = run.status === 'running' || run.status === 'needs-input'
-          const canCopy = ['ready', 'running', 'needs-input'].includes(run.status)
+          const verificationEditable = editable || Boolean(
+            run.status === 'review' && run.automaticExecution && run.automaticExecution.state !== 'review',
+          )
+          const canCopy = !preparedExecution && !preparingExecution && ['ready', 'running', 'needs-input'].includes(run.status)
+          const automaticCategory = task.providerRecommendation?.category
+          const canPrepareAutomatic = Boolean(
+            run.status === 'ready'
+            && selectedProviderId === 'codex'
+            && (automaticCategory === 'coding' || automaticCategory === 'testing')
+            && workspace
+            && workspace.workspaceId === session.plan.workspace?.id
+            && codexExecutionScope?.fresh
+            && window.petcast?.prepareCodexTaskExecution,
+          )
+          const taskArtifact = artifactViews[task.id]
 
           return (
             <li className={`task-plan-card is-${run.status}`} key={task.id}>
@@ -170,7 +637,7 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
                 <select
                   id={`task-provider-${task.id}`}
                   value={selectedProviderId}
-                  disabled={!['waiting', 'ready'].includes(run.status)}
+                  disabled={!['waiting', 'ready'].includes(run.status) || Boolean(preparedExecution) || Boolean(preparingExecution)}
                   onChange={event => applyAction({
                     type: 'assign-provider',
                     taskId: task.id,
@@ -185,7 +652,33 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
                   ))}
                 </select>
                 <small>人工复制 · 第 {run.attempt} 次</small>
+                <div className="task-provider-recommendation">
+                  {task.providerRecommendation
+                    ? <>
+                      <strong>
+                        推荐：{recommendedProviderName} · {categoryLabels[task.providerRecommendation.category]} · {confidenceLabels[task.providerRecommendation.confidence]}
+                      </strong>
+                      {manuallyOverridden && <em>已人工改选</em>}
+                      <p>{task.providerRecommendation.reason}</p>
+                    </>
+                    : <p>旧会话未记录推荐依据；仍可按实际需要人工选择 AI。</p>}
+                </div>
               </div>
+
+              <TaskDefinitionEditor
+                key={`${task.id}:${session.plan.workspace?.id ?? 'none'}`}
+                task={task}
+                taskType={session.analysisResult.taskType}
+                providers={providers}
+                workspace={workspace}
+                defaultScope={defaultScope}
+                disabled={!planEditable}
+                onSave={definition => applyAction({
+                  type: 'update-task-definition',
+                  taskId: task.id,
+                  task: definition,
+                })}
+              />
 
               <fieldset className="task-dependency-editor" disabled={!dependenciesEditable}>
                 <legend>前置任务</legend>
@@ -222,11 +715,13 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
 
               <dl className="task-plan-meta">
                 <div><dt>前置依赖</dt><dd>{dependencyNames.length ? dependencyNames.join('、') : '无，可立即开始'}</dd></div>
-                <div><dt>输入文件</dt><dd>{task.files.inputs.length ? task.files.inputs.map(formatFile).join('、') : '未提供'}</dd></div>
-                <div><dt>允许修改</dt><dd>{displayPaths(task.files.allowedWritePaths, '未授权写入；修改前需确认')}</dd></div>
-                <div><dt>禁止修改</dt><dd>{displayPaths(task.files.forbiddenPaths, '未单独指定；仍不得超出允许范围')}</dd></div>
-                <div><dt>输出位置</dt><dd>{displayPaths(task.files.outputPaths, '待用户确认')}</dd></div>
+                <div><dt>浏览器附件</dt><dd>{task.files.inputs.some(file => file.kind === 'attachment') ? task.files.inputs.filter(file => file.kind === 'attachment').map(formatFile).join('、') : '未提供'}</dd></div>
               </dl>
+              <WorkspaceScopeSummary
+                scope={getTaskWorkspacePathScope(task.files)}
+                inherited={Boolean(defaultScope && workspacePathScopesEqual(getTaskWorkspacePathScope(task.files), defaultScope))}
+                compact
+              />
 
               <details className="task-plan-prompt">
                 <summary>查看将要复制的完整 Prompt</summary>
@@ -248,6 +743,65 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
                   </span>
                 )}
               </div>
+
+              {(canPrepareAutomatic || run.automaticExecution) && (
+                <section className="task-codex-execution">
+                  <header>
+                    <strong>Codex 隔离执行</strong>
+                    <span>{run.automaticExecution ? `状态：${run.automaticExecution.state}` : '不会直接修改原项目'}</span>
+                  </header>
+                  {canPrepareAutomatic && preparedExecution?.taskId !== task.id && preparingExecution?.taskId !== task.id && (
+                    <button
+                      type="button"
+                      disabled={executionBusy || Boolean(preparedExecution) || Boolean(preparingExecution)}
+                      onClick={() => void prepareAutomaticExecution(task.id, prompt, automaticCategory as 'coding' | 'testing')}
+                    >
+                      使用 Codex 执行
+                    </button>
+                  )}
+                  {preparingExecution?.taskId === task.id && (
+                    <div className="task-codex-confirm" role="status">
+                      <strong>正在准备隔离副本并核对账号</strong>
+                      <p>准备期间不会调用模型；可以随时取消。</p>
+                      <button type="button" onClick={cancelPreparingExecution}>取消准备</button>
+                    </div>
+                  )}
+                  {preparedExecution?.taskId === task.id && (
+                    <div className="task-codex-confirm" role="dialog" aria-label="确认 Codex 自动执行">
+                      <strong>执行前确认</strong>
+                      <p>模型：{preparedExecution.prepared.model}；隔离文件：{preparedExecution.prepared.preparedFileCount} 个；网络关闭；不会自动应用改动。</p>
+                      <p>使用本机 Codex 登录，仅供本地试验；面向所有用户的正式版本需要使用 OAuth 登录。</p>
+                      <WorkspaceScopeSummary scope={getTaskWorkspacePathScope(task.files)} compact />
+                      <details><summary>实际发送给 Codex 的 Prompt</summary><pre>{preparedExecution.prompt}</pre></details>
+                      <button type="button" className="is-primary" disabled={executionBusy} onClick={() => void runPreparedExecution()}>确认并开始</button>
+                      <button type="button" disabled={executionBusy} onClick={cancelPreparedExecution}>取消</button>
+                    </div>
+                  )}
+                  {run.automaticExecution?.state === 'running' && (
+                    <button type="button" disabled={!executionBusy} onClick={() => cancelRunningExecution(run.automaticExecution!.executionId)}>取消自动执行</button>
+                  )}
+                  {executionProgress && (preparingExecution?.taskId === task.id || preparedExecution?.taskId === task.id || run.automaticExecution?.state === 'running') && (
+                    <p role="status">{executionProgress}</p>
+                  )}
+                  {run.automaticExecution?.state === 'review' && (
+                    <div className="task-codex-artifact">
+                      <strong>待处理文件改动：{run.automaticExecution.pendingFileCount} 个</strong>
+                      {taskArtifact
+                        ? <details open><summary>查看受限 diff</summary><pre>{taskArtifact.diff || '没有文本差异。'}</pre></details>
+                        : <button type="button" disabled={executionBusy} onClick={() => {
+                          const artifactId = run.automaticExecution?.artifactId
+                          if (artifactId) void readArtifact(task.id, artifactId)
+                        }}>读取 diff</button>}
+                      <p>应用前会再次检查原文件哈希；若队友已修改文件，将拒绝覆盖。</p>
+                      <button type="button" className="is-primary" disabled={executionBusy} onClick={() => void resolveArtifact(task.id, true)}>应用改动</button>
+                      <button type="button" disabled={executionBusy} onClick={() => void resolveArtifact(task.id, false)}>丢弃改动</button>
+                    </div>
+                  )}
+                  {run.automaticExecution && ['applied', 'discarded'].includes(run.automaticExecution.state) && (
+                    <p>{run.automaticExecution.state === 'applied' ? '文件改动已安全应用；仍需逐项人工验收。' : '文件改动已丢弃；可依据文字结果继续人工验收。'}</p>
+                  )}
+                </section>
+              )}
 
               {(editable || run.status === 'review' || run.status === 'done' || run.status === 'failed') && (
                 <section className="task-result-editor">
@@ -277,7 +831,7 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
                     placeholder="例如：src/components/Example.tsx"
                   />
 
-                  <fieldset disabled={!editable}>
+                  <fieldset disabled={!verificationEditable}>
                     <legend>逐项验收</legend>
                     {run.draft.verification.map((item, checkIndex) => (
                       <label key={item.label}>
@@ -302,7 +856,7 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
 
               <div className="task-run-actions">
                 {['ready', 'waiting'].includes(run.status) && <button type="button" onClick={() => applyAction({ type: 'cancel', taskId: task.id })}>取消任务</button>}
-                {run.status === 'running' && <>
+                {run.status === 'running' && run.automaticExecution?.state !== 'running' && <>
                   <button type="button" className="is-primary" onClick={() => applyAction({ type: 'submit-result', taskId: task.id })}>提交待验收</button>
                   <button type="button" onClick={() => applyAction({ type: 'needs-input', taskId: task.id, message: run.draft.reviewNote })}>需要补充信息</button>
                   <button type="button" onClick={() => applyAction({ type: 'fail', taskId: task.id, message: run.draft.reviewNote })}>标记失败</button>
@@ -313,7 +867,7 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
                   <button type="button" onClick={() => applyAction({ type: 'fail', taskId: task.id, message: run.draft.reviewNote })}>标记失败</button>
                   <button type="button" onClick={() => applyAction({ type: 'cancel', taskId: task.id })}>取消</button>
                 </>}
-                {run.status === 'review' && <>
+                {run.status === 'review' && run.automaticExecution?.state !== 'review' && <>
                   <button type="button" className="is-primary" onClick={() => applyAction({ type: 'accept', taskId: task.id })}>验收通过</button>
                   <button type="button" onClick={() => applyAction({ type: 'request-changes', taskId: task.id, message: run.draft.reviewNote })}>退回修改</button>
                   <button type="button" onClick={() => applyAction({ type: 'fail', taskId: task.id, message: run.draft.reviewNote })}>标记失败</button>
@@ -358,6 +912,16 @@ export function TaskPlanCards({ session, providers, onSessionChange }: TaskPlanC
           <ul>{session.plan.assumptions.map(assumption => <li key={assumption}>{assumption}</li>)}</ul>
         </details>
       </section>
+
+      {defaultScopeOpen && workspace && (
+        <WorkspaceScopePicker
+          title="设置全局默认文件范围"
+          workspace={workspace}
+          initialScope={defaultScope ?? { readPaths: [], allowedWritePaths: [], forbiddenPaths: [], outputPaths: [] }}
+          onSave={saveDefaultScope}
+          onClose={() => setDefaultScopeOpen(false)}
+        />
+      )}
     </section>
   )
 }

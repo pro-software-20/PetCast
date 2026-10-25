@@ -508,7 +508,14 @@ export default function App() {
           {page === 'quota' && !historyOpen && <section className="quota-page" aria-label="真实额度页面"><div className="room-art" /><div className="room-nameplate">{appearance.petName || '布罗艾'}的小屋</div><div className="quota-page-panel"><h1>额度数据</h1><UsageSettings state={connection} desktop={!isBrowserFallback} onSelect={connection.select} onRefresh={() => void connection.refresh()} /><UsageBoard usage={usage} analysis={analysis} stale={!fresh} status={usageReadStatus} /></div></section>}
           {fishingOpen && fresh && usage && <FishingGame usage={usage} petName={appearance.petName} aquarium={aquarium} capacity={AQUARIUM_CAPACITY} onCatch={handleCatch} onKeep={handleKeep} onFeed={handleFeedCatch} onRelease={handleReleaseCatch} onReplace={handleReplaceFish} onClose={() => setFishingOpen(false)} />}
           {mailboxOpen && <MailboxPanel items={mailItems} usage={fresh ? usage : null} onClose={() => setMailboxOpen(false)} />}
-          {taskAnalysisOpen && page === 'tasks' && <TaskAnalysisPanel onClose={closeTaskAnalysis} />}
+          {taskAnalysisOpen && page === 'tasks' && (
+            <TaskAnalysisPanel
+              onClose={closeTaskAnalysis}
+              codexExecutionScope={connection.source === 'real' && fresh && usage?.scopeId
+                ? { scopeId: usage.scopeId, fresh: true }
+                : undefined}
+            />
+          )}
           {historyOpen && <UsageHistoryPanel key={`${historyScope?.source}-${historyScope?.scopeId}`} scope={historyScope} store={history.store} currentQuota={historyScope && usage ? { ...historyScope, fresh, sampledAt: usage.sampledAt.toISOString(), shortRemaining: usage.shortWindowRemaining, weeklyRemaining: usage.weeklyRemaining, shortResetAt: usage.shortWindowResetAt.toISOString(), weeklyResetAt: usage.weeklyResetAt.toISOString() } : null} revision={history.revision} recordStatus={history.status} onClear={scope => history.recorder.clear(scope)} onClose={() => setHistoryOpen(false)} />}
           <nav className="wood-nav" aria-label="主导航">{([{ id: 'home', label: '主页' }, { id: 'appearance', label: '形象' }, { id: 'tasks', label: '任务分析' }, { id: 'quota', label: '真实额度' }] as const).map(item => <button key={item.id} aria-current={page === item.id ? 'page' : undefined} onClick={() => void navigate(item.id)}>{item.label}</button>)}</nav>
           <header className="warm-window-actions"><span title={usageReadStatus}>{usageReadStatus}</span>{desktopApi && <button className="close" onClick={() => desktopApi.close()} aria-label="关闭">×</button>}</header>

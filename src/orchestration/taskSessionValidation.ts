@@ -203,12 +203,49 @@ export function validateTaskSession(value: unknown): TaskSessionValidationResult
       runById.set(run.taskId, run)
       if (!statuses.has(String(run.status))) push(issues, 'INVALID_STATE', `${path}.status`, '任务状态无效。')
       if (!isProviderId(run.assignedProviderId)) push(issues, 'INVALID_SHAPE', `${path}.assignedProviderId`, 'Provider ID 无效。')
-      if (run.executionMode !== 'manual') push(issues, 'INVALID_STATE', `${path}.executionMode`, 'P2 任务只能使用人工执行模式。')
+      if (!['manual', 'local-agent'].includes(String(run.executionMode))) {
+        push(issues, 'INVALID_STATE', `${path}.executionMode`, '任务执行模式无效。')
+      }
       if (!Number.isInteger(run.attempt) || Number(run.attempt) < 0) push(issues, 'INVALID_SHAPE', `${path}.attempt`, '尝试次数必须是非负整数。')
       validateDate(run.startedAt, `${path}.startedAt`, issues, true)
       validateDate(run.completedAt, `${path}.completedAt`, issues, true)
       if (run.statusMessage !== undefined && typeof run.statusMessage !== 'string') {
         push(issues, 'INVALID_SHAPE', `${path}.statusMessage`, '状态说明必须是字符串。')
+      }
+      if (run.automaticExecution !== undefined) {
+        const automatic = run.automaticExecution
+        if (!isRecord(automatic)
+          || !isNonEmptyString(automatic.executionId)
+          || !isNonEmptyString(automatic.model)
+          || !['preparing', 'running', 'review', 'applied', 'discarded', 'interrupted'].includes(String(automatic.state))
+          || !Number.isSafeInteger(automatic.pendingFileCount)
+          || Number(automatic.pendingFileCount) < 0
+          || !['pending', 'safe', 'rejected'].includes(String(automatic.safetyStatus))
+          || (automatic.artifactId !== undefined && !isNonEmptyString(automatic.artifactId))) {
+          push(issues, 'INVALID_SHAPE', `${path}.automaticExecution`, '自动执行元信息无效。')
+        } else {
+          if (run.executionMode !== 'local-agent') {
+            push(issues, 'INVALID_STATE', `${path}.executionMode`, '自动执行任务必须使用本地代理模式。')
+          }
+          if (automatic.state === 'review' && (!automatic.artifactId || Number(automatic.pendingFileCount) < 1)) {
+            push(issues, 'INVALID_STATE', `${path}.automaticExecution`, '待处理文件产物缺少安全句柄或文件数量。')
+          }
+          if (['applied', 'discarded', 'interrupted'].includes(String(automatic.state))
+            && (automatic.artifactId !== undefined || automatic.pendingFileCount !== 0)) {
+            push(issues, 'INVALID_STATE', `${path}.automaticExecution`, '已处理或中断的产物不能继续保留待应用句柄。')
+          }
+          if (['preparing', 'running'].includes(String(automatic.state)) && run.status !== 'running') {
+            push(issues, 'INVALID_STATE', `${path}.automaticExecution.state`, '运行中的自动执行必须对应进行中任务。')
+          }
+          if (automatic.state === 'review' && run.status !== 'review') {
+            push(issues, 'INVALID_STATE', `${path}.automaticExecution.state`, '待处理产物必须对应待验收任务。')
+          }
+          if (automatic.state === 'interrupted' && run.status !== 'needs-input') {
+            push(issues, 'INVALID_STATE', `${path}.automaticExecution.state`, '中断执行必须等待用户确认。')
+          }
+        }
+      } else if (run.executionMode === 'local-agent') {
+        push(issues, 'INVALID_STATE', `${path}.automaticExecution`, '本地代理任务必须记录自动执行元信息。')
       }
 
       if (!isRecord(run.draft) || typeof run.draft.outputText !== 'string' || typeof run.draft.reviewNote !== 'string') {

@@ -52,6 +52,7 @@ export function buildManualTaskPrompt(
   return [
     `执行角色：${providerName}`,
     `总体目标：${plan.goal}`,
+    `工作区：${plan.workspace?.displayName ?? '未选择工作区'}`,
     '',
     `当前任务：${task.title}`,
     task.description,
@@ -71,6 +72,9 @@ export function buildManualTaskPrompt(
     '',
     '输入文件：',
     ...formatInput(task.files.inputs),
+    '',
+    '允许读取的工作区位置：',
+    ...formatPaths(task.files.readPaths ?? [], '未授权读取工作区路径；如需读取，请先向用户确认。'),
     '',
     '允许修改的工作区位置：',
     ...formatPaths(task.files.allowedWritePaths, '未授权直接修改工作区文件；如需修改，请先向用户确认具体路径。'),

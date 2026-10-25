@@ -19,6 +19,29 @@ export const PROVIDER_CAPABILITIES = [
 ] as const
 export type ProviderCapability = (typeof PROVIDER_CAPABILITIES)[number]
 
+export const TASK_WORK_CATEGORIES = [
+  'planning',
+  'coding',
+  'testing',
+  'research',
+  'analysis',
+  'writing',
+  'review',
+  'vision',
+  'general',
+] as const
+export type TaskWorkCategory = (typeof TASK_WORK_CATEGORIES)[number]
+
+export const RECOMMENDATION_CONFIDENCES = ['high', 'medium', 'low'] as const
+export type RecommendationConfidence = (typeof RECOMMENDATION_CONFIDENCES)[number]
+
+export interface TaskProviderRecommendation {
+  category: TaskWorkCategory
+  requiredCapabilities: ProviderCapability[]
+  confidence: RecommendationConfidence
+  reason: string
+}
+
 export type QuotaSupport = 'official-api' | 'local-record' | 'manual' | 'none'
 
 /** Public provider metadata only. Credentials never belong in this contract. */
@@ -45,10 +68,25 @@ export type TaskInputFileReference = AttachmentFileReference | WorkspaceFileRefe
 
 export interface TaskFileScope {
   inputs: TaskInputFileReference[]
+  /** Safe workspace-relative files or directory prefixes that may be read. */
+  readPaths?: string[]
   /** Exact files or directory prefixes relative to the workspace root. */
   allowedWritePaths: string[]
   forbiddenPaths: string[]
   outputPaths: string[]
+}
+
+export interface WorkspacePathScope {
+  readPaths: string[]
+  allowedWritePaths: string[]
+  forbiddenPaths: string[]
+  outputPaths: string[]
+}
+
+export interface TaskWorkspaceContext {
+  id: string
+  displayName: string
+  defaultScope?: WorkspacePathScope
 }
 
 /** Static task definition. Runtime state is kept in TaskRunRecord. */
@@ -58,6 +96,8 @@ export interface TaskNode {
   description: string
   dependsOn: string[]
   recommendedProviderId: ProviderId
+  /** Optional so task sessions created before P2.2 remain restorable. */
+  providerRecommendation?: TaskProviderRecommendation
   executionMode: ExecutionMode
   prompt: string
   files: TaskFileScope
@@ -71,6 +111,7 @@ export interface TaskPlan {
   title: string
   goal: string
   assumptions: string[]
+  workspace?: TaskWorkspaceContext
   tasks: TaskNode[]
   finalAcceptanceChecks: string[]
 }
@@ -124,6 +165,24 @@ export interface TaskResultDraft {
   reviewNote: string
 }
 
+export type AutomaticTaskExecutionState =
+  | 'preparing'
+  | 'running'
+  | 'review'
+  | 'applied'
+  | 'discarded'
+  | 'interrupted'
+
+export interface AutomaticTaskExecutionMetadata {
+  executionId: string
+  model: string
+  state: AutomaticTaskExecutionState
+  pendingFileCount: number
+  safetyStatus: 'pending' | 'safe' | 'rejected'
+  /** Opaque short-lived handle. It becomes invalid when the desktop process restarts. */
+  artifactId?: string
+}
+
 /** Mutable execution state kept separately from the AI-generated task plan. */
 export interface TaskRunRecord {
   taskId: string
@@ -136,6 +195,7 @@ export interface TaskRunRecord {
   startedAt?: string
   completedAt?: string
   result?: TaskExecutionResult
+  automaticExecution?: AutomaticTaskExecutionMetadata
 }
 
 export interface TaskSessionV1 {

@@ -2,8 +2,8 @@
   "method": "built-in imagegen",
   "animal": "rabbit",
   "references": [
-    "C:\\Users\\HP\\.codex\\generated_images\\01a162e2-20b2-73e2-a9d5-8b4893b176e3\\exec-d9eb670f-62d1-43b9-87f7-4137033380f7.png",
-    "D:\\download\\PetCast-main (1)\\PetCast-main\\public\\assets\\pets\\rabbit.png"
+    "Generated rabbit animation atlas before padding correction (working reference; not included)",
+    "public/assets/pets/rabbit.png"
   ],
   "prompt": "Use case: precise-object-edit. Image 1 is the rabbit animation atlas to CORRECT. Image 2 is the original PetCast rabbit identity reference. Produce a corrected transparent RGBA sprite atlas. Keep the SAME cream-white rabbit, asymmetric long ears with pale pink interiors, tiny pink nose, glossy dark eye, warm brown pixel outline, fluffy tail, SAME 12 animation poses and SAME 4-column x 3-row order as Image 1. Change ONLY framing and spacing: UNIFORMLY make all rabbits about 72 percent of their current size, centered in the MIDDLE of each equal SQUARE cell, leaving at least 50 pixels of fully transparent margin on every side at 1448x1086 canvas size. No ears, noses, paws or tails may touch a cell edge or the image edge. The last bottom-right rabbit MUST have all its paws completely visible with generous transparent space below them; the input's bottom-right foot touches the canvas and this must be fixed. Keep consistent scale across all frames, no cropping. Row 1: four idle/breath/blink poses; rows 2 and 3: eight phases of the same low bunny hop, with correct four-paw anatomy. Same right-facing three-quarter orientation, fixed camera and crisp pixel style as references, no redesign, no new expressions or markings. Background is genuinely transparent. No text, numbers, gridlines, shadows, watermarks or scenery. Output a strict 4:3 aspect ratio, ideally 1448x1086 or 1536x1152; all 12 cells identical size."
 }
