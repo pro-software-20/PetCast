@@ -15,14 +15,37 @@ const compiled = ts.transpileModule(source, { compilerOptions: {
 
 function setup() {
   const handlers = new Map(), listeners = new Map(), calls = [], sent = []
+  const senderListeners = new Map()
+  let pendingResolve
   const exports = {}
   const frame = { url: 'file:///test/index.html' }
-  const sender = { mainFrame: frame, send: (...args) => sent.push(args) }
+  const sender = {
+    mainFrame: frame,
+    send: (...args) => sent.push(args),
+    once: (name, listener) => senderListeners.set(name, listener),
+    removeListener: (name, listener) => {
+      if (senderListeners.get(name) === listener) senderListeners.delete(name)
+    },
+    emit: (name, ...args) => senderListeners.get(name)?.(...args),
+  }
   class Manager {
     constructor(_workspaces, _identity, emit) { this.emit = emit }
-    prepare(input) { calls.push(['prepare', input]); this.emit({ executionId: 'execution-1', stage: 'preparing', message: 'safe' }); return { ok: true, value: {} } }
-    run(id) { calls.push(['run', id]); return { ok: true, value: {} } }
-    cancel(id) { calls.push(['cancel', id]); return { ok: true, value: null } }
+    prepare(input) {
+      calls.push(['prepare', input]); this.emit({ executionId: 'execution-1', stage: 'preparing', message: 'safe' })
+      if (input.requestId === 'prepare-wait') return new Promise(resolve => { pendingResolve = resolve })
+      return { ok: true, value: {} }
+    }
+    run(id) {
+      calls.push(['run', id])
+      if (id === 'execution-wait') return new Promise(resolve => { pendingResolve = resolve })
+      return { ok: true, value: {} }
+    }
+    cancel(id) {
+      calls.push(['cancel', id])
+      pendingResolve?.({ ok: false, code: 'CANCELLED', message: 'cancelled' })
+      pendingResolve = undefined
+      return { ok: true, value: null }
+    }
     readArtifact(id) { calls.push(['read', id]); if (id === 'explode') throw new Error('private path'); return { ok: true, value: {} } }
     applyArtifact(id) { calls.push(['apply', id]); return { ok: true, value: null } }
     discardArtifact(id) { calls.push(['discard', id]); return { ok: true, value: null } }
@@ -63,4 +86,24 @@ test('task execution IPC accepts only the trusted main frame and exposes bounded
   assert.equal(failed.ok, false)
   assert.equal(failed.code, 'PROVIDER_FAILED')
   assert.equal(failed.message, 'provider failed')
+})
+
+test('task execution IPC cancels prepare and run when the renderer navigates away', async () => {
+  const prepareIpc = setup()
+  const prepare = prepareIpc.handlers.get('task-execution:prepare')(
+    prepareIpc.event,
+    { requestId: 'prepare-wait' },
+  )
+  prepareIpc.sender.emit('did-start-navigation', {}, 'file:///frame.html', false, false)
+  await Promise.resolve()
+  assert.equal(prepareIpc.calls.some(call => call[0] === 'cancel'), false)
+  prepareIpc.sender.emit('did-start-navigation', {}, 'file:///next.html', false, true)
+  assert.equal((await prepare).code, 'CANCELLED')
+  assert.deepEqual(prepareIpc.calls.at(-1), ['cancel', 'prepare-wait'])
+
+  const runIpc = setup()
+  const run = runIpc.handlers.get('task-execution:run')(runIpc.event, 'execution-wait')
+  runIpc.sender.emit('destroyed')
+  assert.equal((await run).code, 'CANCELLED')
+  assert.deepEqual(runIpc.calls.at(-1), ['cancel', 'execution-wait'])
 })

@@ -54,16 +54,42 @@ export function registerTaskExecutionIpc(options: {
     experimentalLocalAuth: options.experimentalLocalAuth,
   })
 
+  const whileRendererActive = async <T>(
+    event: Electron.IpcMainInvokeEvent,
+    id: string,
+    action: () => Promise<TaskExecutionOutcome<T>> | TaskExecutionOutcome<T>,
+  ) => {
+    const cancel = () => { void safely(() => manager.cancel(id)) }
+    const cancelMainNavigation = (
+      _navigationEvent: Electron.Event,
+      _url: string,
+      _isInPlace: boolean,
+      isMainFrame: boolean,
+    ) => { if (isMainFrame) cancel() }
+    event.sender.once('destroyed', cancel)
+    event.sender.once('did-start-navigation', cancelMainNavigation)
+    try { return await safely(action) }
+    finally {
+      event.sender.removeListener('destroyed', cancel)
+      event.sender.removeListener('did-start-navigation', cancelMainNavigation)
+    }
+  }
+
   ipcMain.handle('task-execution:prepare', async (event, input: unknown) => {
     if (!authorized(event)) return denied()
-    try { return await manager.prepare(validatePrepareCodexTaskExecutionRequest(input)) }
+    try {
+      const request = validatePrepareCodexTaskExecutionRequest(input)
+      return await whileRendererActive(event, request.requestId, () => manager.prepare(request))
+    }
     catch (error) {
       const code = error instanceof Error && error.message === 'PATH_NOT_ALLOWED' ? 'PATH_NOT_ALLOWED' : 'INVALID_REQUEST'
       return { ok: false, code, message: TASK_EXECUTION_MESSAGES[code] }
     }
   })
   ipcMain.handle('task-execution:run', (event, id: unknown) => (
-    authorized(event) && isTaskExecutionId(id) ? safely(() => manager.run(id)) : denied()
+    authorized(event) && isTaskExecutionId(id)
+      ? whileRendererActive(event, id, () => manager.run(id))
+      : denied()
   ))
   ipcMain.on('task-execution:cancel', (event, id: unknown) => {
     if (authorized(event) && isTaskExecutionId(id)) void safely(() => manager.cancel(id))

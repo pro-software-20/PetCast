@@ -18,6 +18,7 @@
     "test:contracts": "node --test --test-concurrency=1 tests/*.test.mjs",
     "check:codex": "npm run build:electron && node scripts/check-codex-usage.mjs",
     "test:desktop": "npm run build && node scripts/smoke-desktop.mjs",
+    "test:task-ui": "npm run build && node scripts/test-task-analysis-ui.mjs",
     "test:ui": "npm run build && node scripts/test-usage-ui.mjs",
     "test:history-ui": "npm run build && node scripts/test-history-ui.mjs"
   },
