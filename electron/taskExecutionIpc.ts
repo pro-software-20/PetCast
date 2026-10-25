@@ -15,6 +15,17 @@ const denied = (): TaskExecutionOutcome<never> => ({
   message: TASK_EXECUTION_MESSAGES.INVALID_REQUEST,
 })
 
+const failed = (): TaskExecutionOutcome<never> => ({
+  ok: false,
+  code: 'PROVIDER_FAILED',
+  message: TASK_EXECUTION_MESSAGES.PROVIDER_FAILED,
+})
+
+const safely = async <T>(action: () => Promise<TaskExecutionOutcome<T>> | TaskExecutionOutcome<T>) => {
+  try { return await action() }
+  catch { return failed() }
+}
+
 export function registerTaskExecutionIpc(options: {
   getWindow: () => BrowserWindow | null
   rendererUrl: string
@@ -46,19 +57,19 @@ export function registerTaskExecutionIpc(options: {
     }
   })
   ipcMain.handle('task-execution:run', (event, id: unknown) => (
-    authorized(event) && isTaskExecutionId(id) ? manager.run(id) : denied()
+    authorized(event) && isTaskExecutionId(id) ? safely(() => manager.run(id)) : denied()
   ))
   ipcMain.on('task-execution:cancel', (event, id: unknown) => {
-    if (authorized(event) && isTaskExecutionId(id)) void manager.cancel(id)
+    if (authorized(event) && isTaskExecutionId(id)) void safely(() => manager.cancel(id))
   })
   ipcMain.handle('task-execution:artifact-read', (event, id: unknown) => (
-    authorized(event) && isTaskExecutionId(id) ? manager.readArtifact(id) : denied()
+    authorized(event) && isTaskExecutionId(id) ? safely(() => manager.readArtifact(id)) : denied()
   ))
   ipcMain.handle('task-execution:artifact-apply', (event, id: unknown) => (
-    authorized(event) && isTaskExecutionId(id) ? manager.applyArtifact(id) : denied()
+    authorized(event) && isTaskExecutionId(id) ? safely(() => manager.applyArtifact(id)) : denied()
   ))
   ipcMain.handle('task-execution:artifact-discard', (event, id: unknown) => (
-    authorized(event) && isTaskExecutionId(id) ? manager.discardArtifact(id) : denied()
+    authorized(event) && isTaskExecutionId(id) ? safely(() => manager.discardArtifact(id)) : denied()
   ))
   return manager
 }

@@ -43,6 +43,7 @@ export class CodexAppServerSession {
   private usage: CodexRunResult['usage'] = null
   private completion?: { resolve: () => void; reject: (error: Error) => void }
   private pendingCompletionStatus?: unknown
+  private turnTerminalReceived = false
 
   constructor(
     private readonly cwd: string,
@@ -142,8 +143,13 @@ export class CodexAppServerSession {
       return
     }
     if (method === 'turn/completed') {
+      if (this.turnTerminalReceived) return
+      this.turnTerminalReceived = true
       const turn = object(params.turn)
       const status = turn?.status
+      this.onProgress(status === 'completed'
+        ? 'Codex 已完成隔离执行。'
+        : status === 'interrupted' ? 'Codex 执行已中断。' : 'Codex 未能完成隔离执行。')
       if (!this.completion) this.pendingCompletionStatus = status
       else {
         if (status === 'completed') this.completion.resolve()
@@ -181,8 +187,12 @@ export class CodexAppServerSession {
     this.child.stderr.on('data', () => {})
     this.child.on('error', () => this.fail(new CodexAppServerError('CODEX_UNAVAILABLE')))
     this.child.on('exit', () => this.fail(new CodexAppServerError('CODEX_UNAVAILABLE')))
-    await this.request('initialize', { clientInfo: { name: 'petcast', title: 'PetCast', version: '0.1.0' } })
+    await this.request('initialize', {
+      clientInfo: { name: 'petcast', title: 'PetCast', version: '0.1.0' },
+      capabilities: null,
+    })
     this.send({ method: 'initialized', params: {} })
+    this.onProgress('Codex 服务已连接，正在核对本机登录…')
     const account = object(await this.request('account/read', { refreshToken: false }))
     const accountValue = object(account?.account)
     if (accountValue?.type !== 'chatgpt' || typeof accountValue.email !== 'string') {
@@ -192,15 +202,16 @@ export class CodexAppServerSession {
     const accountId = typeof limits?.accountId === 'string' && limits.accountId.trim() ? limits.accountId : undefined
     const actualScopeId = await this.identity.hashAccount(accountValue.email, accountId)
     if (actualScopeId !== expectedScopeId) throw new CodexAppServerError('ACCOUNT_MISMATCH')
+    this.onProgress('Codex 账号已核对，正在创建隔离线程…')
     const thread = object(await this.request('thread/start', {
       cwd: this.cwd,
       approvalPolicy: 'never',
       sandbox: 'workspace-write',
-      runtimeWorkspaceRoots: [this.cwd],
       ephemeral: true,
     }))
     const threadValue = object(thread?.thread)
     if (typeof threadValue?.id !== 'string') throw new CodexAppServerError('PROVIDER_FAILED')
+    this.onProgress('Codex 隔离线程已准备完成。')
     this.threadId = threadValue.id
     const rawModel = typeof threadValue.model === 'string'
       ? threadValue.model
@@ -213,11 +224,12 @@ export class CodexAppServerSession {
     if (!this.threadId) throw new CodexAppServerError('PROVIDER_FAILED')
     this.output = ''
     this.usage = null
+    this.pendingCompletionStatus = undefined
+    this.turnTerminalReceived = false
     const response = object(await this.request('turn/start', {
       threadId: this.threadId,
       input: [{ type: 'text', text: prompt, text_elements: [] }],
       cwd: this.cwd,
-      runtimeWorkspaceRoots: [this.cwd],
       approvalPolicy: 'never',
       sandboxPolicy: {
         type: 'workspaceWrite',
@@ -230,6 +242,7 @@ export class CodexAppServerSession {
     const turn = object(response?.turn)
     if (typeof turn?.id !== 'string') throw new CodexAppServerError('PROVIDER_FAILED')
     this.turnId = turn.id
+    this.onProgress('Codex 已接受任务，正在隔离副本中执行。')
     await new Promise<void>((resolve, reject) => {
       this.completion = { resolve, reject }
       const timer = setTimeout(() => {

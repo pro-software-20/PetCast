@@ -23,7 +23,7 @@ function setup() {
     prepare(input) { calls.push(['prepare', input]); this.emit({ executionId: 'execution-1', stage: 'preparing', message: 'safe' }); return { ok: true, value: {} } }
     run(id) { calls.push(['run', id]); return { ok: true, value: {} } }
     cancel(id) { calls.push(['cancel', id]); return { ok: true, value: null } }
-    readArtifact(id) { calls.push(['read', id]); return { ok: true, value: {} } }
+    readArtifact(id) { calls.push(['read', id]); if (id === 'explode') throw new Error('private path'); return { ok: true, value: {} } }
     applyArtifact(id) { calls.push(['apply', id]); return { ok: true, value: null } }
     discardArtifact(id) { calls.push(['discard', id]); return { ok: true, value: null } }
     dispose() {}
@@ -36,7 +36,7 @@ function setup() {
       if (name === './taskExecutionManager.js') return { TaskExecutionManager: Manager }
       if (name === './taskExecutionProtocol.js') return {
         isTaskExecutionId: value => typeof value === 'string' && /^[A-Za-z0-9-]+$/.test(value),
-        TASK_EXECUTION_MESSAGES: { INVALID_REQUEST: 'invalid' },
+        TASK_EXECUTION_MESSAGES: { INVALID_REQUEST: 'invalid', PROVIDER_FAILED: 'provider failed' },
         validatePrepareCodexTaskExecutionRequest: value => value,
       }
       return require(name)
@@ -59,4 +59,8 @@ test('task execution IPC accepts only the trusted main frame and exposes bounded
   assert.equal((await ipc.handlers.get('task-execution:run')(untrusted, 'execution-1')).code, 'INVALID_REQUEST')
   assert.equal(ipc.calls.some(call => call[0] === 'run'), false)
   assert.equal((await ipc.handlers.get('task-execution:artifact-read')(ipc.event, '../bad')).code, 'INVALID_REQUEST')
+  const failed = await ipc.handlers.get('task-execution:artifact-read')(ipc.event, 'explode')
+  assert.equal(failed.ok, false)
+  assert.equal(failed.code, 'PROVIDER_FAILED')
+  assert.equal(failed.message, 'provider failed')
 })

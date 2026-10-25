@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
@@ -10,6 +10,7 @@ import { loadTs } from './load-ts.mjs'
 const protocol = await loadTs('../electron/taskExecutionProtocol.ts')
 const sandbox = await loadTs('../electron/taskExecutionSandbox.ts')
 const { CodexAppServerSession } = await loadTs('../electron/codexAppServer.ts')
+const { TaskExecutionManager } = await loadTs('../electron/taskExecutionManager.ts')
 const { createTaskSession, updateTaskSession, recoverInterruptedTaskExecutions } = await loadTs('../src/orchestration/taskSession.ts')
 
 const scope = {
@@ -18,6 +19,17 @@ const scope = {
   forbiddenPaths: ['src/private'],
   outputPaths: ['src/generated.ts'],
 }
+
+const managerRequest = workspaceId => ({
+  requestId: 'prepare-test',
+  taskId: 'task-1',
+  workspaceId,
+  expectedScopeId: `codex-${'b'.repeat(64)}`,
+  prompt: '修改授权代码',
+  category: 'coding',
+  scope: { readPaths: ['src'], allowedWritePaths: ['src'], forbiddenPaths: [], outputPaths: [] },
+  dependencySummaries: [],
+})
 
 test('execution request accepts only metadata, safe paths and coding/testing categories', () => {
   const request = {
@@ -121,10 +133,172 @@ test('app-server performs handshake, verifies scope and reports streamed output 
   const result = await session.run('只修改授权文件')
   assert.equal(result.outputText, '完成修改')
   assert.deepEqual(result.usage, { inputTokens: 12, outputTokens: 4, cachedInputTokens: 2 })
+  const initialize = messages.find(message => message.method === 'initialize')
+  assert.equal(initialize.params.capabilities, null)
   const turn = messages.find(message => message.method === 'turn/start')
   assert.equal(turn.params.approvalPolicy, 'never')
   assert.equal(turn.params.sandboxPolicy.networkAccess, false)
   session.close()
+})
+
+function statusChild(status, lateStatus) {
+  const child = new EventEmitter()
+  child.stdin = new PassThrough()
+  child.stdout = new PassThrough()
+  child.stderr = new PassThrough()
+  child.killed = false
+  child.kill = () => { child.killed = true; return true }
+  child.stdin.on('data', chunk => {
+    for (const line of chunk.toString().trim().split('\n')) {
+      if (!line) continue
+      const request = JSON.parse(line)
+      if (!request.id) continue
+      let result = {}
+      if (request.method === 'account/read') result = { account: { type: 'chatgpt', email: 'person@example.com' } }
+      if (request.method === 'account/rateLimits/read') result = { accountId: 'workspace-a' }
+      if (request.method === 'thread/start') result = { thread: { id: 'thread-1', model: 'gpt-test' } }
+      if (request.method === 'turn/start') {
+        result = { turn: { id: 'turn-1' } }
+        queueMicrotask(() => {
+          child.stdout.write(`${JSON.stringify({ method: 'turn/completed', params: { turn: { status } } })}\n`)
+          if (lateStatus) child.stdout.write(`${JSON.stringify({ method: 'turn/completed', params: { turn: { status: lateStatus } } })}\n`)
+        })
+      }
+      child.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`)
+    }
+  })
+  return child
+}
+
+for (const status of ['failed', 'interrupted']) {
+  test(`app-server treats ${status} as failure and ignores a late completed event`, async () => {
+    const expectedScope = `codex-${'e'.repeat(64)}`
+    const session = new CodexAppServerSession(
+      'C:/isolated',
+      { getSalt: async () => 'salt', hashAccount: async () => expectedScope },
+      () => {},
+      () => statusChild(status, 'completed'),
+      async () => ({ executable: 'fake', source: 'explicit' }),
+    )
+    await session.prepare(expectedScope)
+    await assert.rejects(() => session.run('只修改授权文件'), error => (
+      error.code === (status === 'interrupted' ? 'CANCELLED' : 'PROVIDER_FAILED')
+    ))
+    session.close()
+  })
+}
+
+test('manager cancels preparation by request id and rejects a late prepared result', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'petcast-manager-source-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const workspaceId = 'a'.repeat(64)
+  let stagedRoot
+  let stageStarted
+  const started = new Promise(resolve => { stageStarted = resolve })
+  const events = []
+  const manager = new TaskExecutionManager(
+    { get: id => id === workspaceId ? root : undefined },
+    {},
+    event => events.push(event),
+    {
+      stageWorkspace: ({ stagedRoot: nextRoot, signal }) => new Promise((resolve, reject) => {
+        stagedRoot = nextRoot
+        stageStarted()
+        signal.addEventListener('abort', () => reject(new Error('late preparation cancelled')), { once: true })
+      }),
+      createServer: () => { throw new Error('server must not start') },
+    },
+  )
+  t.after(() => manager.dispose())
+  const pending = manager.prepare(managerRequest(workspaceId))
+  await started
+  const cancelled = await manager.cancel('prepare-test')
+  assert.equal(cancelled.ok, true)
+  const result = await pending
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'CANCELLED')
+  await assert.rejects(() => stat(stagedRoot), error => error.code === 'ENOENT')
+  assert.equal(events.some(event => event.executionId === 'prepare-test' && event.code === 'CANCELLED'), true)
+})
+
+async function createManagerArtifact(t, options = {}) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'petcast-manager-source-'))
+  await mkdir(path.join(root, 'src'), { recursive: true })
+  await writeFile(path.join(root, 'src', 'app.ts'), 'before\n')
+  const workspaceId = 'd'.repeat(64)
+  const events = []
+  const manager = new TaskExecutionManager(
+    { get: id => id === workspaceId ? root : undefined },
+    {},
+    event => events.push(event),
+    {
+      artifactTtlMs: options.artifactTtlMs ?? 60_000,
+      cleanupRetryDelaysMs: options.cleanupRetryDelaysMs ?? [],
+      createServer: stagedRoot => ({
+        prepare: async () => 'gpt-test',
+        run: async () => {
+          await writeFile(path.join(stagedRoot, 'src', 'app.ts'), 'after\n')
+          return { outputText: '修改完成', usage: { inputTokens: 10, outputTokens: 3, cachedInputTokens: 1 } }
+        },
+        interrupt: async () => {},
+        close: () => {},
+      }),
+      ...(options.discardArtifact ? { discardArtifact: options.discardArtifact } : {}),
+    },
+  )
+  t.after(async () => {
+    await manager.dispose()
+    await rm(root, { recursive: true, force: true })
+  })
+  const prepared = await manager.prepare(managerRequest(workspaceId))
+  assert.equal(prepared.ok, true)
+  const result = await manager.run(prepared.value.executionId)
+  assert.equal(result.ok, true)
+  return { manager, root, events, executionId: prepared.value.executionId, result: result.value }
+}
+
+test('manager expires review artifacts and emits a structured interruption', async t => {
+  const item = await createManagerArtifact(t, { artifactTtlMs: 10 })
+  await new Promise(resolve => setTimeout(resolve, 40))
+  const read = item.manager.readArtifact(item.result.artifactId)
+  assert.equal(read.ok, false)
+  assert.equal(read.code, 'ARTIFACT_EXPIRED')
+  assert.equal(item.events.some(event => (
+    event.executionId === item.executionId && event.code === 'ARTIFACT_EXPIRED'
+  )), true)
+})
+
+test('successful apply is not reported as failed when temporary cleanup fails', async t => {
+  let cleanupAttempts = 0
+  const item = await createManagerArtifact(t, {
+    discardArtifact: async () => {
+      cleanupAttempts += 1
+      throw new Error('temporary cleanup failure with an internal path')
+    },
+  })
+  const applied = await item.manager.applyArtifact(item.result.artifactId)
+  assert.equal(applied.ok, true)
+  assert.equal(await readFile(path.join(item.root, 'src', 'app.ts'), 'utf8'), 'after\n')
+  assert.equal(cleanupAttempts, 1)
+  assert.equal(item.manager.readArtifact(item.result.artifactId).code, 'ARTIFACT_NOT_FOUND')
+})
+
+test('discard cleanup failure is structured and leaves the artifact retryable', async t => {
+  let shouldFail = true
+  const item = await createManagerArtifact(t, {
+    discardArtifact: async artifact => {
+      if (shouldFail) throw new Error(`do not expose ${artifact.stagedRoot}`)
+      await rm(artifact.stagedRoot, { recursive: true, force: true })
+    },
+  })
+  const first = await item.manager.discardArtifact(item.result.artifactId)
+  assert.deepEqual(first, {
+    ok: false,
+    code: 'CLEANUP_FAILED',
+    message: protocol.TASK_EXECUTION_MESSAGES.CLEANUP_FAILED,
+  })
+  shouldFail = false
+  assert.equal((await item.manager.discardArtifact(item.result.artifactId)).ok, true)
 })
 
 const analysis = {
@@ -148,6 +322,11 @@ test('automatic session requires artifact resolution and recovers interrupted de
   assert.equal(started.ok, true)
   const completed = updateTaskSession(started.session, { type: 'complete-automatic', taskId: 'task-1', artifactId: 'artifact-1', summary: 'done', outputText: 'done', changedFiles: ['src/app.ts'] })
   assert.equal(completed.ok, true)
+  const expired = updateTaskSession(completed.session, { type: 'interrupt-automatic', taskId: 'task-1', message: 'artifact expired' })
+  assert.equal(expired.ok, true)
+  assert.equal(expired.session.runs[0].status, 'needs-input')
+  assert.equal(expired.session.runs[0].automaticExecution.state, 'interrupted')
+  assert.equal(expired.session.runs[0].automaticExecution.artifactId, undefined)
   assert.equal(updateTaskSession(completed.session, { type: 'accept', taskId: 'task-1' }).ok, false)
   const applied = updateTaskSession(completed.session, { type: 'apply-automatic', taskId: 'task-1' })
   assert.equal(applied.ok, true)

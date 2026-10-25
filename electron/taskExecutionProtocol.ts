@@ -30,6 +30,8 @@ export type TaskExecutionErrorCode =
   | 'CANCELLED'
   | 'SOURCE_CHANGED'
   | 'ARTIFACT_NOT_FOUND'
+  | 'ARTIFACT_EXPIRED'
+  | 'CLEANUP_FAILED'
   | 'UNSAFE_CHANGES'
   | 'LOG_PERSISTENCE_FAILED'
   | 'PROVIDER_FAILED'
@@ -71,6 +73,7 @@ export interface TaskExecutionEvent {
   executionId: string
   stage: 'preparing' | 'running' | 'review' | 'applying' | 'applied' | 'discarded' | 'interrupted'
   message: string
+  code?: TaskExecutionErrorCode
 }
 
 export const TASK_EXECUTION_MESSAGES: Record<TaskExecutionErrorCode, string> = {
@@ -84,6 +87,8 @@ export const TASK_EXECUTION_MESSAGES: Record<TaskExecutionErrorCode, string> = {
   CANCELLED: 'Codex 执行已取消。',
   SOURCE_CHANGED: '原项目文件已发生变化，为避免覆盖，改动未应用。',
   ARTIFACT_NOT_FOUND: '执行产物已失效，请核对执行记录后重新运行。',
+  ARTIFACT_EXPIRED: '待审核改动已超过 30 分钟并失效，请核对执行记录后重新运行。',
+  CLEANUP_FAILED: '临时执行文件暂未清理完成，请稍后重试。',
   UNSAFE_CHANGES: '检测到删除、二进制、越权或其他不安全改动，整次结果已拒绝。',
   LOG_PERSISTENCE_FAILED: '执行日志保存失败；为避免重复计费，不会自动重跑。',
   PROVIDER_FAILED: 'Codex 未能完成任务，请查看安全摘要后人工处理。',

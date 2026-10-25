@@ -952,6 +952,36 @@ pnpm test:desktop
 git diff --check
 ```
 
+## 22.1. B 模块 P2.5.1：Codex 真实联调与可靠性修复
+
+本轮继续把 P2.5 作为本地桌面试验功能，不将本机登录复用描述为公开版 OAuth。正式面向所有用户发布前，仍需迁移到官方 Sign in with ChatGPT/OAuth、令牌刷新和注册配置。
+
+- 准备阶段按 `requestId` 注册可取消操作；取消、关闭面板或切换会话会中止文件隔离和 app-server 初始化，并阻止迟到结果进入待执行状态。
+- 待审核文件产物 30 分钟后失效，页面收到 `ARTIFACT_EXPIRED` 后会清除句柄并把任务转为“需要信息”，不会自动重跑。
+- 应用成功与临时目录清理解耦：源文件已经安全写回时，首次清理失败不会误报“应用失败”，后台只进行有限重试。
+- 丢弃失败保留产物供用户重试；主进程和 Renderer 的准备、读取、应用、丢弃异常均转换为结构化安全提示，不暴露绝对路径、stderr 或服务商正文。
+- app-server 按本机 `codex-cli 0.163.0` 生成的 v2 协议校验；补齐 `initialize.capabilities`，并移除会导致当前 CLI 拒绝请求的冗余 `runtimeWorkspaceRoots` 覆盖。文件写入边界仍由隔离副本和 `sandboxPolicy.writableRoots` 强制限制。
+- `turn/completed` 只接受首个终态；`failed`、`interrupted` 不会被迟到的 `completed` 覆盖。
+- 执行确认页明确提示“使用本机 Codex 登录，仅供本地试验”；浏览器模式和执行器不可用时继续使用人工复制流程。
+
+真实联调使用系统临时零依赖 ESM 项目，未写入 Git：
+
+- 第一次调用暴露协议兼容问题，随后修复；按两次调用上限，第二次优先验证修复，取消链保留模拟测试覆盖。
+- 第二次由 `gpt-5.6-luna` 修改 `src/calculator.mjs` 与 `tests/calculator.test.mjs`，未访问或修改禁止的 `private` 路径。
+- 人为修改原始文件后应用返回 `SOURCE_CHANGED`；恢复原文件后安全应用成功，临时项目 `node:test` 通过。
+- D 模块记录服务商上报的输入、缓存输入和输出 Token，费用保持 `null`；联调完成后隔离目录数量为 0。
+
+本轮自动测试增加准备取消、迟到终态、产物过期、清理失败、应用后清理失败、IPC 异常脱敏及 review 状态中断覆盖。验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm check:codex
+git diff --check
+```
+
 ## 23. D 模块后续接入说明
 
 D v4 已提供 `recommendTaskPlan(pendingTask, taskRecords, modelCapacities, now)` 及对应页面。B 可直接传入待办条件与各模型当前资源，获取同一任务的模型 / 时间方案。详见 `docs/D_UNIFIED_PLAN.md`。执行前仍需重新确认资源，不能把 recheck 当成确定排期；D 不负责自动调用或队列资源预留。
