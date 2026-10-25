@@ -29,8 +29,47 @@ import type { WorkspaceRegistry } from './workspaceRegistry.js'
 interface PreparedExecution {
   request: PrepareCodexTaskExecutionRequest
   staged: StagedTaskWorkspace
-  server: CodexAppServerSession
+  server: TaskExecutionServer
   model: string
+}
+
+interface TaskExecutionServer {
+  prepare(expectedScopeId: string): Promise<string>
+  run(prompt: string): Promise<{
+    outputText: string
+    usage: CodexTaskExecutionResult['usage']
+  }>
+  interrupt(): Promise<void>
+  close(): void
+}
+
+interface PreparingExecution {
+  requestId: string
+  executionId: string
+  controller: AbortController
+  cancelled: boolean
+  stagedRoot?: string
+  server?: TaskExecutionServer
+}
+
+interface StoredArtifact {
+  artifact: TaskExecutionArtifact
+  executionId: string
+}
+
+export interface TaskExecutionManagerOptions {
+  artifactTtlMs?: number
+  prepareTimeoutMs?: number
+  cleanupRetryDelaysMs?: readonly number[]
+  createServer?: (
+    stagedRoot: string,
+    identity: CodexScopeIdentity,
+    onProgress: (message: string) => void,
+  ) => TaskExecutionServer
+  stageWorkspace?: typeof stageTaskWorkspace
+  createArtifact?: typeof createTaskExecutionArtifact
+  applyArtifact?: typeof applyTaskExecutionArtifact
+  discardArtifact?: typeof discardTaskExecutionArtifact
 }
 
 const resultError = <T>(code: TaskExecutionErrorCode): TaskExecutionOutcome<T> => ({
@@ -52,18 +91,44 @@ const summaryOf = (text: string, files: string[]) => {
 
 export class TaskExecutionManager {
   private readonly prepared = new Map<string, PreparedExecution>()
-  private readonly artifacts = new Map<string, TaskExecutionArtifact>()
+  private readonly artifacts = new Map<string, StoredArtifact>()
+  private readonly expiredArtifactIds = new Set<string>()
   private readonly expiryTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private readonly cleanupTimers = new Set<ReturnType<typeof setTimeout>>()
+  private readonly pendingCleanup = new Map<string, TaskExecutionArtifact>()
   private runningId?: string
-  private preparing = false
+  private preparing?: PreparingExecution
+  private disposed = false
+
+  private readonly artifactTtlMs: number
+  private readonly prepareTimeoutMs: number
+  private readonly cleanupRetryDelaysMs: readonly number[]
+  private readonly createServer: NonNullable<TaskExecutionManagerOptions['createServer']>
+  private readonly stageWorkspace: typeof stageTaskWorkspace
+  private readonly createArtifact: typeof createTaskExecutionArtifact
+  private readonly applyStoredArtifact: typeof applyTaskExecutionArtifact
+  private readonly discardStoredArtifact: typeof discardTaskExecutionArtifact
 
   constructor(
     private readonly workspaces: WorkspaceRegistry,
     private readonly identity: CodexScopeIdentity,
     private readonly emit: (event: TaskExecutionEvent) => void,
-  ) {}
+    options: TaskExecutionManagerOptions = {},
+  ) {
+    this.artifactTtlMs = options.artifactTtlMs ?? 30 * 60_000
+    this.prepareTimeoutMs = options.prepareTimeoutMs ?? 30_000
+    this.cleanupRetryDelaysMs = options.cleanupRetryDelaysMs ?? [1_000, 5_000, 30_000]
+    this.createServer = options.createServer ?? ((stagedRoot, identity, onProgress) => (
+      new CodexAppServerSession(stagedRoot, identity, onProgress)
+    ))
+    this.stageWorkspace = options.stageWorkspace ?? stageTaskWorkspace
+    this.createArtifact = options.createArtifact ?? createTaskExecutionArtifact
+    this.applyStoredArtifact = options.applyArtifact ?? applyTaskExecutionArtifact
+    this.discardStoredArtifact = options.discardArtifact ?? discardTaskExecutionArtifact
+  }
 
   private expireLater(id: string, action: () => Promise<unknown>, delay: number) {
+    this.clearExpiry(id)
     const timer = setTimeout(() => {
       this.expiryTimers.delete(id)
       void action()
@@ -73,46 +138,142 @@ export class TaskExecutionManager {
   }
 
   private clearExpiry(id: string) {
-    clearTimeout(this.expiryTimers.get(id))
+    const timer = this.expiryTimers.get(id)
+    if (timer) clearTimeout(timer)
     this.expiryTimers.delete(id)
   }
 
+  private rememberExpiredArtifact(artifactId: string) {
+    this.expiredArtifactIds.add(artifactId)
+    while (this.expiredArtifactIds.size > 100) {
+      const oldest = this.expiredArtifactIds.values().next().value as string | undefined
+      if (!oldest) break
+      this.expiredArtifactIds.delete(oldest)
+    }
+  }
+
+  private artifactMissing<T>(artifactId: string): TaskExecutionOutcome<T> {
+    return resultError(this.expiredArtifactIds.has(artifactId) ? 'ARTIFACT_EXPIRED' : 'ARTIFACT_NOT_FOUND')
+  }
+
+  private async removeRoot(root: string): Promise<boolean> {
+    try {
+      await fs.rm(root, { recursive: true, force: true })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private scheduleDetachedCleanup(artifact: TaskExecutionArtifact, attempt = 0) {
+    this.pendingCleanup.set(artifact.id, artifact)
+    const delay = this.cleanupRetryDelaysMs[attempt]
+    if (delay === undefined || this.disposed) return
+    const timer = setTimeout(() => {
+      this.cleanupTimers.delete(timer)
+      void this.discardStoredArtifact(artifact).then(() => {
+        this.pendingCleanup.delete(artifact.id)
+      }).catch(() => {
+        this.scheduleDetachedCleanup(artifact, attempt + 1)
+      })
+    }, delay)
+    timer.unref?.()
+    this.cleanupTimers.add(timer)
+  }
+
+  private async cleanupAppliedArtifact(artifact: TaskExecutionArtifact) {
+    try {
+      await this.discardStoredArtifact(artifact)
+    } catch {
+      this.scheduleDetachedCleanup(artifact)
+    }
+  }
+
+  private async expireArtifact(artifactId: string, attempt = 0): Promise<void> {
+    const stored = this.artifacts.get(artifactId)
+    if (!stored) return
+    if (attempt === 0) {
+      this.rememberExpiredArtifact(artifactId)
+      this.emit({
+        executionId: stored.executionId,
+        stage: 'interrupted',
+        code: 'ARTIFACT_EXPIRED',
+        message: TASK_EXECUTION_MESSAGES.ARTIFACT_EXPIRED,
+      })
+    }
+    try {
+      await this.discardStoredArtifact(stored.artifact)
+      this.artifacts.delete(artifactId)
+    } catch {
+      const delay = this.cleanupRetryDelaysMs[attempt]
+      if (delay === undefined) {
+        this.emit({
+          executionId: stored.executionId,
+          stage: 'review',
+          code: 'CLEANUP_FAILED',
+          message: TASK_EXECUTION_MESSAGES.CLEANUP_FAILED,
+        })
+        return
+      }
+      this.expireLater(artifactId, () => this.expireArtifact(artifactId, attempt + 1), delay)
+    }
+  }
+
   async prepare(request: PrepareCodexTaskExecutionRequest): Promise<TaskExecutionOutcome<PreparedCodexTaskExecution>> {
-    if (this.preparing || this.prepared.size > 0 || this.runningId) return resultError('CODEX_UNAVAILABLE')
+    if (this.disposed || this.preparing || this.prepared.size > 0 || this.runningId) return resultError('CODEX_UNAVAILABLE')
     const root = this.workspaces.get(request.workspaceId)
     if (!root) return resultError('NO_WORKSPACE')
-    this.preparing = true
-    const executionId = randomUUID()
-    const stagedRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'petcast-codex-'))
-    let server: CodexAppServerSession | undefined
+
+    const context: PreparingExecution = {
+      requestId: request.requestId,
+      executionId: randomUUID(),
+      controller: new AbortController(),
+      cancelled: false,
+    }
+    this.preparing = context
     try {
-      this.emit({ executionId, stage: 'preparing', message: '正在构建隔离副本并验证 Codex 账号…' })
-      const staged = await stageTaskWorkspace({ root, stagedRoot, scope: request.scope })
-      server = new CodexAppServerSession(stagedRoot, this.identity, message => {
-        this.emit({ executionId, stage: 'running', message })
+      this.emit({ executionId: request.requestId, stage: 'preparing', message: '正在构建隔离副本并验证 Codex 账号…' })
+      context.stagedRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'petcast-codex-'))
+      if (context.cancelled || context.controller.signal.aborted) throw new CodexAppServerError('CANCELLED')
+      const staged = await this.stageWorkspace({
+        root,
+        stagedRoot: context.stagedRoot,
+        scope: request.scope,
+        signal: context.controller.signal,
       })
+      if (context.cancelled || context.controller.signal.aborted) throw new CodexAppServerError('CANCELLED')
+      const server = this.createServer(staged.stagedRoot, this.identity, message => {
+        if (!context.cancelled) this.emit({ executionId: context.executionId, stage: 'running', message })
+      })
+      context.server = server
       let prepareTimer: ReturnType<typeof setTimeout> | undefined
       const model = await Promise.race([
         server.prepare(request.expectedScopeId),
         new Promise<never>((_, reject) => {
-          prepareTimer = setTimeout(() => reject(new CodexAppServerError('TIMEOUT')), 30_000)
+          prepareTimer = setTimeout(() => reject(new CodexAppServerError('TIMEOUT')), this.prepareTimeoutMs)
         }),
-      ]).finally(() => clearTimeout(prepareTimer))
-      this.prepared.set(executionId, { request: structuredClone(request), staged, server, model })
-      this.expireLater(executionId, () => this.cancel(executionId), 10 * 60_000)
+      ]).finally(() => {
+        if (prepareTimer) clearTimeout(prepareTimer)
+      })
+      if (context.cancelled || context.controller.signal.aborted || this.preparing !== context) {
+        throw new CodexAppServerError('CANCELLED')
+      }
+      this.prepared.set(context.executionId, { request: structuredClone(request), staged, server, model })
+      this.expireLater(context.executionId, () => this.cancel(context.executionId), 10 * 60_000)
       return { ok: true, value: {
-        executionId,
+        executionId: context.executionId,
         model,
         preparedFileCount: staged.preparedFileCount,
         preparedBytes: staged.preparedBytes,
         warnings: staged.warnings,
       } }
     } catch (error) {
-      server?.close()
-      await fs.rm(stagedRoot, { recursive: true, force: true }).catch(() => undefined)
-      return resultError(codeFor(error))
+      context.server?.close()
+      if (context.stagedRoot) await this.removeRoot(context.stagedRoot)
+      const code = context.cancelled || context.controller.signal.aborted ? 'CANCELLED' : codeFor(error)
+      return resultError(code)
     } finally {
-      this.preparing = false
+      if (this.preparing === context) this.preparing = undefined
     }
   }
 
@@ -125,8 +286,9 @@ export class TaskExecutionManager {
     this.emit({ executionId, stage: 'running', message: 'Codex 已开始在隔离副本中执行。' })
     try {
       const output = await prepared.server.run(prepared.request.prompt)
-      const artifact = await createTaskExecutionArtifact(prepared.staged)
-      this.artifacts.set(artifact.id, artifact)
+      const artifact = await this.createArtifact(prepared.staged)
+      this.artifacts.set(artifact.id, { artifact, executionId })
+      this.expireLater(artifact.id, () => this.expireArtifact(artifact.id), this.artifactTtlMs)
       this.prepared.delete(executionId)
       prepared.server.close()
       const changedFiles = artifact.changes.map(change => change.path)
@@ -141,66 +303,121 @@ export class TaskExecutionManager {
     } catch (error) {
       prepared.server.close()
       this.prepared.delete(executionId)
-      await fs.rm(prepared.staged.stagedRoot, { recursive: true, force: true }).catch(() => undefined)
+      await this.removeRoot(prepared.staged.stagedRoot)
       const code = codeFor(error)
-      this.emit({ executionId, stage: code === 'CANCELLED' ? 'interrupted' : 'review', message: TASK_EXECUTION_MESSAGES[code] })
+      this.emit({
+        executionId,
+        stage: code === 'CANCELLED' ? 'interrupted' : 'review',
+        code,
+        message: TASK_EXECUTION_MESSAGES[code],
+      })
       return resultError(code)
     } finally {
       if (this.runningId === executionId) this.runningId = undefined
     }
   }
 
-  async cancel(executionId: string): Promise<TaskExecutionOutcome<null>> {
-    const prepared = this.prepared.get(executionId)
+  async cancel(id: string): Promise<TaskExecutionOutcome<null>> {
+    const preparing = this.preparing
+    if (preparing && (preparing.requestId === id || preparing.executionId === id)) {
+      preparing.cancelled = true
+      preparing.controller.abort()
+      preparing.server?.close()
+      if (this.preparing === preparing) this.preparing = undefined
+      const cleaned = !preparing.stagedRoot || await this.removeRoot(preparing.stagedRoot)
+      this.emit({
+        executionId: preparing.requestId,
+        stage: 'interrupted',
+        code: cleaned ? 'CANCELLED' : 'CLEANUP_FAILED',
+        message: cleaned ? TASK_EXECUTION_MESSAGES.CANCELLED : TASK_EXECUTION_MESSAGES.CLEANUP_FAILED,
+      })
+      return cleaned ? { ok: true, value: null } : resultError('CLEANUP_FAILED')
+    }
+
+    const prepared = this.prepared.get(id)
     if (!prepared) return resultError('ARTIFACT_NOT_FOUND')
-    await prepared.server.interrupt()
-    this.clearExpiry(executionId)
-    this.prepared.delete(executionId)
-    await fs.rm(prepared.staged.stagedRoot, { recursive: true, force: true }).catch(() => undefined)
-    if (this.runningId === executionId) this.runningId = undefined
-    this.emit({ executionId, stage: 'interrupted', message: '执行已取消，隔离副本已清理。' })
-    return { ok: true, value: null }
+    try {
+      await prepared.server.interrupt()
+    } catch {
+      prepared.server.close()
+    }
+    this.clearExpiry(id)
+    this.prepared.delete(id)
+    const cleaned = await this.removeRoot(prepared.staged.stagedRoot)
+    if (this.runningId === id) this.runningId = undefined
+    this.emit({
+      executionId: id,
+      stage: 'interrupted',
+      code: cleaned ? 'CANCELLED' : 'CLEANUP_FAILED',
+      message: cleaned ? '执行已取消，隔离副本已清理。' : TASK_EXECUTION_MESSAGES.CLEANUP_FAILED,
+    })
+    return cleaned ? { ok: true, value: null } : resultError('CLEANUP_FAILED')
   }
 
   readArtifact(artifactId: string): TaskExecutionOutcome<TaskExecutionArtifactView> {
-    const artifact = this.artifacts.get(artifactId)
-    return artifact ? { ok: true, value: viewTaskExecutionArtifact(artifact) } : resultError('ARTIFACT_NOT_FOUND')
+    if (this.expiredArtifactIds.has(artifactId)) return resultError('ARTIFACT_EXPIRED')
+    const stored = this.artifacts.get(artifactId)
+    return stored ? { ok: true, value: viewTaskExecutionArtifact(stored.artifact) } : this.artifactMissing(artifactId)
   }
 
   async applyArtifact(artifactId: string): Promise<TaskExecutionOutcome<null>> {
-    const artifact = this.artifacts.get(artifactId)
-    if (!artifact) return resultError('ARTIFACT_NOT_FOUND')
+    if (this.expiredArtifactIds.has(artifactId)) return resultError('ARTIFACT_EXPIRED')
+    const stored = this.artifacts.get(artifactId)
+    if (!stored) return this.artifactMissing(artifactId)
     try {
-      await applyTaskExecutionArtifact(artifact)
-      this.clearExpiry(artifactId)
-      await discardTaskExecutionArtifact(artifact)
-      this.artifacts.delete(artifactId)
-      return { ok: true, value: null }
+      await this.applyStoredArtifact(stored.artifact)
     } catch (error) {
       return resultError(codeFor(error))
     }
+
+    this.clearExpiry(artifactId)
+    this.artifacts.delete(artifactId)
+    this.emit({ executionId: stored.executionId, stage: 'applied', message: '文件改动已安全应用，临时副本正在清理。' })
+    await this.cleanupAppliedArtifact(stored.artifact)
+    return { ok: true, value: null }
   }
 
   async discardArtifact(artifactId: string): Promise<TaskExecutionOutcome<null>> {
-    const artifact = this.artifacts.get(artifactId)
-    if (!artifact) return resultError('ARTIFACT_NOT_FOUND')
+    if (this.expiredArtifactIds.has(artifactId)) return resultError('ARTIFACT_EXPIRED')
+    const stored = this.artifacts.get(artifactId)
+    if (!stored) return this.artifactMissing(artifactId)
+    try {
+      await this.discardStoredArtifact(stored.artifact)
+    } catch {
+      return resultError('CLEANUP_FAILED')
+    }
     this.clearExpiry(artifactId)
-    await discardTaskExecutionArtifact(artifact)
     this.artifacts.delete(artifactId)
+    this.emit({ executionId: stored.executionId, stage: 'discarded', message: '待审核改动已丢弃，原项目未修改。' })
     return { ok: true, value: null }
   }
 
   async dispose() {
+    this.disposed = true
+    const preparing = this.preparing
+    if (preparing) {
+      preparing.cancelled = true
+      preparing.controller.abort()
+      preparing.server?.close()
+      if (preparing.stagedRoot) await this.removeRoot(preparing.stagedRoot)
+    }
+    this.preparing = undefined
     for (const timer of this.expiryTimers.values()) clearTimeout(timer)
     this.expiryTimers.clear()
+    for (const timer of this.cleanupTimers) clearTimeout(timer)
+    this.cleanupTimers.clear()
     for (const item of this.prepared.values()) {
       item.server.close()
-      await fs.rm(item.staged.stagedRoot, { recursive: true, force: true }).catch(() => undefined)
+      await this.removeRoot(item.staged.stagedRoot)
     }
-    for (const artifact of this.artifacts.values()) {
-      await discardTaskExecutionArtifact(artifact).catch(() => undefined)
+    for (const stored of this.artifacts.values()) {
+      await this.discardStoredArtifact(stored.artifact).catch(() => undefined)
+    }
+    for (const artifact of this.pendingCleanup.values()) {
+      await this.discardStoredArtifact(artifact).catch(() => undefined)
     }
     this.prepared.clear()
     this.artifacts.clear()
+    this.pendingCleanup.clear()
   }
 }

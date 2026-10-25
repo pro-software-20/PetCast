@@ -105,18 +105,26 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
     prompt: string
     prepared: PreparedCodexTaskExecution
   } | null>(null)
+  const [preparingExecution, setPreparingExecution] = useState<{
+    taskId: string
+    requestId: string
+  } | null>(null)
   const [executionProgress, setExecutionProgress] = useState<string | null>(null)
   const [executionBusy, setExecutionBusy] = useState(false)
   const [artifactViews, setArtifactViews] = useState<Record<string, TaskExecutionArtifactView>>({})
   const cancelRequested = useRef(new Set<string>())
+  const preparingRequest = useRef<string | null>(null)
+  const preparedExecutionRef = useRef(preparedExecution)
+  const executionSessionId = useRef(session.id)
+  preparedExecutionRef.current = preparedExecution
   const manualProviders = providers.filter(provider => provider.executionModes.includes('manual'))
   const selectableProviders = manualProviders.some(provider => provider.id === 'local')
     ? manualProviders
     : [LOCAL_PROVIDER_PROFILE, ...manualProviders]
   const completedCount = session.runs.filter(run => run.status === 'done').length
   const readyCount = session.runs.filter(run => run.status === 'ready').length
-  const dependenciesEditable = canEditTaskDependencies(session) && !preparedExecution
-  const planEditable = canEditTaskPlan(session) && !preparedExecution
+  const dependenciesEditable = canEditTaskDependencies(session) && !preparedExecution && !preparingExecution
+  const planEditable = canEditTaskPlan(session) && !preparedExecution && !preparingExecution
   const allTasksDone = completedCount === session.runs.length
   const report = session.completedAt ? generateTaskSessionReport(session) : null
   const defaultScope = session.plan.workspace?.defaultScope
@@ -130,13 +138,19 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
     if (requestId) window.petcast?.cancelTaskWorkspace?.(requestId)
   }, [])
 
-  useEffect(() => window.petcast?.onTaskExecutionEvent?.((event) => {
-    if (preparedExecution?.prepared.executionId === event.executionId) setExecutionProgress(event.message)
-  }), [preparedExecution?.prepared.executionId])
-
-  useEffect(() => () => {
-    if (preparedExecution) window.petcast?.cancelCodexTaskExecution?.(preparedExecution.prepared.executionId)
-  }, [preparedExecution?.prepared.executionId])
+  useEffect(() => {
+    if (executionSessionId.current === session.id) return
+    const requestId = preparingRequest.current
+    if (requestId) window.petcast?.cancelCodexTaskExecution?.(requestId)
+    const prepared = preparedExecutionRef.current
+    if (prepared) window.petcast?.cancelCodexTaskExecution?.(prepared.prepared.executionId)
+    preparingRequest.current = null
+    setPreparingExecution(null)
+    setPreparedExecution(null)
+    setExecutionBusy(false)
+    setExecutionProgress(null)
+    executionSessionId.current = session.id
+  }, [session.id])
 
   const applyAction = (action: TaskSessionAction, persistImmediately = true) => {
     const outcome = updateTaskSession(sessionRef.current, action)
@@ -150,6 +164,32 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
     return true
   }
 
+  useEffect(() => window.petcast?.onTaskExecutionEvent?.((event) => {
+    if (preparedExecutionRef.current?.prepared.executionId === event.executionId
+      || preparingRequest.current === event.executionId) {
+      setExecutionProgress(event.message)
+    }
+    if (event.code !== 'ARTIFACT_EXPIRED') return
+    const run = sessionRef.current.runs.find(candidate => (
+      candidate.automaticExecution?.executionId === event.executionId
+    ))
+    if (!run || run.automaticExecution?.state !== 'review') return
+    setArtifactViews(current => {
+      const next = { ...current }
+      delete next[run.taskId]
+      return next
+    })
+    applyAction({ type: 'interrupt-automatic', taskId: run.taskId, message: event.message })
+    setActionError(event.message)
+  }), [])
+
+  useEffect(() => () => {
+    const requestId = preparingRequest.current
+    if (requestId) window.petcast?.cancelCodexTaskExecution?.(requestId)
+    const prepared = preparedExecutionRef.current
+    if (prepared) window.petcast?.cancelCodexTaskExecution?.(prepared.prepared.executionId)
+  }, [])
+
   const prepareAutomaticExecution = async (
     taskId: string,
     prompt: string,
@@ -158,13 +198,16 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
     const current = sessionRef.current
     const task = current.plan.tasks.find(candidate => candidate.id === taskId)
     if (!task || !current.plan.workspace || !codexExecutionScope?.fresh || !window.petcast?.prepareCodexTaskExecution) return
+    const requestId = `prepare-${globalThis.crypto.randomUUID()}`
+    preparingRequest.current = requestId
+    setPreparingExecution({ taskId, requestId })
     setExecutionBusy(true)
     setActionError(null)
     setExecutionProgress('正在准备隔离副本…')
     try {
       const scope = getTaskWorkspacePathScope(task.files)
       const outcome = await window.petcast.prepareCodexTaskExecution({
-        requestId: `prepare-${globalThis.crypto.randomUUID()}`,
+        requestId,
         taskId,
         workspaceId: current.plan.workspace.id,
         expectedScopeId: codexExecutionScope.scopeId,
@@ -176,15 +219,35 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
           return result ? [result.summary] : []
         }),
       })
+      if (preparingRequest.current !== requestId) {
+        if (outcome.ok) window.petcast.cancelCodexTaskExecution?.(outcome.value.executionId)
+        return
+      }
       if (!outcome.ok) {
         setActionError(outcome.message)
         return
       }
       setPreparedExecution({ taskId, prompt, prepared: outcome.value })
       setExecutionProgress('隔离副本和账号已验证；确认后才会调用 Codex。')
+    } catch {
+      if (preparingRequest.current === requestId) setActionError('Codex 准备失败，请稍后重试。')
     } finally {
-      setExecutionBusy(false)
+      if (preparingRequest.current === requestId) {
+        preparingRequest.current = null
+        setPreparingExecution(null)
+        setExecutionBusy(false)
+      }
     }
+  }
+
+  const cancelPreparingExecution = () => {
+    const requestId = preparingRequest.current
+    if (!requestId) return
+    preparingRequest.current = null
+    window.petcast?.cancelCodexTaskExecution?.(requestId)
+    setPreparingExecution(null)
+    setExecutionBusy(false)
+    setExecutionProgress('已取消准备。')
   }
 
   const cancelPreparedExecution = () => {
@@ -228,8 +291,16 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
         }
       })
       await recorder.finish('succeeded')
-      if (!value.changedFiles.length) await window.petcast.discardTaskExecutionArtifact(value.artifactId)
-      applyAction({
+      let cleanupWarning: string | undefined
+      if (!value.changedFiles.length) {
+        try {
+          const cleanup = await window.petcast.discardTaskExecutionArtifact(value.artifactId)
+          if (!cleanup.ok) cleanupWarning = cleanup.message
+        } catch {
+          cleanupWarning = 'Codex 已完成且未修改文件，但临时副本清理失败；应用退出时会再次清理。'
+        }
+      }
+      const completed = applyAction({
         type: 'complete-automatic',
         taskId,
         ...(value.changedFiles.length ? { artifactId: value.artifactId } : {}),
@@ -238,16 +309,37 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
         changedFiles: value.changedFiles,
         ...(value.usage ? { usage: { inputTokens: value.usage.inputTokens, outputTokens: value.usage.outputTokens } } : {}),
       })
+      if (!completed) {
+        if (value.changedFiles.length) {
+          try { await window.petcast.discardTaskExecutionArtifact(value.artifactId) }
+          catch { /* the main process keeps failed cleanup retryable */ }
+        }
+        applyAction({
+          type: 'interrupt-automatic',
+          taskId,
+          message: '执行结果未能写入当前会话，文件产物已丢弃；请人工核对执行账本。',
+        })
+        setActionError('执行结果未能写入当前会话，未保留待应用改动。')
+        setPreparedExecution(null)
+        return
+      }
       if (value.changedFiles.length) {
-        const artifact = await window.petcast.readTaskExecutionArtifact(value.artifactId)
-        if (artifact.ok) setArtifactViews(currentViews => ({ ...currentViews, [taskId]: artifact.value }))
+        try {
+          const artifact = await window.petcast.readTaskExecutionArtifact(value.artifactId)
+          if (artifact.ok) setArtifactViews(currentViews => ({ ...currentViews, [taskId]: artifact.value }))
+          else setActionError(artifact.message)
+        } catch {
+          setActionError('读取 Codex 文件差异失败，请稍后重试。')
+        }
       }
       setPreparedExecution(null)
       setExecutionProgress('执行完成；AI 验证结果不会替代人工验收。')
+      if (cleanupWarning) setActionError(cleanupWarning)
     } catch (error) {
       const cancelled = cancelRequested.current.delete(prepared.executionId)
       if (providerResult?.ok) {
-        await window.petcast?.discardTaskExecutionArtifact?.(providerResult.value.artifactId)
+        try { await window.petcast?.discardTaskExecutionArtifact?.(providerResult.value.artifactId) }
+        catch { /* keep the original safe error */ }
       } else {
         window.petcast?.cancelCodexTaskExecution?.(prepared.executionId)
       }
@@ -279,20 +371,50 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
     const artifactId = run?.automaticExecution?.artifactId
     if (!artifactId || !window.petcast) return
     setExecutionBusy(true)
-    const outcome = apply
-      ? await window.petcast.applyTaskExecutionArtifact(artifactId)
-      : await window.petcast.discardTaskExecutionArtifact(artifactId)
-    setExecutionBusy(false)
-    if (!outcome.ok) {
-      setActionError(outcome.message)
-      return
+    setActionError(null)
+    try {
+      const outcome = apply
+        ? await window.petcast.applyTaskExecutionArtifact(artifactId)
+        : await window.petcast.discardTaskExecutionArtifact(artifactId)
+      if (!outcome.ok) {
+        setActionError(outcome.message)
+        if (outcome.code === 'ARTIFACT_EXPIRED') {
+          applyAction({ type: 'interrupt-automatic', taskId, message: outcome.message })
+        }
+        return
+      }
+      applyAction({ type: apply ? 'apply-automatic' : 'discard-automatic', taskId })
+      setArtifactViews(current => {
+        const next = { ...current }
+        delete next[taskId]
+        return next
+      })
+    } catch {
+      setActionError(apply ? '应用 Codex 改动失败，请确认原文件未变化后重试。' : '丢弃 Codex 改动失败，请稍后重试。')
+    } finally {
+      setExecutionBusy(false)
     }
-    applyAction({ type: apply ? 'apply-automatic' : 'discard-automatic', taskId })
-    setArtifactViews(current => {
-      const next = { ...current }
-      delete next[taskId]
-      return next
-    })
+  }
+
+  const readArtifact = async (taskId: string, artifactId: string) => {
+    if (!window.petcast) return
+    setExecutionBusy(true)
+    setActionError(null)
+    try {
+      const outcome = await window.petcast.readTaskExecutionArtifact(artifactId)
+      if (!outcome.ok) {
+        setActionError(outcome.message)
+        if (outcome.code === 'ARTIFACT_EXPIRED') {
+          applyAction({ type: 'interrupt-automatic', taskId, message: outcome.message })
+        }
+        return
+      }
+      setArtifactViews(current => ({ ...current, [taskId]: outcome.value }))
+    } catch {
+      setActionError('读取 Codex 文件差异失败，请稍后重试。')
+    } finally {
+      setExecutionBusy(false)
+    }
   }
 
   const copyTaskPrompt = async (taskId: string, text: string, status: TaskStatus) => {
@@ -487,7 +609,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
           const verificationEditable = editable || Boolean(
             run.status === 'review' && run.automaticExecution && run.automaticExecution.state !== 'review',
           )
-          const canCopy = !preparedExecution && ['ready', 'running', 'needs-input'].includes(run.status)
+          const canCopy = !preparedExecution && !preparingExecution && ['ready', 'running', 'needs-input'].includes(run.status)
           const automaticCategory = task.providerRecommendation?.category
           const canPrepareAutomatic = Boolean(
             run.status === 'ready'
@@ -515,7 +637,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
                 <select
                   id={`task-provider-${task.id}`}
                   value={selectedProviderId}
-                  disabled={!['waiting', 'ready'].includes(run.status) || Boolean(preparedExecution)}
+                  disabled={!['waiting', 'ready'].includes(run.status) || Boolean(preparedExecution) || Boolean(preparingExecution)}
                   onChange={event => applyAction({
                     type: 'assign-provider',
                     taskId: task.id,
@@ -628,19 +750,27 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
                     <strong>Codex 隔离执行</strong>
                     <span>{run.automaticExecution ? `状态：${run.automaticExecution.state}` : '不会直接修改原项目'}</span>
                   </header>
-                  {canPrepareAutomatic && preparedExecution?.taskId !== task.id && (
+                  {canPrepareAutomatic && preparedExecution?.taskId !== task.id && preparingExecution?.taskId !== task.id && (
                     <button
                       type="button"
-                      disabled={executionBusy || Boolean(preparedExecution)}
+                      disabled={executionBusy || Boolean(preparedExecution) || Boolean(preparingExecution)}
                       onClick={() => void prepareAutomaticExecution(task.id, prompt, automaticCategory as 'coding' | 'testing')}
                     >
                       使用 Codex 执行
                     </button>
                   )}
+                  {preparingExecution?.taskId === task.id && (
+                    <div className="task-codex-confirm" role="status">
+                      <strong>正在准备隔离副本并核对账号</strong>
+                      <p>准备期间不会调用模型；可以随时取消。</p>
+                      <button type="button" onClick={cancelPreparingExecution}>取消准备</button>
+                    </div>
+                  )}
                   {preparedExecution?.taskId === task.id && (
                     <div className="task-codex-confirm" role="dialog" aria-label="确认 Codex 自动执行">
                       <strong>执行前确认</strong>
                       <p>模型：{preparedExecution.prepared.model}；隔离文件：{preparedExecution.prepared.preparedFileCount} 个；网络关闭；不会自动应用改动。</p>
+                      <p>使用本机 Codex 登录，仅供本地试验；面向所有用户的正式版本需要使用 OAuth 登录。</p>
                       <WorkspaceScopeSummary scope={getTaskWorkspacePathScope(task.files)} compact />
                       <details><summary>实际发送给 Codex 的 Prompt</summary><pre>{preparedExecution.prompt}</pre></details>
                       <button type="button" className="is-primary" disabled={executionBusy} onClick={() => void runPreparedExecution()}>确认并开始</button>
@@ -650,7 +780,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
                   {run.automaticExecution?.state === 'running' && (
                     <button type="button" disabled={!executionBusy} onClick={() => cancelRunningExecution(run.automaticExecution!.executionId)}>取消自动执行</button>
                   )}
-                  {executionProgress && (preparedExecution?.taskId === task.id || run.automaticExecution?.state === 'running') && (
+                  {executionProgress && (preparingExecution?.taskId === task.id || preparedExecution?.taskId === task.id || run.automaticExecution?.state === 'running') && (
                     <p role="status">{executionProgress}</p>
                   )}
                   {run.automaticExecution?.state === 'review' && (
@@ -658,12 +788,9 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
                       <strong>待处理文件改动：{run.automaticExecution.pendingFileCount} 个</strong>
                       {taskArtifact
                         ? <details open><summary>查看受限 diff</summary><pre>{taskArtifact.diff || '没有文本差异。'}</pre></details>
-                        : <button type="button" onClick={async () => {
+                        : <button type="button" disabled={executionBusy} onClick={() => {
                           const artifactId = run.automaticExecution?.artifactId
-                          if (!artifactId || !window.petcast) return
-                          const outcome = await window.petcast.readTaskExecutionArtifact(artifactId)
-                          if (outcome.ok) setArtifactViews(current => ({ ...current, [task.id]: outcome.value }))
-                          else setActionError(outcome.message)
+                          if (artifactId) void readArtifact(task.id, artifactId)
                         }}>读取 diff</button>}
                       <p>应用前会再次检查原文件哈希；若队友已修改文件，将拒绝覆盖。</p>
                       <button type="button" className="is-primary" disabled={executionBusy} onClick={() => void resolveArtifact(task.id, true)}>应用改动</button>
