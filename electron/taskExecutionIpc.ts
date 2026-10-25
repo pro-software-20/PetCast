@@ -8,6 +8,7 @@ import {
   type TaskExecutionOutcome,
 } from './taskExecutionProtocol.js'
 import type { WorkspaceRegistry } from './workspaceRegistry.js'
+import type { ChatGptAuthService } from './chatGptAuth.js'
 
 const denied = (): TaskExecutionOutcome<never> => ({
   ok: false,
@@ -31,6 +32,8 @@ export function registerTaskExecutionIpc(options: {
   rendererUrl: string
   workspaces: WorkspaceRegistry
   identity: CodexScopeIdentity
+  auth: ChatGptAuthService
+  experimentalLocalAuth: boolean
 }) {
   const authorized = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => {
     const window = options.getWindow()
@@ -46,6 +49,9 @@ export function registerTaskExecutionIpc(options: {
   const manager = new TaskExecutionManager(options.workspaces, options.identity, event => {
     const window = options.getWindow()
     if (window && !window.isDestroyed()) window.webContents.send('task-execution:event', event)
+  }, {
+    auth: options.auth,
+    experimentalLocalAuth: options.experimentalLocalAuth,
   })
 
   ipcMain.handle('task-execution:prepare', async (event, input: unknown) => {

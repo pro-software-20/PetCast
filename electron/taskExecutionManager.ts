@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { CodexAppServerError, CodexAppServerSession } from './codexAppServer.js'
+import { CodexAppServerError, CodexAppServerSession, type CodexAppServerAuth } from './codexAppServer.js'
 import type { CodexScopeIdentity } from './codexScopeIdentity.js'
+import { ChatGptAuthError } from './chatGptAuthProtocol.js'
 import {
   TASK_EXECUTION_MESSAGES,
   type CodexTaskExecutionResult,
@@ -34,7 +35,7 @@ interface PreparedExecution {
 }
 
 interface TaskExecutionServer {
-  prepare(expectedScopeId: string): Promise<string>
+  prepare(expectedScopeId: string, auth?: CodexAppServerAuth): Promise<string>
   run(prompt: string): Promise<{
     outputText: string
     usage: CodexTaskExecutionResult['usage']
@@ -70,6 +71,10 @@ export interface TaskExecutionManagerOptions {
   createArtifact?: typeof createTaskExecutionArtifact
   applyArtifact?: typeof applyTaskExecutionArtifact
   discardArtifact?: typeof discardTaskExecutionArtifact
+  auth?: {
+    getAccessToken(expectedScopeId: string): Promise<{ accessToken: string; scopeId: string }>
+  }
+  experimentalLocalAuth?: boolean
 }
 
 const resultError = <T>(code: TaskExecutionErrorCode): TaskExecutionOutcome<T> => ({
@@ -80,6 +85,12 @@ const resultError = <T>(code: TaskExecutionErrorCode): TaskExecutionOutcome<T> =
 
 const codeFor = (error: unknown): TaskExecutionErrorCode => {
   if (error instanceof TaskSandboxError || error instanceof CodexAppServerError) return error.code
+  if (error instanceof ChatGptAuthError) {
+    if (error.code === 'AUTH_REQUIRED') return 'AUTH_REQUIRED'
+    if (error.code === 'REAUTH_REQUIRED') return 'REAUTH_REQUIRED'
+    if (error.code === 'SCOPE_MISSING') return 'SCOPE_MISSING'
+    return error.code === 'CANCELLED' ? 'CANCELLED' : 'PROVIDER_FAILED'
+  }
   return 'PROVIDER_FAILED'
 }
 
@@ -108,6 +119,8 @@ export class TaskExecutionManager {
   private readonly createArtifact: typeof createTaskExecutionArtifact
   private readonly applyStoredArtifact: typeof applyTaskExecutionArtifact
   private readonly discardStoredArtifact: typeof discardTaskExecutionArtifact
+  private readonly auth?: TaskExecutionManagerOptions['auth']
+  private readonly experimentalLocalAuth: boolean
 
   constructor(
     private readonly workspaces: WorkspaceRegistry,
@@ -125,6 +138,8 @@ export class TaskExecutionManager {
     this.createArtifact = options.createArtifact ?? createTaskExecutionArtifact
     this.applyStoredArtifact = options.applyArtifact ?? applyTaskExecutionArtifact
     this.discardStoredArtifact = options.discardArtifact ?? discardTaskExecutionArtifact
+    this.auth = options.auth
+    this.experimentalLocalAuth = options.experimentalLocalAuth ?? false
   }
 
   private expireLater(id: string, action: () => Promise<unknown>, delay: number) {
@@ -242,13 +257,23 @@ export class TaskExecutionManager {
         signal: context.controller.signal,
       })
       if (context.cancelled || context.controller.signal.aborted) throw new CodexAppServerError('CANCELLED')
+      let serverAuth: CodexAppServerAuth
+      if (request.authMode === 'chatgpt-oauth') {
+        if (!this.auth) throw new ChatGptAuthError('AUTH_REQUIRED')
+        const connection = await this.auth.getAccessToken(request.expectedScopeId)
+        serverAuth = { mode: 'chatgpt-oauth', accessToken: connection.accessToken }
+      } else {
+        if (!this.experimentalLocalAuth) throw new ChatGptAuthError('AUTH_REQUIRED')
+        serverAuth = { mode: 'local-codex-experimental' }
+      }
+      if (context.cancelled || context.controller.signal.aborted) throw new CodexAppServerError('CANCELLED')
       const server = this.createServer(staged.stagedRoot, this.identity, message => {
         if (!context.cancelled) this.emit({ executionId: context.executionId, stage: 'running', message })
       })
       context.server = server
       let prepareTimer: ReturnType<typeof setTimeout> | undefined
       const model = await Promise.race([
-        server.prepare(request.expectedScopeId),
+        server.prepare(request.expectedScopeId, serverAuth),
         new Promise<never>((_, reject) => {
           prepareTimer = setTimeout(() => reject(new CodexAppServerError('TIMEOUT')), this.prepareTimeoutMs)
         }),

@@ -13,6 +13,7 @@ export interface PrepareCodexTaskExecutionRequest {
   taskId: string
   workspaceId: string
   expectedScopeId: string
+  authMode: 'chatgpt-oauth' | 'local-codex-experimental'
   prompt: string
   category: TaskExecutionCategory
   scope: TaskExecutionFileScope
@@ -23,6 +24,9 @@ export type TaskExecutionErrorCode =
   | 'INVALID_REQUEST'
   | 'NO_WORKSPACE'
   | 'ACCOUNT_MISMATCH'
+  | 'AUTH_REQUIRED'
+  | 'REAUTH_REQUIRED'
+  | 'SCOPE_MISSING'
   | 'CODEX_UNAVAILABLE'
   | 'PATH_NOT_ALLOWED'
   | 'INPUT_TOO_LARGE'
@@ -79,7 +83,10 @@ export interface TaskExecutionEvent {
 export const TASK_EXECUTION_MESSAGES: Record<TaskExecutionErrorCode, string> = {
   INVALID_REQUEST: '自动执行请求无效。',
   NO_WORKSPACE: '请重新选择并确认当前项目工作区。',
-  ACCOUNT_MISMATCH: '当前 Codex 账号与页面已确认账号不一致，请重新读取真实额度。',
+  ACCOUNT_MISMATCH: '当前 Codex 账号与页面已确认账号不一致，请重新检查 ChatGPT 连接。',
+  AUTH_REQUIRED: '请先使用 ChatGPT 账号连接 PetCast。',
+  REAUTH_REQUIRED: 'ChatGPT 登录已失效，请重新连接后再执行。',
+  SCOPE_MISSING: '当前账号未授权 PetCast 使用 ChatGPT 计划。',
   CODEX_UNAVAILABLE: '本机 Codex 不可用或尚未登录。',
   PATH_NOT_ALLOWED: '文件授权范围无效或包含越权路径。',
   INPUT_TOO_LARGE: '授权文件或执行输出超过安全上限。',
@@ -107,6 +114,7 @@ export function validatePrepareCodexTaskExecutionRequest(value: unknown): Prepar
   const request = value as Record<string, unknown>
   if (!ID.test(String(request.requestId)) || !ID.test(String(request.taskId))
     || !/^[a-f0-9]{64}$/.test(String(request.workspaceId)) || !SCOPE.test(String(request.expectedScopeId))
+    || !['chatgpt-oauth', 'local-codex-experimental'].includes(String(request.authMode))
     || typeof request.prompt !== 'string' || !request.prompt.trim() || request.prompt.length > 32_000
     || !TASK_EXECUTION_CATEGORIES.includes(request.category as TaskExecutionCategory)
     || !request.scope || typeof request.scope !== 'object' || Array.isArray(request.scope)
@@ -133,6 +141,7 @@ export function validatePrepareCodexTaskExecutionRequest(value: unknown): Prepar
     taskId: request.taskId as string,
     workspaceId: request.workspaceId as string,
     expectedScopeId: request.expectedScopeId as string,
+    authMode: request.authMode as PrepareCodexTaskExecutionRequest['authMode'],
     prompt: (request.prompt as string).trim(),
     category: request.category as TaskExecutionCategory,
     scope: {

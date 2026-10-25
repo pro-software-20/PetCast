@@ -23,7 +23,12 @@ export function createCodexScopeIdentity(userData: string) {
     return `codex-${createHmac('sha256', await getSalt()).update(material).digest('hex')}`
   }
 
-  return { getSalt, hashAccount }
+  const hashSubject = async (subject: string, clientId: string) => {
+    const material = JSON.stringify(['chatgpt-oauth', subject.trim(), clientId.trim()])
+    return `codex-${createHmac('sha256', await getSalt()).update(material).digest('hex')}`
+  }
+
+  return { getSalt, hashAccount, hashSubject }
 }
 
 export type CodexScopeIdentity = ReturnType<typeof createCodexScopeIdentity>

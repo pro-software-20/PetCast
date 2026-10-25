@@ -24,12 +24,16 @@ import { TaskExecutionRecorder, TaskPersistenceError } from '../history/TaskExec
 import { TaskDefinitionEditor } from './TaskDefinitionEditor'
 import { WorkspaceScopePicker } from './WorkspaceScopePicker'
 import { WorkspaceScopeSummary } from './WorkspaceScopeSummary'
+import {
+  getCodexExecutionAccess,
+  type CodexEnvironmentState,
+} from '../codex/codexEnvironment'
 
 export interface TaskPlanCardsProps {
   session: TaskSessionV1
   providers: ProviderProfile[]
   onSessionChange: (session: TaskSessionV1, persistImmediately?: boolean) => void
-  codexExecutionScope?: { scopeId: string; fresh: boolean }
+  codexEnvironment?: CodexEnvironmentState
 }
 
 type CopyStatus = 'idle' | 'success' | 'error'
@@ -86,7 +90,7 @@ const downloadMarkdown = (markdown: string, fileName: string) => {
   URL.revokeObjectURL(url)
 }
 
-export function TaskPlanCards({ session, providers, onSessionChange, codexExecutionScope }: TaskPlanCardsProps) {
+export function TaskPlanCards({ session, providers, onSessionChange, codexEnvironment = { status: 'browser' } }: TaskPlanCardsProps) {
   const [copyStatuses, setCopyStatuses] = useState<Record<string, CopyStatus>>({})
   const [actionError, setActionError] = useState<string | null>(null)
   const [reportCopyStatus, setReportCopyStatus] = useState<CopyStatus>('idle')
@@ -131,6 +135,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
   const tasksWithCustomScope = defaultScope
     ? session.plan.tasks.filter(task => !workspacePathScopesEqual(getTaskWorkspacePathScope(task.files), defaultScope)).length
     : session.plan.tasks.length
+  const codexExecutionAccess = getCodexExecutionAccess(codexEnvironment)
 
   useEffect(() => () => {
     const requestId = workspaceRequest.current
@@ -197,7 +202,8 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
   ) => {
     const current = sessionRef.current
     const task = current.plan.tasks.find(candidate => candidate.id === taskId)
-    if (!task || !current.plan.workspace || !codexExecutionScope?.fresh || !window.petcast?.prepareCodexTaskExecution) return
+    if (!task || !current.plan.workspace || !codexExecutionAccess.available
+      || !codexExecutionAccess.scopeId || !window.petcast?.prepareCodexTaskExecution) return
     const requestId = `prepare-${globalThis.crypto.randomUUID()}`
     preparingRequest.current = requestId
     setPreparingExecution({ taskId, requestId })
@@ -210,7 +216,8 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
         requestId,
         taskId,
         workspaceId: current.plan.workspace.id,
-        expectedScopeId: codexExecutionScope.scopeId,
+        expectedScopeId: codexExecutionAccess.scopeId,
+        authMode: codexExecutionAccess.authMode ?? 'chatgpt-oauth',
         prompt,
         category,
         scope,
@@ -258,7 +265,8 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
   }
 
   const runPreparedExecution = async () => {
-    if (!preparedExecution || !codexExecutionScope || !window.petcast?.runCodexTaskExecution) return
+    if (!preparedExecution || !codexExecutionAccess.available
+      || !codexExecutionAccess.scopeId || !window.petcast?.runCodexTaskExecution) return
     const { taskId, prepared } = preparedExecution
     const current = sessionRef.current
     const task = current.plan.tasks.find(candidate => candidate.id === taskId)
@@ -268,7 +276,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
     setExecutionProgress('正在写入执行账本…')
     const recorder = new TaskExecutionRecorder(ledger, {
       source: 'real',
-      scopeId: codexExecutionScope.scopeId,
+      scopeId: codexExecutionAccess.scopeId,
       id: `auto-${current.id}-${taskId}-${run.attempt + 1}`.replace(/[^a-zA-Z0-9:._-]/g, '-'),
       label: task.title.slice(0, 100),
       category: task.providerRecommendation?.category ?? 'coding',
@@ -611,13 +619,16 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
           )
           const canCopy = !preparedExecution && !preparingExecution && ['ready', 'running', 'needs-input'].includes(run.status)
           const automaticCategory = task.providerRecommendation?.category
-          const canPrepareAutomatic = Boolean(
+          const automaticCandidate = Boolean(
             run.status === 'ready'
             && selectedProviderId === 'codex'
-            && (automaticCategory === 'coding' || automaticCategory === 'testing')
+            && (automaticCategory === 'coding' || automaticCategory === 'testing'),
+          )
+          const canPrepareAutomatic = Boolean(
+            automaticCandidate
             && workspace
             && workspace.workspaceId === session.plan.workspace?.id
-            && codexExecutionScope?.fresh
+            && codexExecutionAccess.available
             && window.petcast?.prepareCodexTaskExecution,
           )
           const taskArtifact = artifactViews[task.id]
@@ -744,7 +755,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
                 )}
               </div>
 
-              {(canPrepareAutomatic || run.automaticExecution) && (
+              {(automaticCandidate || run.automaticExecution) && (
                 <section className="task-codex-execution">
                   <header>
                     <strong>Codex 隔离执行</strong>
@@ -759,6 +770,14 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
                       使用 Codex 执行
                     </button>
                   )}
+                  {automaticCandidate && !canPrepareAutomatic && !run.automaticExecution && (
+                    <div className="task-codex-unavailable" role="status">
+                      <button type="button" disabled>使用 Codex 执行</button>
+                      <p>{workspace && workspace.workspaceId === session.plan.workspace?.id
+                        ? codexExecutionAccess.message
+                        : '请先选择并确认当前项目工作区。'} 人工复制任务 Prompt 仍可使用。</p>
+                    </div>
+                  )}
                   {preparingExecution?.taskId === task.id && (
                     <div className="task-codex-confirm" role="status">
                       <strong>正在准备隔离副本并核对账号</strong>
@@ -770,10 +789,12 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexExecut
                     <div className="task-codex-confirm" role="dialog" aria-label="确认 Codex 自动执行">
                       <strong>执行前确认</strong>
                       <p>模型：{preparedExecution.prepared.model}；隔离文件：{preparedExecution.prepared.preparedFileCount} 个；网络关闭；不会自动应用改动。</p>
-                      <p>使用本机 Codex 登录，仅供本地试验；面向所有用户的正式版本需要使用 OAuth 登录。</p>
+                      <p>{codexExecutionAccess.authMode === 'chatgpt-oauth'
+                        ? '使用已连接的 ChatGPT 计划；访问令牌不会发送到页面或写入任务记录。'
+                        : '使用本机 Codex 登录实验回退；公开使用时建议连接 ChatGPT。'}</p>
                       <WorkspaceScopeSummary scope={getTaskWorkspacePathScope(task.files)} compact />
                       <details><summary>实际发送给 Codex 的 Prompt</summary><pre>{preparedExecution.prompt}</pre></details>
-                      <button type="button" className="is-primary" disabled={executionBusy} onClick={() => void runPreparedExecution()}>确认并开始</button>
+                      <button type="button" className="is-primary" disabled={executionBusy || !codexExecutionAccess.available} onClick={() => void runPreparedExecution()}>确认并开始</button>
                       <button type="button" disabled={executionBusy} onClick={cancelPreparedExecution}>取消</button>
                     </div>
                   )}
