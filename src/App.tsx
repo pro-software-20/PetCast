@@ -500,6 +500,7 @@ export default function App() {
         {!expanded && <CompactDevice appearance={appearance} usage={usage} status={usageReadStatus} stale={!fresh} onNavigate={target => void navigate(target)} onClose={desktopApi ? () => desktopApi.close() : undefined} />}
         {expanded && <>
           <RiverScene usage={usage} analysis={analysis} appearance={appearance} status={usageReadStatus} stale={!fresh}
+            petActive={page === 'home' && !homeOpen && !fishingOpen && !mailboxOpen && !historyOpen && !taskAnalysisOpen}
             onStartFishing={() => { setHomeOpen(false); setMailboxOpen(false); setTaskAnalysisOpen(false); setHistoryOpen(false); if (fresh) setFishingOpen(true) }}
             onOpenHome={openRoom} onOpenMailbox={openMailbox} unreadMailCount={unreadMailIds.length} />
           {homeOpen && page === 'home' && <HomeScene aquarium={aquarium} codex={codex} capacity={AQUARIUM_CAPACITY} petId={appearance.petId} petName={appearance.petName || '布罗艾'} onClose={() => setHomeOpen(false)} onFeed={fish => handleStoredFish(fish, 'fed')} onRelease={fish => handleStoredFish(fish, 'released')} />}

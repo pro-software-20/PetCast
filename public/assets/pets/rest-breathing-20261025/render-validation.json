@@ -1,0 +1,192 @@
+[
+  {
+    "id": "cat",
+    "name": "猫",
+    "band": [
+      138,
+      199,
+      82,
+      229
+    ],
+    "changedPixels": [
+      0,
+      0,
+      0,
+      835,
+      2302,
+      3092,
+      3537,
+      3781,
+      3842,
+      3781,
+      3537,
+      3092,
+      2302,
+      835,
+      0,
+      0
+    ],
+    "headAndFeetUnchanged": true,
+    "drawBounds": [
+      34,
+      20,
+      187,
+      208
+    ],
+    "frameWidth": 256,
+    "frameHeight": 256,
+    "cycleMs": 4800
+  },
+  {
+    "id": "dog",
+    "name": "狗",
+    "band": [
+      144,
+      200,
+      82,
+      241
+    ],
+    "changedPixels": [
+      0,
+      0,
+      0,
+      843,
+      2234,
+      2981,
+      3399,
+      3651,
+      3702,
+      3651,
+      3399,
+      2981,
+      2234,
+      843,
+      0,
+      0
+    ],
+    "headAndFeetUnchanged": true,
+    "drawBounds": [
+      24,
+      28,
+      208,
+      200
+    ],
+    "frameWidth": 256,
+    "frameHeight": 256,
+    "cycleMs": 4800
+  },
+  {
+    "id": "shark",
+    "name": "鲨鱼",
+    "band": [
+      202,
+      223,
+      80,
+      214
+    ],
+    "changedPixels": [
+      0,
+      0,
+      0,
+      74,
+      696,
+      1057,
+      1208,
+      1297,
+      1329,
+      1297,
+      1208,
+      1057,
+      696,
+      74,
+      0,
+      0
+    ],
+    "headAndFeetUnchanged": true,
+    "drawBounds": [
+      24,
+      79,
+      208,
+      149
+    ],
+    "frameWidth": 256,
+    "frameHeight": 256,
+    "cycleMs": 4800
+  },
+  {
+    "id": "chicken",
+    "name": "鸡",
+    "band": [
+      158,
+      204,
+      15,
+      241
+    ],
+    "changedPixels": [
+      0,
+      0,
+      0,
+      1452,
+      3505,
+      4439,
+      4936,
+      5202,
+      5285,
+      5202,
+      4936,
+      4439,
+      3505,
+      1452,
+      0,
+      0
+    ],
+    "headAndFeetUnchanged": true,
+    "drawBounds": [
+      24,
+      23,
+      208,
+      205
+    ],
+    "frameWidth": 256,
+    "frameHeight": 256,
+    "cycleMs": 4800
+  },
+  {
+    "id": "rabbit",
+    "name": "兔子",
+    "band": [
+      184,
+      206,
+      86,
+      218
+    ],
+    "changedPixels": [
+      0,
+      0,
+      0,
+      389,
+      902,
+      1176,
+      1348,
+      1434,
+      1447,
+      1434,
+      1348,
+      1176,
+      902,
+      389,
+      0,
+      0
+    ],
+    "headAndFeetUnchanged": true,
+    "drawBounds": [
+      45,
+      20,
+      166,
+      208
+    ],
+    "frameWidth": 256,
+    "frameHeight": 256,
+    "cycleMs": 4800
+  }
+]

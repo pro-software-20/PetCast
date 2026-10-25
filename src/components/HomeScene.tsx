@@ -30,7 +30,7 @@ export function HomeScene({ aquarium, codex, capacity, petId, petName, onClose, 
   return (
     <section className="home-scene cartoon-room" aria-label={`${petName}的河边小屋`}>
       <div className="room-art" />
-      <div className="room-pet"><Pet petId={petId} name={petName} dragging={false} expanded dragDirection="right" mood="normal" reaction={null} /></div>
+      <div className="room-pet"><Pet petId={petId} name={petName} dragging={false} expanded dragDirection="right" mood="normal" reaction={null} action="idle" /></div>
       <button className="home-back" onClick={onClose}>← 返回河边</button>
       <div className="home-title"><strong>{petName}的小屋</strong></div>
       <button className="codex-frame" onClick={() => setView('codex')} aria-label="打开墙上的鱼类图鉴">

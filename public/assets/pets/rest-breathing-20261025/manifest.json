@@ -1,0 +1,208 @@
+{
+  "cycleMs": 4800,
+  "framesPerPet": 16,
+  "breathingOnly": true,
+  "method": "fixed imagegen pose with code-native local chest/belly breathing; shark original pose reused",
+  "pets": [
+    {
+      "id": "cat",
+      "name": "猫",
+      "idle": {
+        "file": "native/cat-idle.png",
+        "still": "native/cat-idle-still.png",
+        "width": 193,
+        "height": 213,
+        "frames": 13,
+        "totalMs": 4800.0,
+        "bounds": [
+          31,
+          17,
+          224,
+          230
+        ]
+      },
+      "moving": {
+        "file": "native/cat-move.png",
+        "still": "native/cat-move-still.png",
+        "width": 327,
+        "height": 354,
+        "frames": 8,
+        "totalMs": 1520.0,
+        "bounds": [
+          61,
+          49,
+          388,
+          403
+        ]
+      },
+      "movingFrameMs": 190,
+      "movingAction": "walk",
+      "chestBand": [
+        0.57,
+        0.86,
+        0.26,
+        1.04
+      ]
+    },
+    {
+      "id": "dog",
+      "name": "狗",
+      "idle": {
+        "file": "native/dog-idle.png",
+        "still": "native/dog-idle-still.png",
+        "width": 214,
+        "height": 205,
+        "frames": 13,
+        "totalMs": 4800.0,
+        "bounds": [
+          21,
+          26,
+          235,
+          231
+        ]
+      },
+      "moving": {
+        "file": "native/dog-move.png",
+        "still": "native/dog-move-still.png",
+        "width": 350,
+        "height": 326,
+        "frames": 8,
+        "totalMs": 1520.0,
+        "bounds": [
+          49,
+          77,
+          399,
+          403
+        ]
+      },
+      "movingFrameMs": 190,
+      "movingAction": "walk",
+      "chestBand": [
+        0.58,
+        0.86,
+        0.28,
+        1.04
+      ]
+    },
+    {
+      "id": "shark",
+      "name": "鲨鱼",
+      "idle": {
+        "file": "native/shark-idle.png",
+        "still": "native/shark-idle-still.png",
+        "width": 214,
+        "height": 155,
+        "frames": 13,
+        "totalMs": 4800.0,
+        "bounds": [
+          21,
+          76,
+          235,
+          231
+        ]
+      },
+      "moving": {
+        "file": "native/shark-move.png",
+        "still": "native/shark-move-still.png",
+        "width": 366,
+        "height": 271,
+        "frames": 8,
+        "totalMs": 1760.0,
+        "bounds": [
+          49,
+          148,
+          415,
+          419
+        ]
+      },
+      "movingFrameMs": 220,
+      "movingAction": "swim",
+      "chestBand": [
+        0.83,
+        0.965,
+        0.27,
+        0.91
+      ]
+    },
+    {
+      "id": "chicken",
+      "name": "鸡",
+      "idle": {
+        "file": "native/chicken-idle.png",
+        "still": "native/chicken-idle-still.png",
+        "width": 214,
+        "height": 210,
+        "frames": 13,
+        "totalMs": 4800.0,
+        "bounds": [
+          21,
+          21,
+          235,
+          231
+        ]
+      },
+      "moving": {
+        "file": "native/chicken-move.png",
+        "still": "native/chicken-move-still.png",
+        "width": 299,
+        "height": 344,
+        "frames": 8,
+        "totalMs": 1520.0,
+        "bounds": [
+          74,
+          59,
+          373,
+          403
+        ]
+      },
+      "movingFrameMs": 190,
+      "movingAction": "walk",
+      "chestBand": [
+        0.66,
+        0.88,
+        -0.04,
+        1.04
+      ]
+    },
+    {
+      "id": "rabbit",
+      "name": "兔子",
+      "idle": {
+        "file": "native/rabbit-idle.png",
+        "still": "native/rabbit-idle-still.png",
+        "width": 172,
+        "height": 214,
+        "frames": 13,
+        "totalMs": 4800.0,
+        "bounds": [
+          42,
+          17,
+          214,
+          231
+        ]
+      },
+      "moving": {
+        "file": "native/rabbit-move.png",
+        "still": "native/rabbit-move-still.png",
+        "width": 238,
+        "height": 249,
+        "frames": 8,
+        "totalMs": 1760.0,
+        "bounds": [
+          48,
+          42,
+          286,
+          291
+        ]
+      },
+      "movingFrameMs": 220,
+      "movingAction": "hop",
+      "chestBand": [
+        0.79,
+        0.89,
+        0.25,
+        1.04
+      ]
+    }
+  ]
+}

@@ -175,6 +175,8 @@ interface TaskAnalysisInput {
 
 负责视觉内容、桌面程序以及其他成员模块的最终接入。
 
+2026-10-25 状态：已接入五宠形象、四款可调色外壳、河畔/小屋界面及宠物动画。主页按沙地/水域范围活动，低频换向并随机休息；小屋与形象页使用轻微呼吸待机。动画接入及验证见 [C 宠物动画记录](docs/C_PET_ANIMATIONS.md)。独立安装包和另一台 Windows 电脑验收仍未完成。
+
 主要任务：
 
 - 支持更换宠物。
@@ -216,7 +218,7 @@ public/assets/scenes/
 - PetDefinition 包含 id、name、spriteUrl、frameWidth、frameHeight、columns、rows 和 animations。
 - animations 按 idle、drag-left、drag-right、wave、celebrate、tired、anxious、eat、sleep 等动作配置帧坐标和 frameMs。
 - idle 必须存在且非空；其他动作缺失时退回 idle。坐标不可超过网格，帧间隔必须大于零。
-- C 接入新皮肤时必须同步改造 Pet.tsx 的固定帧表、背景尺寸和人物名称，不能只替换图片 URL。本次仅冻结配置类型，尚未实现换皮渲染器和选择界面。
+- C 接入新皮肤时必须同步改造 Pet.tsx 的固定帧表、背景尺寸和人物名称，不能只替换图片 URL。C 已完成配置化换皮、形象设置与动画显示；每个动作可补充独立图集尺寸、循环图像和静态首帧，减少动态效果时使用静态首帧。
 - SceneDefinition 包含 id、name、backgroundUrl、themeClass；场景变体要保留钓鱼、邮箱和房间的点击区域。
 - AppearancePreferences 单独保存 version、petId、sceneId，读取时核对注册表，未知 ID 回退默认。由 C 实现独立存储，不覆盖游戏存档。
 - “啃脑子”、睡眠等角色动作可扩展动作表，但分心事件来源与动作呈现分开，缺少动作仍可正常显示。

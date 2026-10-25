@@ -16,7 +16,7 @@ export function CompactDevice({ appearance, usage, status, stale, onNavigate, on
       <ShellArtwork shellId={shell.id} color={appearance.shellColor} />
       <div className={`device-screen ${stale ? 'is-stale' : ''}`} aria-label="正方形宠物与额度显示区" style={shellScreenStyle(shell)} title={status}>
         <span className="device-source">{status}</span>
-        <div className="device-pet-viewport pet-wrap"><PixelPet petId={appearance.petId} name={appearance.petName} /></div>
+        <div className="device-pet-viewport pet-wrap"><PixelPet petId={appearance.petId} name={appearance.petName} animated /></div>
         <div className="device-quotas" aria-label={`${status}，5h ${usage ? Math.round(usage.shortWindowRemaining) + '%' : '未知'}，周额度 ${usage ? Math.round(usage.weeklyRemaining) + '%' : '未知'}`}>
           {([['5h', usage?.shortWindowRemaining], ['周', usage?.weeklyRemaining]] as const).map(([label, value]) => <div className="device-quota-row" key={label}>
             <span>{label}</span><div className="device-quota-track"><i style={{ width: value === undefined ? '0%' : `${Math.max(0, Math.min(100, value))}%` }} /></div><strong>{value === undefined ? '—' : `${Math.round(value)}%`}</strong>
