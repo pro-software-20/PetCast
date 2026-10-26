@@ -1,0 +1,9 @@
+{
+  "tool": "imagegen built-in",
+  "date": "2026-10-26",
+  "references": [
+    "public/assets/shells/round.png",
+    "public/assets/pets/rest-breathing-20261025/native/cat-idle-still.png"
+  ],
+  "prompt": "Use case: compositing / precise-object-edit. Asset type: PetCast Windows app icon, transparent square PNG master. Image 1 is the exact existing ROUND/EGG Tamagotchi shell edit target; Image 2 is the exact existing orange pixel cat to place INSIDE its display. User correction: use the shell WITHOUT animal ears; white shell; little cat inside. Retain Image 1's round egg silhouette, scalloped square display bezel, three round bottom buttons, upper-left star, little upper-right charm/chain, and PET / CAST wordmark. NO ears or antennae protruding from the shell. Recolor all pink plastic and magenta outlines to a soft WHITE/ivory body with gentle pale neutral-gray shading and legible warm gray outlines; keep the device 2D, softly illustrated, clean and crisp. Place exactly the complete seated orange tabby pixel cat from Image 2 in the center of the display, facing the same direction, large enough to read at icon size but fully inside the screen with margin. Preserve its orange stripes, cream chest/paws/muzzle, brown pixel contour, existing eyes and body shape; keep cat edges sharply PIXELATED, do not smooth or repaint the cat as a cartoon. Display background very pale cool white. No quotas, numbers, extra lettering, other pets, or UI added. Center entire complete shell in a SQUARE canvas with approximately 6 percent transparent margin around; no crop. Actual transparent alpha outside, no colored backdrop, no painted checkerboard, no external shadow, no stray pixels. Original rabbit-ear version is superseded; this icon must have NO shell ears."
+}

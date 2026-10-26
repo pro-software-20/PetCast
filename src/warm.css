@@ -157,6 +157,9 @@
 .quota-page { position:absolute; inset:0; z-index:60; background:#f8e7cc; }
 .quota-page-panel { position:absolute; inset:86px 34px 55px; padding:18px; border:2px solid #bd946a; border-radius:10px; background:#fff8e9ed; display:grid; grid-template-columns:1.2fr 1fr; gap:12px 22px; overflow:auto; box-shadow:0 8px 20px #84603a25; }
 .quota-page-panel h1 { grid-column:1/-1; margin:0; font-size:20px; font-weight:600; color:#795638; }
+.quota-page-heading { grid-column:1/-1; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.petcast-warm .quota-page-close { display:grid; place-items:center; flex:none; width:28px; height:28px; padding:0; border:1px solid #d4b48b; border-radius:6px; background:#fff6df; color:#795638; font-size:18px; line-height:1; }
+.petcast-warm .quota-page-close:hover { color:#fff; border-color:#c36f68; background:#c36f68; }
 .quota-page-panel .usage-settings { position:static; width:auto; margin:0; border:1px solid #ddc7a5; padding:12px; }
 .quota-page-panel .usage-board-detail { position:static; width:auto; height:max-content; padding:12px; border:1px solid #dec6a1; border-radius:7px; background:#fff9eb; box-shadow:none; }
 .quota-page-panel .usage-board-detail:before,.quota-page-panel .usage-board-detail:after { display:none; }

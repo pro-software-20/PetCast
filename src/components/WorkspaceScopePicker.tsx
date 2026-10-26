@@ -132,7 +132,7 @@ export function WorkspaceScopePicker({
   }
 
   return createPortal(
-    <div className="workspace-scope-overlay" role="presentation" onPointerDown={event => event.stopPropagation()}>
+    <div className="workspace-scope-overlay petcast-task-dialog" role="presentation" onPointerDown={event => event.stopPropagation()}>
       <section className="workspace-scope-dialog" role="dialog" aria-modal="true" aria-labelledby="workspace-scope-title">
         <header>
           <div>

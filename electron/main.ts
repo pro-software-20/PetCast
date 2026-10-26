@@ -14,6 +14,9 @@ import { ChatGptAuthService } from './chatGptAuth.js'
 import { registerChatGptAuthIpc } from './chatGptAuthIpc.js'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
+app.setAppUserModelId('io.github.pro-software-20.petcast')
+// Keep the existing data directory when the packaged product name becomes PetCast.
+app.setPath('userData', path.join(app.getPath('appData'), 'petcast-stage1'))
 const COMPACT = { width: 300, height: 340 }
 // 760 × 510 game scene + 218 px mock sidecar + 14 px gap + 16 px app padding.
 const EXPANDED = { width: 1008, height: 526 }
@@ -70,6 +73,7 @@ const createWindow = () => {
     fullscreenable: false,
     show: false,
     hasShadow: true,
+    icon: path.join(currentDir, '../dist/assets/app/icon.png'),
     webPreferences: {
       preload: path.join(currentDir, 'preload.cjs'),
       contextIsolation: true,

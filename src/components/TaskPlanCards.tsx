@@ -567,11 +567,15 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
   return (
     <section className="task-plan-panel" aria-labelledby="task-plan-title">
       <header className="task-plan-header">
-        <span> MANUAL AI PLAN </span>
-        <h2 id="task-plan-title">人工 AI 任务方案</h2>
-        <p>{session.plan.title}</p>
+        <h2 id="task-plan-title">任务清单</h2>
+      <div className="task-plan-progress" aria-label={`已完成 ${completedCount} / ${session.runs.length}`}>
+        <span><strong>{completedCount}</strong> / {session.runs.length} 已完成</span>
+        <div><i style={{ width: `${(completedCount / session.runs.length) * 100}%` }} /></div>
+      </div>
       </header>
 
+      <details className="task-workspace-details">
+        <summary>项目文件与权限<span>{session.plan.workspace?.displayName ?? '可选，尚未选择'}</span></summary>
       <section className="task-workspace-selector">
         <div>
           <strong>项目工作区</strong>
@@ -594,6 +598,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
           </div>
         )}
       </section>
+      </details>
 
       {session.plan.workspace && (
         <section className="task-global-scope">
@@ -622,10 +627,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
         </section>
       )}
 
-      <div className="task-plan-progress" aria-label={`已完成 ${completedCount} / ${session.runs.length}`}>
-        <span><strong>{completedCount}</strong> / {session.runs.length} 已完成</span>
-        <div><i style={{ width: `${(completedCount / session.runs.length) * 100}%` }} /></div>
-      </div>
+
 
       <div className={`task-dependency-summary${dependenciesEditable ? '' : ' is-locked'}`}>
         <strong>{readyCount > 1 ? `当前 ${readyCount} 个任务可并行开始` : `当前 ${readyCount} 个任务可开始`}</strong>
@@ -636,10 +638,6 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
         </span>
       </div>
 
-      <div className="task-plan-goal">
-        <strong>总体目标</strong>
-        <p>{session.plan.goal}</p>
-      </div>
 
       {actionError && <p className="task-plan-error" role="alert">{actionError}</p>}
 
@@ -984,6 +982,10 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
           )
         })}
       </ol>
+      <details className="task-plan-goal">
+        <summary>查看总体目标</summary>
+        <p>{session.plan.goal}</p>
+      </details>
 
       <section className="task-plan-footer">
         <h3>最终验收</h3>
