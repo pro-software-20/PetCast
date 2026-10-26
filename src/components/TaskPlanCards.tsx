@@ -100,8 +100,8 @@ const nextStepText = (
   if (automaticState === 'review') return '下一步：查看 diff，并应用或丢弃文件改动。'
   if (status === 'waiting') return `下一步：等待 ${dependencyNames.join('、') || '前置任务'} 完成。`
   if (status === 'ready') return automaticCandidate
-    ? '下一步：复制 Prompt，或使用可用的 Codex 隔离执行。'
-    : '下一步：复制 Prompt 并开始任务。'
+    ? '下一步：可复制给外部 AI 后开始跟踪，或使用 Codex 隔离执行。'
+    : '下一步：复制 Prompt；实际交给 AI 后开始跟踪。'
   if (status === 'running') return '下一步：粘贴 AI 结果并提交待验收。'
   if (status === 'needs-input') return '下一步：补充信息后继续任务。'
   if (status === 'review') return '下一步：逐项检查并决定验收或退回。'
@@ -473,10 +473,9 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
     }
   }
 
-  const copyTaskPrompt = async (taskId: string, text: string, status: TaskStatus) => {
+  const copyTaskPrompt = async (taskId: string, text: string) => {
     const copied = await copyText(text)
     setCopyStatuses(current => ({ ...current, [taskId]: copied ? 'success' : 'error' }))
-    if (copied && status === 'ready') applyAction({ type: 'start', taskId })
   }
 
   const updateVerification = (taskId: string, index: number, status: VerificationStatus) => {
@@ -714,7 +713,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
               {run.statusMessage && <p className="task-run-message" role="status">{run.statusMessage}</p>}
 
               <div className="task-plan-assignment">
-                <label htmlFor={`task-provider-${task.id}`}>本次复制给</label>
+                <label htmlFor={`task-provider-${task.id}`}>子任务执行 AI</label>
                 <select
                   id={`task-provider-${task.id}`}
                   value={selectedProviderId}
@@ -751,13 +750,23 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
                   type="button"
                   className="task-analysis-copy"
                   disabled={!canCopy}
-                  onClick={() => void copyTaskPrompt(task.id, prompt, run.status)}
+                  onClick={() => void copyTaskPrompt(task.id, prompt)}
                 >
-                  {copyStatus === 'success' ? '已复制' : run.status === 'ready' ? '复制并开始任务' : '再次复制任务 Prompt'}
+                  {copyStatus === 'success' ? '已复制' : run.status === 'ready' ? '复制任务 Prompt' : '再次复制任务 Prompt'}
                 </button>
+                {run.status === 'ready' && (
+                  <button
+                    type="button"
+                    className="is-primary"
+                    disabled={Boolean(preparedExecution) || Boolean(preparingExecution)}
+                    onClick={() => applyAction({ type: 'start', taskId: task.id })}
+                  >
+                    已交给 AI，开始跟踪
+                  </button>
+                )}
                 {copyStatus !== 'idle' && (
                   <span className={`task-analysis-copy-status is-${copyStatus}`} role={copyStatus === 'error' ? 'alert' : 'status'}>
-                    {copyStatus === 'success' ? '可粘贴到所选 AI。' : '复制失败，任务尚未开始。'}
+                    {copyStatus === 'success' ? '可粘贴到所选 AI；任务仍未开始。' : '复制失败，任务状态未改变。'}
                   </span>
                 )}
               </div>

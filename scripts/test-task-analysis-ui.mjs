@@ -324,7 +324,9 @@ if (!process.versions.electron) {
     await openCard(index)
     const status = await js(`document.querySelectorAll('.task-plan-card')[${index}].className`)
     if (status.includes('is-ready')) {
-      await clickInCard(index, '复制并开始任务')
+      await clickInCard(index, '复制任务 Prompt')
+      assert.ok(await js(`document.querySelectorAll('.task-plan-card')[${index}].classList.contains('is-ready')`))
+      await clickInCard(index, '已交给 AI，开始跟踪')
       await wait(`document.querySelectorAll('.task-plan-card')[${index}].classList.contains('is-running')`, `task ${index + 1} running`)
     }
     const longResult = `任务 ${index + 1} 的人工结果摘要。${'详细过程。'.repeat(90)}FULL-RESULT-TAIL-${index}`
@@ -391,6 +393,10 @@ if (!process.versions.electron) {
     fixtureMode = 'manual'
     await createWindow({ clearStorage: true })
     await openTaskAnalysis()
+    assert.equal(await js("document.querySelectorAll('.codex-setup-status').length"), 1)
+    assert.equal(await js("document.querySelector('.codex-setup-status').open"), false)
+    assert.equal(await js("document.querySelectorAll('.codex-setup-status .chatgpt-auth-status').length"), 1)
+    assert.equal(await js("document.querySelectorAll('.codex-setup-status .codex-environment-status').length"), 1)
     await wait("document.querySelector('.chatgpt-auth-status')?.textContent.includes('当前地区无法连接 ChatGPT')", 'regional fallback')
     assert.match(await js("document.querySelector('.chatgpt-auth-status').textContent"), /复制任务 Prompt/)
     await click('开始分析')
@@ -428,7 +434,27 @@ if (!process.versions.electron) {
     assert.ok(await js("document.querySelectorAll('.task-plan-card.is-waiting').length >= 1"))
 
     const firstReady = await js(`[...document.querySelectorAll('.task-plan-card')].findIndex(card=>card.classList.contains('is-ready'))`)
-    await clickInCard(firstReady, '复制并开始任务')
+    await clickInCard(firstReady, '复制任务 Prompt')
+    await wait(`document.querySelectorAll('.task-plan-card')[${firstReady}]?.textContent.includes('任务仍未开始')`, 'copy does not start task')
+    assert.ok(await js(`document.querySelectorAll('.task-plan-card')[${firstReady}].classList.contains('is-ready')`))
+    assert.equal(await js(`document.querySelectorAll('.task-plan-card')[${firstReady}].querySelector('.task-dependency-editor').disabled`), false)
+
+    const secondReady = await js(`[...document.querySelectorAll('.task-plan-card')].findIndex((card,index)=>index!==${firstReady}&&card.classList.contains('is-ready'))`)
+    assert.ok(secondReady >= 0)
+    await js(`Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async () => { throw new Error('fixture copy failure') } },
+    }); window.__petcastOriginalExecCommand = document.execCommand.bind(document);
+    document.execCommand = () => false; true`)
+    await clickInCard(secondReady, '复制任务 Prompt')
+    await wait(`document.querySelectorAll('.task-plan-card')[${secondReady}]?.textContent.includes('任务状态未改变')`, 'copy failure does not start task')
+    assert.ok(await js(`document.querySelectorAll('.task-plan-card')[${secondReady}].classList.contains('is-ready')`))
+    await js(`Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async value => { window.__petcastCopied = String(value) } },
+    }); document.execCommand = window.__petcastOriginalExecCommand; true`)
+
+    await clickInCard(firstReady, '已交给 AI，开始跟踪')
     await wait(`document.querySelectorAll('.task-plan-card')[${firstReady}].classList.contains('is-running')`, 'manual task started')
     await sleep(450)
     await currentWindow.reload()

@@ -1075,6 +1075,28 @@ pnpm test:task-ui
 git diff --check
 ```
 
+## 22.6. B 模块 P2.8.1：任务执行语义修复
+
+P2.8.1 修复任务推荐、人工执行状态和 Codex 能力展示之间的语义混淆，不增加新的 AI 调用能力：
+
+- “编写代码并测试”等实际开发任务推荐 Codex；测试方案设计仍推荐 DeepSeek，纯 React 结构设计与需要创建文件的实现任务分别处理。
+- 复制任务 Prompt 只操作剪贴板，不再自动把任务标记为运行中；用户明确点击“已交给 AI，开始跟踪”后才进入 `running` 并锁定计划。
+- ChatGPT 授权与 Codex 环境检查合并为默认折叠的“Codex 自动执行（可选）”区域，人工复制和任务跟踪不依赖该能力。
+- 任务摘要明确显示“任务拆解：本地规则”，任务卡使用“子任务执行 AI”标签；真正的大脑切换留到 P2.9。
+
+本轮保持任务会话协议、OAuth、Codex 自动执行、额度、账本和游戏模块不变。UI 验收覆盖复制成功和失败均不启动任务、显式开始跟踪、折叠状态展示及截图示例的四项 AI 推荐。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
+
 ## 23. D 模块后续接入说明
 
 D v4 已提供 `recommendTaskPlan(pendingTask, taskRecords, modelCapacities, now)` 及对应页面。B 可直接传入待办条件与各模型当前资源，获取同一任务的模型 / 时间方案。详见 `docs/D_UNIFIED_PLAN.md`。执行前仍需重新确认资源，不能把 recheck 当成确定排期；D 不负责自动调用或队列资源预留。

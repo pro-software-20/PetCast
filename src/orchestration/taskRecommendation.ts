@@ -79,7 +79,10 @@ const providerForCategory = (
     reason: '检测到代码实现或项目文件修改需求，Codex 更适合完成代码变更并给出验证记录。',
   }
   if (category === 'testing') {
-    const needsExecution = matches(text, /运行|执行|自动化|编写测试|修复测试|测试代码|单元测试|集成测试|端到端|构建|typecheck|\b(?:run|execute|automation|unit test|integration test|e2e|build)\b/i)
+    const needsExecution = matches(
+      text,
+      /(?:运行|执行|自动化|编写|补充|新增|实现|修复).{0,16}(?:测试|用例)|(?:测试|用例).{0,16}(?:运行|执行|失败|修复|代码)|代码.{0,16}(?:测试|用例)|单元测试|集成测试|端到端|构建|typecheck|\b(?:run|execute|automation|write|add|implement|fix).{0,16}(?:test|spec)|\b(?:unit test|integration test|e2e|build)\b/i,
+    )
     return needsExecution
       ? {
           preferredId: 'codex',

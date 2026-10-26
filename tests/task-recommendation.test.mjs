@@ -35,6 +35,7 @@ test('recommends different providers for planning, coding and writing subtasks',
 test('distinguishes test design from executable testing work', () => {
   const design = recommend('设计边界场景测试方案和测试用例')
   const execution = recommend('运行单元测试并修复失败测试')
+  const implementation = recommend('编写核心页面代码和测试')
 
   assert.equal(design.recommendation.category, 'testing')
   assert.equal(design.recommendedProviderId, 'deepseek')
@@ -42,6 +43,29 @@ test('distinguishes test design from executable testing work', () => {
   assert.equal(execution.recommendation.category, 'testing')
   assert.equal(execution.recommendedProviderId, 'codex')
   assert.deepEqual(execution.recommendation.requiredCapabilities, ['testing'])
+  assert.equal(implementation.recommendation.category, 'testing')
+  assert.equal(implementation.recommendedProviderId, 'codex')
+  assert.deepEqual(implementation.recommendation.requiredCapabilities, ['testing'])
+})
+
+test('recommends providers consistently for the mixed App example', () => {
+  const tasks = [
+    '分析一个记账 App 的功能需求',
+    '根据需求设计 React 页面结构',
+    '编写核心页面代码和测试',
+    '撰写一份面向普通用户的使用说明',
+  ].map(text => recommend(text, { globalTaskType: 'mixed' }))
+
+  assert.deepEqual(tasks.map(task => task.recommendedProviderId), [
+    'deepseek',
+    'deepseek',
+    'codex',
+    'doubao',
+  ])
+
+  const implementation = recommend('实现 React 页面结构并创建组件文件')
+  assert.equal(implementation.recommendedProviderId, 'codex')
+  assert.equal(implementation.recommendation.category, 'coding')
 })
 
 test('distinguishes project document edits from content-only writing', () => {
