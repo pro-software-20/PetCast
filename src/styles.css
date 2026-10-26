@@ -303,6 +303,17 @@ button { font: inherit; }
 .task-analysis-header p { margin: 0; color: #76979a; font-size: 9px; line-height: 1.5; }
 .task-analysis-close { position: absolute; z-index: 2; top: 16px; right: 18px; width: 29px; height: 29px; border: 2px solid #80a6a3; border-radius: 9px; color: #557e80; background: #e9f6e9; cursor: pointer; font-size: 18px; line-height: 1; }
 .task-analysis-close:hover, .task-analysis-close:focus-visible { color: #fff; border-color: #c36f68; background: #c36f68; outline: none; }
+.codex-setup-status { margin-top: 11px; border: 1px solid rgba(82,145,151,.28); border-radius: 10px; background: rgba(235,247,250,.72); }
+.codex-setup-status > summary { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 10px; color: #3f7479; cursor: pointer; list-style-position: inside; }
+.codex-setup-status > summary span { display: inline-grid; min-width: 0; gap: 2px; margin-right: auto; }
+.codex-setup-status > summary strong { font-size: 9px; }
+.codex-setup-status > summary small { color: #718f91; font-size: 7px; font-weight: 500; }
+.codex-setup-status > summary em { flex: 0 0 auto; padding: 3px 6px; border-radius: 99px; color: #6d8b8e; background: rgba(255,255,255,.72); font-size: 7px; font-style: normal; font-weight: 900; }
+.codex-setup-status.is-ready { border-color: rgba(70,150,113,.38); background: rgba(222,245,228,.72); }
+.codex-setup-status.is-ready > summary em { color: #477b5d; background: rgba(255,255,255,.8); }
+.codex-setup-status.is-warning { border-color: rgba(194,137,72,.38); background: #fff5de; }
+.codex-setup-status.is-warning > summary, .codex-setup-status.is-warning > summary small { color: #8b673e; }
+.codex-setup-content { display: grid; gap: 7px; padding: 0 8px 8px; }
 .codex-environment-status { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 11px; padding: 8px 10px; border: 1px solid rgba(82,145,151,.28); border-radius: 9px; background: rgba(226,245,239,.72); }
 .codex-environment-status > div { min-width: 0; }
 .codex-environment-status strong { display: block; color: #3f7479; font-size: 9px; }
@@ -322,6 +333,7 @@ button { font: inherit; }
 .chatgpt-auth-status.is-ready { border-color: rgba(70,150,113,.38); background: rgba(222,245,228,.8); }
 .chatgpt-auth-status.is-warning { border-color: rgba(194,137,72,.38); background: #fff5de; }
 .chatgpt-auth-status.is-warning strong, .chatgpt-auth-status.is-warning p, .chatgpt-auth-status.is-warning small { color: #8b673e; }
+.codex-setup-content .chatgpt-auth-status, .codex-setup-content .codex-environment-status { margin-top: 0; }
 .task-analysis-overview { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 8px; margin-top: 11px; padding: 8px 9px; border: 1px solid rgba(82,145,151,.3); border-radius: 10px; background: rgba(226,245,239,.78); }
 .task-analysis-overview > div { display: grid; min-width: 0; gap: 2px; }
 .task-analysis-overview strong { overflow: hidden; color: #386d76; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
@@ -483,7 +495,10 @@ button { font: inherit; }
 .task-plan-prompt { margin-top: 8px; color: #557d83; font-size: 8px; }
 .task-plan-prompt summary, .task-plan-footer summary { cursor: pointer; font-weight: 800; }
 .task-plan-prompt pre { max-height: 180px; overflow: auto; margin: 6px 0 0; padding: 8px; border-radius: 7px; color: #456e73; background: rgba(220,240,234,.7); font: inherit; font-size: 8px; line-height: 1.5; white-space: pre-wrap; user-select: text; }
-.task-plan-copy-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.task-plan-copy-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.task-plan-copy-row > button { padding: 5px 8px; border: 1px solid rgba(82,145,151,.34); border-radius: 7px; color: #44747b; background: #fff; cursor: pointer; font: inherit; font-size: 8px; font-weight: 800; }
+.task-plan-copy-row > button.is-primary { color: #fff; border-color: #4f9895; background: #5ca7a2; }
+.task-plan-copy-row > button:disabled { cursor: not-allowed; opacity: .55; }
 .task-plan-copy-row .task-analysis-copy-status { margin: 0; }
 .task-codex-execution { margin-top: 9px; padding: 9px; border: 1px solid rgba(48,132,150,.35); border-radius: 9px; background: rgba(226,248,246,.72); }
 .task-codex-execution > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; }
