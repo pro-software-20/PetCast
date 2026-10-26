@@ -33,6 +33,26 @@ export function generateTaskSessionReport(session: TaskSessionV1): TaskReportOut
     const checks = result?.verification.map(item => (
       `- [${item.status === 'passed' ? 'x' : ' '}] ${item.label}：${statusLabels[item.status]}${item.details ? `（${item.details}）` : ''}`
     )).join('\n') ?? '- 无记录'
+    const handoff = result?.handoff
+    const handoffDetails = handoff
+      ? [
+        handoff.summary,
+        '',
+        '#### 关键决策',
+        '',
+        ...(handoff.keyDecisions.length ? handoff.keyDecisions.map(item => `- ${item}`) : ['- 无']),
+        '',
+        '#### 交接文件',
+        '',
+        ...(handoff.artifacts.length
+          ? handoff.artifacts.map(artifact => `- ${artifact.path}：${artifact.description}`)
+          : ['- 无']),
+        '',
+        '#### 遗留问题',
+        '',
+        ...(handoff.openQuestions.length ? handoff.openQuestions.map(item => `- ${item}`) : ['- 无']),
+      ].join('\n')
+      : '旧任务未记录结构化交接信息。'
 
     return [
       `## ${index + 1}. ${task.title}`,
@@ -58,6 +78,10 @@ export function generateTaskSessionReport(session: TaskSessionV1): TaskReportOut
       '### 人工备注',
       '',
       result?.reviewNote || '无',
+      '',
+      '### 后续任务交接',
+      '',
+      handoffDetails,
     ].join('\n')
   })
 

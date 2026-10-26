@@ -138,7 +138,16 @@ const completeFirstTask = (session) => {
 const completeTask = (session, taskId) => {
   const task = session.plan.tasks.find(candidate => candidate.id === taskId)
   assert.ok(task)
-  let next = mustUpdate(session, { type: 'start', taskId })
+  let next = session
+  for (const dependencyTaskId of task.dependsOn) {
+    const dependencyResult = next.runs.find(candidate => candidate.taskId === dependencyTaskId)?.result
+    for (const artifact of dependencyResult?.handoff?.artifacts ?? []) {
+      next = mustUpdate(next, {
+        type: 'confirm-handoff-artifact', taskId, dependencyTaskId, path: artifact.path, provided: true,
+      })
+    }
+  }
+  next = mustUpdate(next, { type: 'start', taskId })
   next = mustUpdate(next, {
     type: 'update-draft',
     taskId,
@@ -424,19 +433,118 @@ test('returns safe errors for unavailable storage and oversized sessions', async
   assert.equal(outcome.code, 'LIMIT_EXCEEDED')
 })
 
-test('uses only accepted dependency summaries in the next task prompt', () => {
+test('builds a structured dependency handoff without leaking full output', () => {
   const session = completeFirstTask(mustCreate())
   const nextTask = session.plan.tasks[1]
   const dependencyResult = session.runs[0].result
   const prompt = buildManualTaskPrompt(nextTask, session.plan, 'codex', [dependencyResult])
 
-  assert.match(prompt, /已验收的前置结果摘要/)
+  assert.match(prompt, /已验收的前置任务交接/)
   assert.match(prompt, /方案摘要/)
+  assert.match(prompt, /docs\/plan\.md/)
+  assert.match(prompt, /方案覆盖目标：passed/)
   assert.equal(prompt.includes('FULL_PRIVATE_RESULT'), false)
+})
+
+test('edits and freezes a structured handoff during review', () => {
+  let session = mustUpdate(mustCreate(), { type: 'start', taskId: 'task-1' })
+  session = mustUpdate(session, {
+    type: 'update-draft',
+    taskId: 'task-1',
+    draft: {
+      outputText: '方案摘要\n\nPRIVATE_DETAILS',
+      changedFiles: ['docs/plan.md'],
+      verification: [{ label: '方案覆盖目标', status: 'passed', details: '已核对范围' }],
+    },
+  })
+  session = mustUpdate(session, { type: 'submit-result', taskId: 'task-1' })
+  assert.deepEqual(session.runs[0].result.handoff.artifacts.map(item => item.path), ['docs/plan.md'])
+
+  const edited = {
+    summary: '确认采用分层方案。',
+    keyDecisions: ['使用 React 组件拆分页面'],
+    artifacts: [{ path: 'docs/plan.md', description: '已验收的实现方案。' }],
+    openQuestions: ['颜色主题仍需用户确认'],
+  }
+  session = mustUpdate(session, { type: 'set-review-handoff', taskId: 'task-1', handoff: edited })
+  assert.deepEqual(session.runs[0].draft.handoff, edited)
+  assert.deepEqual(session.runs[0].result.handoff, edited)
+  session = mustUpdate(session, { type: 'accept', taskId: 'task-1' }, DONE)
+  assert.equal(updateTaskSession(session, {
+    type: 'set-review-handoff', taskId: 'task-1', handoff: { ...edited, summary: 'changed' },
+  }, DONE).ok, false)
+})
+
+test('requires external file handoff confirmation and resets it after provider changes', () => {
+  let session = completeFirstTask(mustCreate())
+  const blocked = updateTaskSession(session, { type: 'start', taskId: 'task-2' }, LATER)
+  assert.equal(blocked.ok, false)
+  assert.match(blocked.message, /文件已经提供/)
+
+  session = mustUpdate(session, {
+    type: 'confirm-handoff-artifact', taskId: 'task-2', dependencyTaskId: 'task-1', path: 'docs/plan.md', provided: true,
+  })
+  assert.deepEqual(session.runs[1].dependencyHandoffs[0].providedArtifactPaths, ['docs/plan.md'])
+  session = mustUpdate(session, { type: 'assign-provider', taskId: 'task-2', providerId: 'deepseek' })
+  assert.deepEqual(session.runs[1].dependencyHandoffs[0].providedArtifactPaths, [])
+  assert.equal(updateTaskSession(session, { type: 'start', taskId: 'task-2' }, LATER).ok, false)
+  session = mustUpdate(session, {
+    type: 'confirm-handoff-artifact', taskId: 'task-2', dependencyTaskId: 'task-1', path: 'docs/plan.md', provided: true,
+  })
+  assert.equal(mustUpdate(session, { type: 'start', taskId: 'task-2' }).runs[1].status, 'running')
+})
+
+test('allows local Codex only after explicit safe handoff read authorization', () => {
+  const source = input()
+  source.plan.workspace = { id: 'e'.repeat(64), displayName: 'Handoff Project' }
+  source.plan.tasks[1].providerRecommendation = {
+    category: 'coding', requiredCapabilities: ['coding'], confidence: 'high', reason: '需要实现代码。',
+  }
+  let created = createTaskSession(source, NOW)
+  assert.equal(created.ok, true)
+  let session = completeFirstTask(created.session)
+  assert.equal(updateTaskSession(session, {
+    type: 'start-automatic', taskId: 'task-2', executionId: 'exec-1', model: 'codex',
+  }, LATER).ok, false)
+
+  session = mustUpdate(session, {
+    type: 'authorize-handoff-path', taskId: 'task-2', dependencyTaskId: 'task-1', path: 'docs/plan.md', authorized: true,
+  })
+  session = mustUpdate(session, {
+    type: 'start-automatic', taskId: 'task-2', executionId: 'exec-1', model: 'codex',
+  })
+  assert.equal(session.runs[1].executionMode, 'local-agent')
+})
+
+test('rejects unknown, unsafe and forbidden handoff paths', () => {
+  const source = input()
+  source.plan.workspace = { id: 'f'.repeat(64), displayName: 'Safe Project' }
+  source.plan.tasks[1].files.forbiddenPaths = ['docs']
+  let created = createTaskSession(source, NOW)
+  assert.equal(created.ok, true)
+  let session = completeFirstTask(created.session)
+  assert.equal(updateTaskSession(session, {
+    type: 'authorize-handoff-path', taskId: 'task-2', dependencyTaskId: 'task-1', path: 'docs/plan.md', authorized: true,
+  }, LATER).ok, false)
+  for (const path of ['docs/missing.md', '../outside.md']) {
+    const outcome = updateTaskSession(session, {
+      type: 'authorize-handoff-path', taskId: 'task-2', dependencyTaskId: 'task-1', path, authorized: true,
+    }, LATER)
+    assert.equal(outcome.ok, false)
+  }
+
+  const corrupted = structuredClone(session)
+  corrupted.runs[1].dependencyHandoffs = [{
+    dependencyTaskId: 'task-1', authorizedReadPaths: ['docs/missing.md'], providedArtifactPaths: [],
+  }]
+  assert.equal(validateTaskSession(corrupted).ok, false)
 })
 
 test('completes final verification and generates a summary-only Markdown report', () => {
   let session = completeFirstTask(mustCreate())
+  session = mustUpdate(session, {
+    type: 'confirm-handoff-artifact', taskId: 'task-2', dependencyTaskId: 'task-1', path: 'docs/plan.md', provided: true,
+  })
   session = mustUpdate(session, { type: 'start', taskId: 'task-2' })
   session = mustUpdate(session, {
     type: 'update-draft',

@@ -4,9 +4,16 @@ import {
   normalizeTaskFileScope,
   normalizeWorkspacePathScope,
 } from './taskPathScope'
+import {
+  createTaskHandoffPackage,
+  dependencyResultHasArtifact,
+  getHandoffReadiness,
+  normalizeTaskHandoffPackage,
+} from './taskHandoff'
 import type {
   ProviderId,
   TaskFileScope,
+  TaskHandoffPackage,
   TaskNode,
   TaskPlan,
   TaskProviderRecommendation,
@@ -49,6 +56,9 @@ export type TaskSessionAction =
   | { type: 'set-automatic-verification'; taskId: string; index: number; status: VerificationStatus; details?: string }
   | { type: 'set-review-verification'; taskId: string; index: number; status: VerificationStatus; details?: string }
   | { type: 'set-review-note'; taskId: string; note: string }
+  | { type: 'set-review-handoff'; taskId: string; handoff: TaskHandoffPackage }
+  | { type: 'authorize-handoff-path'; taskId: string; dependencyTaskId: string; path: string; authorized: boolean }
+  | { type: 'confirm-handoff-artifact'; taskId: string; dependencyTaskId: string; path: string; provided: boolean }
   | { type: 'update-draft'; taskId: string; draft: Partial<TaskResultDraft> }
   | { type: 'needs-input'; taskId: string; message: string }
   | { type: 'resume'; taskId: string }
@@ -94,6 +104,27 @@ const summarize = (text: string) => {
 }
 
 const normalizePaths = (paths: string[]) => [...new Set(paths.map(path => path.trim()).filter(Boolean))]
+
+const getOrCreateHandoffReceipt = (run: TaskRunRecord, dependencyTaskId: string) => {
+  run.dependencyHandoffs ??= []
+  let receipt = run.dependencyHandoffs.find(candidate => candidate.dependencyTaskId === dependencyTaskId)
+  if (!receipt) {
+    receipt = { dependencyTaskId, authorizedReadPaths: [], providedArtifactPaths: [] }
+    run.dependencyHandoffs.push(receipt)
+  }
+  return receipt
+}
+
+const normalizeHandoffForChangedFiles = (
+  handoff: TaskHandoffPackage,
+  changedFiles: string[],
+): TaskHandoffPackage | null => {
+  const normalized = normalizeTaskHandoffPackage(handoff)
+  const expected = createTaskHandoffPackage('handoff', changedFiles).artifacts.map(artifact => artifact.path).sort()
+  const actual = normalized.artifacts.map(artifact => artifact.path).sort()
+  if (!normalized.summary || JSON.stringify(expected) !== JSON.stringify(actual)) return null
+  return normalized
+}
 
 const refreshReadyTasks = (session: TaskSessionV1) => {
   const statusById = new Map(session.runs.map(run => [run.taskId, run.status]))
@@ -244,8 +275,56 @@ export function updateTaskSession(
       }
       case 'assign-provider':
         if (!['waiting', 'ready'].includes(run.status)) return invalidTransition('任务开始后不能切换 AI。')
+        if (run.assignedProviderId !== action.providerId) {
+          run.dependencyHandoffs?.forEach((receipt) => {
+            receipt.providedArtifactPaths = []
+            receipt.providedToProviderId = undefined
+          })
+        }
         run.assignedProviderId = action.providerId
         break
+      case 'authorize-handoff-path': {
+        if (!['waiting', 'ready'].includes(run.status) || run.attempt > 0) {
+          return invalidTransition('任务开始后不能修改前置文件读取授权。')
+        }
+        if (!session.plan.workspace) {
+          return { ok: false, code: 'INVALID_DATA', message: '请先选择并确认项目工作区。' }
+        }
+        const dependencyRun = session.runs.find(candidate => candidate.taskId === action.dependencyTaskId)
+        if (!task.dependsOn.includes(action.dependencyTaskId)
+          || dependencyRun?.status !== 'done'
+          || !dependencyResultHasArtifact(dependencyRun.result, action.path)) {
+          return { ok: false, code: 'INVALID_DATA', message: '只能授权已验收直接前置任务交接的文件。' }
+        }
+        if (task.files.forbiddenPaths.some(forbidden => action.path === forbidden || action.path.startsWith(`${forbidden}/`))) {
+          return { ok: false, code: 'INVALID_DATA', message: '该文件位于禁止范围，不能授权读取。' }
+        }
+        const receipt = getOrCreateHandoffReceipt(run, action.dependencyTaskId)
+        receipt.authorizedReadPaths = action.authorized
+          ? normalizePaths([...receipt.authorizedReadPaths, action.path])
+          : receipt.authorizedReadPaths.filter(path => path !== action.path)
+        break
+      }
+      case 'confirm-handoff-artifact': {
+        if (!['waiting', 'ready'].includes(run.status) || run.attempt > 0) {
+          return invalidTransition('任务开始后不能修改外部 AI 文件交接确认。')
+        }
+        const dependencyRun = session.runs.find(candidate => candidate.taskId === action.dependencyTaskId)
+        if (!task.dependsOn.includes(action.dependencyTaskId)
+          || dependencyRun?.status !== 'done'
+          || !dependencyResultHasArtifact(dependencyRun.result, action.path)) {
+          return { ok: false, code: 'INVALID_DATA', message: '只能确认已验收直接前置任务交接的文件。' }
+        }
+        const receipt = getOrCreateHandoffReceipt(run, action.dependencyTaskId)
+        if (receipt.providedToProviderId && receipt.providedToProviderId !== run.assignedProviderId) {
+          receipt.providedArtifactPaths = []
+        }
+        receipt.providedToProviderId = run.assignedProviderId
+        receipt.providedArtifactPaths = action.provided
+          ? normalizePaths([...receipt.providedArtifactPaths, action.path])
+          : receipt.providedArtifactPaths.filter(path => path !== action.path)
+        break
+      }
       case 'apply-workspace-default-scope': {
         if (!canEditTaskPlan(session)) return invalidTransition('任务开始后不能修改文件授权。')
         const scope = session.plan.workspace?.defaultScope
@@ -276,6 +355,9 @@ export function updateTaskSession(
       }
       case 'start':
         if (run.status !== 'ready') return invalidTransition('只有已就绪任务可以开始。')
+        if (!getHandoffReadiness(session, task.id, 'manual', run.assignedProviderId).ready) {
+          return invalidTransition('请先确认所有前置任务文件已经提供给当前 AI。')
+        }
         run.status = 'running'
         run.startedAt = now
         run.completedAt = undefined
@@ -286,6 +368,9 @@ export function updateTaskSession(
         if (run.status !== 'ready' || run.assignedProviderId !== 'codex'
           || !['coding', 'testing'].includes(task.providerRecommendation?.category ?? '')) {
           return invalidTransition('只有已就绪且选择 Codex 的任务可以自动执行。')
+        }
+        if (!getHandoffReadiness(session, task.id, 'local-agent').ready) {
+          return invalidTransition('请先为 Codex 授权读取全部前置任务交接文件。')
         }
         run.status = 'running'
         run.executionMode = 'local-agent'
@@ -321,8 +406,10 @@ export function updateTaskSession(
           outputText: action.outputText,
           changedFiles,
           verification: clone(run.draft.verification),
+          handoff: createTaskHandoffPackage(summary, changedFiles),
           usage: action.usage,
         }
+        run.draft.handoff = clone(run.result.handoff)
         run.status = 'review'
         run.automaticExecution = {
           ...run.automaticExecution,
@@ -390,6 +477,16 @@ export function updateTaskSession(
         run.result.reviewNote = action.note.trim() || undefined
         break
       }
+      case 'set-review-handoff': {
+        if (run.status !== 'review' || !run.result || run.automaticExecution?.state === 'review') {
+          return invalidTransition('当前任务尚不能编辑任务交接信息。')
+        }
+        const handoff = normalizeHandoffForChangedFiles(action.handoff, run.result.changedFiles)
+        if (!handoff) return { ok: false, code: 'INVALID_DATA', message: '交接摘要或文件信息无效。' }
+        run.draft.handoff = clone(handoff)
+        run.result.handoff = clone(handoff)
+        break
+      }
       case 'update-draft':
         if (!['running', 'needs-input'].includes(run.status)) return invalidTransition('只有进行中或等待补充信息的任务可以编辑结果。')
         run.draft = {
@@ -397,6 +494,7 @@ export function updateTaskSession(
           changedFiles: action.draft.changedFiles ? normalizePaths(action.draft.changedFiles) : run.draft.changedFiles,
           verification: action.draft.verification ? clone(action.draft.verification) : run.draft.verification,
           reviewNote: action.draft.reviewNote ?? run.draft.reviewNote,
+          handoff: action.draft.handoff ? clone(action.draft.handoff) : run.draft.handoff,
         }
         break
       case 'needs-input':
@@ -418,15 +516,21 @@ export function updateTaskSession(
         if (!run.draft.outputText.trim()) return { ok: false, code: 'INVALID_DATA', message: '请先粘贴 AI 返回结果。' }
         const summary = summarize(run.draft.outputText)
         if (!summary) return { ok: false, code: 'INVALID_DATA', message: '任务结果不能为空。' }
+        const changedFiles = normalizePaths(run.draft.changedFiles)
+        const handoff = run.draft.handoff
+          ? normalizeHandoffForChangedFiles(run.draft.handoff, changedFiles)
+          : null
         run.result = {
           taskId: run.taskId,
           providerId: run.assignedProviderId,
           summary,
           outputText: run.draft.outputText,
-          changedFiles: normalizePaths(run.draft.changedFiles),
+          changedFiles,
           verification: clone(run.draft.verification),
           reviewNote: run.draft.reviewNote.trim() || undefined,
+          handoff: handoff ?? createTaskHandoffPackage(summary, changedFiles),
         }
+        run.draft.handoff = clone(run.result.handoff)
         run.status = 'review'
         run.statusMessage = undefined
         break

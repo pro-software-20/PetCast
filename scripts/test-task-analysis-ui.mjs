@@ -326,6 +326,28 @@ if (!process.versions.electron) {
     if (status.includes('is-ready')) {
       await clickInCard(index, '复制任务 Prompt')
       assert.ok(await js(`document.querySelectorAll('.task-plan-card')[${index}].classList.contains('is-ready')`))
+      const handoffFileCount = await js(`document.querySelectorAll('.task-plan-card')[${index}].querySelectorAll('.task-handoff-artifact').length`)
+      if (handoffFileCount > 0) {
+        assert.equal(await js(`(()=>{
+          const card=document.querySelectorAll('.task-plan-card')[${index}];
+          const button=[...card.querySelectorAll('button')].find(candidate=>candidate.textContent.trim()==='已交给 AI，开始跟踪');
+          return Boolean(button?.disabled);
+        })()`), true)
+        await js(`(()=>{
+          const card=document.querySelectorAll('.task-plan-card')[${index}];
+          for(const label of card.querySelectorAll('.task-handoff-artifact label')){
+            if(label.textContent.includes('已提供给')){
+              const input=label.querySelector('input');
+              if(input && !input.checked && !input.disabled) input.click();
+            }
+          }
+        })()`)
+        await wait(`(()=>{
+          const card=document.querySelectorAll('.task-plan-card')[${index}];
+          const button=[...card.querySelectorAll('button')].find(candidate=>candidate.textContent.trim()==='已交给 AI，开始跟踪');
+          return Boolean(button && !button.disabled);
+        })()`, `task ${index + 1} handoff confirmed`)
+      }
       await clickInCard(index, '已交给 AI，开始跟踪')
       await wait(`document.querySelectorAll('.task-plan-card')[${index}].classList.contains('is-running')`, `task ${index + 1} running`)
     }
