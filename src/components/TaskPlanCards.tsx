@@ -123,7 +123,12 @@ const downloadMarkdown = (markdown: string, fileName: string) => {
 
 export function TaskPlanCards({ session, providers, onSessionChange, codexEnvironment = { status: 'browser' } }: TaskPlanCardsProps) {
   const [copyStatuses, setCopyStatuses] = useState<Record<string, CopyStatus>>({})
-  const [actionError, setActionError] = useState<string | null>(null)
+  const [actionErrorState, setActionErrorState] = useState<{ message: string; taskId?: string } | null>(null)
+  const actionError = actionErrorState?.message ?? null
+  const actionErrorTaskId = actionErrorState?.taskId
+  const setActionError = (message: string | null, taskId?: string) => {
+    setActionErrorState(message ? { message, taskId } : null)
+  }
   const [reportCopyStatus, setReportCopyStatus] = useState<CopyStatus>('idle')
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot | undefined>()
   const [pendingWorkspace, setPendingWorkspace] = useState<WorkspaceSnapshot | undefined>()
@@ -194,7 +199,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
     const previous = sessionRef.current
     const outcome = updateTaskSession(previous, action)
     if (!outcome.ok) {
-      setActionError(outcome.message)
+      setActionError(outcome.message, 'taskId' in action ? action.taskId : undefined)
       if ('taskId' in action) setExpandedTaskId(action.taskId)
       return false
     }
@@ -478,15 +483,23 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
     setCopyStatuses(current => ({ ...current, [taskId]: copied ? 'success' : 'error' }))
   }
 
-  const updateVerification = (taskId: string, index: number, status: VerificationStatus) => {
+  const updateVerification = (
+    taskId: string,
+    index: number,
+    change: { status?: VerificationStatus; details?: string },
+  ) => {
     const run = session.runs.find(candidate => candidate.taskId === taskId)
     if (!run) return
-    if (run.status === 'review' && run.automaticExecution && run.automaticExecution.state !== 'review') {
-      applyAction({ type: 'set-automatic-verification', taskId, index, status })
+    const current = run.draft.verification[index]
+    if (!current) return
+    const status = change.status ?? current.status
+    const details = change.details ?? current.details
+    if (run.status === 'review' && run.automaticExecution?.state !== 'review') {
+      applyAction({ type: 'set-review-verification', taskId, index, status, details })
       return
     }
     const verification = run.draft.verification.map((item, itemIndex) => (
-      itemIndex === index ? { ...item, status } : item
+      itemIndex === index ? { ...item, status, details: details?.trim() || undefined } : item
     ))
     applyAction({ type: 'update-draft', taskId, draft: { verification } }, false)
   }
@@ -641,7 +654,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
         <p>{session.plan.goal}</p>
       </div>
 
-      {actionError && <p className="task-plan-error" role="alert">{actionError}</p>}
+      {actionError && !actionErrorTaskId && <p className="task-plan-error" role="alert">{actionError}</p>}
 
       <ol className="task-plan-list">
         {session.plan.tasks.map((task, index) => {
@@ -666,9 +679,11 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
           ))
           const earlierTasks = session.plan.tasks.slice(0, index)
           const editable = run.status === 'running' || run.status === 'needs-input'
-          const verificationEditable = editable || Boolean(
-            run.status === 'review' && run.automaticExecution && run.automaticExecution.state !== 'review',
-          )
+          const reviewEditable = run.status === 'review' && run.automaticExecution?.state !== 'review'
+          const verificationEditable = editable || reviewEditable
+          const pendingAcceptanceCount = run.status === 'review'
+            ? (run.result?.verification.filter(item => item.status !== 'passed').length ?? 0)
+            : 0
           const canCopy = !preparedExecution && !preparingExecution && ['ready', 'running', 'needs-input'].includes(run.status)
           const automaticCategory = task.providerRecommendation?.category
           const automaticCandidate = Boolean(
@@ -939,12 +954,21 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
                   <fieldset disabled={!verificationEditable}>
                     <legend>逐项验收</legend>
                     {run.draft.verification.map((item, checkIndex) => (
-                      <label key={item.label}>
-                        <span>{item.label}</span>
-                        <select value={item.status} onChange={event => updateVerification(task.id, checkIndex, event.target.value as VerificationStatus)}>
-                          {Object.entries(verificationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                        </select>
-                      </label>
+                      <div className="task-verification-item" key={item.label}>
+                        <label>
+                          <span>{item.label}</span>
+                          <select value={item.status} onChange={event => updateVerification(task.id, checkIndex, { status: event.target.value as VerificationStatus })}>
+                            {Object.entries(verificationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                          </select>
+                        </label>
+                        <input
+                          aria-label={`${item.label}验收说明`}
+                          value={item.details ?? ''}
+                          maxLength={2_000}
+                          placeholder="验收说明（可选）"
+                          onChange={event => updateVerification(task.id, checkIndex, { details: event.target.value })}
+                        />
+                      </div>
                     ))}
                   </fieldset>
 
@@ -952,13 +976,16 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
                   <textarea
                     id={`task-note-${task.id}`}
                     value={run.draft.reviewNote}
-                    disabled={!editable}
+                    disabled={!editable && !reviewEditable}
                     rows={2}
-                    onChange={event => applyAction({ type: 'update-draft', taskId: task.id, draft: { reviewNote: event.target.value } }, false)}
+                    onChange={event => reviewEditable
+                      ? applyAction({ type: 'set-review-note', taskId: task.id, note: event.target.value }, false)
+                      : applyAction({ type: 'update-draft', taskId: task.id, draft: { reviewNote: event.target.value } }, false)}
                   />
                 </section>
               )}
 
+              {actionErrorTaskId === task.id && <p className="task-card-action-error" role="alert">{actionError}</p>}
               <div className="task-run-actions">
                 {['ready', 'waiting'].includes(run.status) && <button type="button" onClick={() => applyAction({ type: 'cancel', taskId: task.id })}>取消任务</button>}
                 {run.status === 'running' && run.automaticExecution?.state !== 'running' && <>
@@ -973,7 +1000,15 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
                   <button type="button" onClick={() => applyAction({ type: 'cancel', taskId: task.id })}>取消</button>
                 </>}
                 {run.status === 'review' && run.automaticExecution?.state !== 'review' && <>
-                  <button type="button" className="is-primary" onClick={() => applyAction({ type: 'accept', taskId: task.id })}>验收通过</button>
+                  {pendingAcceptanceCount > 0 && (
+                    <p className="task-acceptance-hint" role="status">还有 {pendingAcceptanceCount} 项验收未通过，请逐项确认。</p>
+                  )}
+                  <button
+                    type="button"
+                    className="is-primary"
+                    disabled={pendingAcceptanceCount > 0}
+                    onClick={() => applyAction({ type: 'accept', taskId: task.id })}
+                  >验收通过</button>
                   <button type="button" onClick={() => applyAction({ type: 'request-changes', taskId: task.id, message: run.draft.reviewNote })}>退回修改</button>
                   <button type="button" onClick={() => applyAction({ type: 'fail', taskId: task.id, message: run.draft.reviewNote })}>标记失败</button>
                 </>}

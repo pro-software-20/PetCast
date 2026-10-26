@@ -544,10 +544,15 @@ button { font: inherit; }
 .task-result-editor > small { color: #7a999a; font-size: 7px; text-align: right; }
 .task-result-editor fieldset { display: grid; gap: 5px; margin: 2px 0; padding: 7px; border: 1px dashed rgba(82,145,151,.3); border-radius: 7px; }
 .task-result-editor fieldset label { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 7px; color: #557d83; font-size: 8px; }
-.task-result-editor select { padding: 4px 6px; border: 1px solid rgba(82,145,151,.3); border-radius: 6px; color: #3f6b72; background: #fff; font: inherit; font-size: 8px; }
+.task-result-editor select, .task-result-editor input { padding: 4px 6px; border: 1px solid rgba(82,145,151,.3); border-radius: 6px; color: #3f6b72; background: #fff; font: inherit; font-size: 8px; }
+.task-verification-item { display: grid; gap: 4px; }
+.task-verification-item input { width: 100%; }
 .task-run-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .task-run-actions button { min-height: 28px; color: #52787c; border: 1px solid rgba(82,145,151,.3); background: #edf7f3; }
 .task-run-actions button.is-primary { color: #fff; border-color: #4f9692; background: #5da9a3; }
+.task-run-actions button:disabled { cursor: not-allowed; opacity: .52; }
+.task-acceptance-hint { flex-basis: 100%; margin: 0; color: #8b673e; font-size: 8px; line-height: 1.45; }
+.task-card-action-error { margin: 8px 0 0; padding: 7px 8px; border: 1px solid rgba(194,137,72,.38); border-radius: 7px; color: #8b673e; background: #fff5de; font-size: 8px; line-height: 1.45; }
 .task-final-check { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; color: #557d83; font-size: 8px; line-height: 1.4; }
 .task-final-check input { margin: 1px 0 0; accent-color: #5da9a3; }
 .task-plan-footer > p { margin: 4px 0 7px; color: #78999a; font-size: 8px; }

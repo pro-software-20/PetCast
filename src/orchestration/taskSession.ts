@@ -47,6 +47,8 @@ export type TaskSessionAction =
   | { type: 'discard-automatic'; taskId: string }
   | { type: 'interrupt-automatic'; taskId: string; message?: string }
   | { type: 'set-automatic-verification'; taskId: string; index: number; status: VerificationStatus; details?: string }
+  | { type: 'set-review-verification'; taskId: string; index: number; status: VerificationStatus; details?: string }
+  | { type: 'set-review-note'; taskId: string; note: string }
   | { type: 'update-draft'; taskId: string; draft: Partial<TaskResultDraft> }
   | { type: 'needs-input'; taskId: string; message: string }
   | { type: 'resume'; taskId: string }
@@ -363,6 +365,29 @@ export function updateTaskSession(
         draftItem.details = action.details?.trim() || undefined
         resultItem.status = action.status
         resultItem.details = action.details?.trim() || undefined
+        break
+      }
+      case 'set-review-verification': {
+        if (run.status !== 'review' || !run.result || run.automaticExecution?.state === 'review') {
+          return invalidTransition('当前任务尚不能进行人工验收。')
+        }
+        const draftItem = run.draft.verification[action.index]
+        const resultItem = run.result.verification[action.index]
+        if (!draftItem || !resultItem || draftItem.label !== resultItem.label) {
+          return { ok: false, code: 'INVALID_DATA', message: '任务验收项不存在或已发生变化。' }
+        }
+        draftItem.status = action.status
+        draftItem.details = action.details?.trim() || undefined
+        resultItem.status = action.status
+        resultItem.details = action.details?.trim() || undefined
+        break
+      }
+      case 'set-review-note': {
+        if (run.status !== 'review' || !run.result || run.automaticExecution?.state === 'review') {
+          return invalidTransition('当前任务尚不能编辑人工验收备注。')
+        }
+        run.draft.reviewNote = action.note
+        run.result.reviewNote = action.note.trim() || undefined
         break
       }
       case 'update-draft':

@@ -294,6 +294,45 @@ test('requires pasted output and passed checks before unlocking dependencies', (
   assert.deepEqual(session.runs.map(run => run.status), ['done', 'ready'])
 })
 
+test('allows manual verification and notes to be completed during review', () => {
+  let session = mustUpdate(mustCreate(), { type: 'start', taskId: 'task-1' })
+  session = mustUpdate(session, {
+    type: 'update-draft',
+    taskId: 'task-1',
+    draft: { outputText: '完成了分析，但需要在待验收阶段逐项确认。' },
+  })
+  session = mustUpdate(session, { type: 'submit-result', taskId: 'task-1' })
+
+  assert.equal(session.runs[0].status, 'review')
+  assert.equal(session.runs[0].result.verification[0].status, 'not-run')
+  assert.equal(updateTaskSession(session, {
+    type: 'update-draft',
+    taskId: 'task-1',
+    draft: { outputText: '待验收阶段不能替换正文。' },
+  }).ok, false)
+
+  session = mustUpdate(session, {
+    type: 'set-review-verification',
+    taskId: 'task-1',
+    index: 0,
+    status: 'passed',
+    details: '已按目标逐项核对。',
+  })
+  session = mustUpdate(session, {
+    type: 'set-review-note',
+    taskId: 'task-1',
+    note: '人工确认结果符合要求。',
+  })
+
+  assert.deepEqual(session.runs[0].draft.verification, session.runs[0].result.verification)
+  assert.equal(session.runs[0].result.verification[0].details, '已按目标逐项核对。')
+  assert.equal(session.runs[0].draft.reviewNote, '人工确认结果符合要求。')
+  assert.equal(session.runs[0].result.reviewNote, '人工确认结果符合要求。')
+
+  session = mustUpdate(session, { type: 'accept', taskId: 'task-1' }, DONE)
+  assert.deepEqual(session.runs.map(run => run.status), ['done', 'ready'])
+})
+
 test('supports needs-input, failure, cancellation and retry transitions', () => {
   let session = mustUpdate(mustCreate(), { type: 'start', taskId: 'task-1' })
   session = mustUpdate(session, { type: 'needs-input', taskId: 'task-1', message: '缺少目标平台。' })
