@@ -146,6 +146,18 @@ export interface TaskCost {
   currency: string
 }
 
+export interface TaskHandoffArtifact {
+  path: string
+  description: string
+}
+
+export interface TaskHandoffPackage {
+  summary: string
+  keyDecisions: string[]
+  artifacts: TaskHandoffArtifact[]
+  openQuestions: string[]
+}
+
 export interface TaskExecutionResult {
   taskId: string
   providerId: ProviderId
@@ -154,6 +166,7 @@ export interface TaskExecutionResult {
   changedFiles: string[]
   verification: TaskVerificationResult[]
   reviewNote?: string
+  handoff?: TaskHandoffPackage
   usage?: TaskTokenUsage
   cost?: TaskCost
 }
@@ -163,6 +176,14 @@ export interface TaskResultDraft {
   changedFiles: string[]
   verification: TaskVerificationResult[]
   reviewNote: string
+  handoff?: TaskHandoffPackage
+}
+
+export interface TaskDependencyHandoffReceipt {
+  dependencyTaskId: string
+  authorizedReadPaths: string[]
+  providedArtifactPaths: string[]
+  providedToProviderId?: ProviderId
 }
 
 export type AutomaticTaskExecutionState =
@@ -196,6 +217,7 @@ export interface TaskRunRecord {
   completedAt?: string
   result?: TaskExecutionResult
   automaticExecution?: AutomaticTaskExecutionMetadata
+  dependencyHandoffs?: TaskDependencyHandoffReceipt[]
 }
 
 export interface TaskSessionV1 {

@@ -1,4 +1,5 @@
 import { validateTaskPlan } from './taskPlanValidation'
+import { normalizeWorkspacePath } from './taskPathScope'
 import {
   BUILT_IN_PROVIDER_IDS,
   TASK_STATUSES,
@@ -114,6 +115,57 @@ const validatePathList = (
   value.forEach((candidate, index) => {
     if (!isSafePath(candidate)) push(issues, 'INVALID_PATH', `${path}[${index}]`, '必须是安全的工作区相对路径。')
   })
+}
+
+const validateHandoff = (
+  value: unknown,
+  changedFiles: unknown,
+  path: string,
+  issues: TaskSessionValidationIssue[],
+) => {
+  if (value === undefined) return
+  if (!isRecord(value)
+    || !isNonEmptyString(value.summary)
+    || String(value.summary).length > 2_000
+    || !Array.isArray(value.keyDecisions)
+    || !Array.isArray(value.artifacts)
+    || !Array.isArray(value.openQuestions)) {
+    push(issues, 'INVALID_SHAPE', path, '任务交接包结构无效。')
+    return
+  }
+  for (const [field, values] of [
+    ['keyDecisions', value.keyDecisions],
+    ['openQuestions', value.openQuestions],
+  ] as const) {
+    if (values.length > 50 || values.some(item => !isNonEmptyString(item) || String(item).length > 2_000)) {
+      push(issues, 'LIMIT_EXCEEDED', `${path}.${field}`, '交接条目必须非空，且最多 50 项、每项 2,000 字符。')
+    }
+  }
+  if (value.artifacts.length > 200) {
+    push(issues, 'LIMIT_EXCEEDED', `${path}.artifacts`, '交接文件不能超过 200 项。')
+  }
+  const artifactPaths: string[] = []
+  value.artifacts.forEach((artifact, index) => {
+    if (!isRecord(artifact)
+      || normalizeWorkspacePath(String(artifact.path ?? '')) !== artifact.path
+      || !isNonEmptyString(artifact.description)
+      || String(artifact.description).length > 1_000) {
+      push(issues, 'INVALID_PATH', `${path}.artifacts[${index}]`, '交接文件必须使用安全相对路径和非空说明。')
+      return
+    }
+    artifactPaths.push(String(artifact.path))
+  })
+  if (new Set(artifactPaths).size !== artifactPaths.length) {
+    push(issues, 'INVALID_PATH', `${path}.artifacts`, '交接文件不能重复。')
+  }
+  if (Array.isArray(changedFiles)) {
+    const normalizedChanged = changedFiles.flatMap(candidate => (
+      typeof candidate === 'string' ? [normalizeWorkspacePath(candidate)].filter(Boolean) as string[] : []
+    )).sort()
+    if (JSON.stringify([...artifactPaths].sort()) !== JSON.stringify(normalizedChanged)) {
+      push(issues, 'TASK_MISMATCH', `${path}.artifacts`, '交接文件必须与任务实际修改文件一致。')
+    }
+  }
 }
 
 const isStringArray = (value: unknown) => Array.isArray(value) && value.every(item => typeof item === 'string')
@@ -256,6 +308,30 @@ export function validateTaskSession(value: unknown): TaskSessionValidationResult
         }
         validatePathList(run.draft.changedFiles, `${path}.draft.changedFiles`, issues)
         validateVerification(run.draft.verification, expectedLabels(task), `${path}.draft.verification`, issues)
+        validateHandoff(run.draft.handoff, run.draft.changedFiles, `${path}.draft.handoff`, issues)
+      }
+
+      if (run.dependencyHandoffs !== undefined) {
+        if (!Array.isArray(run.dependencyHandoffs) || run.dependencyHandoffs.length > task.dependsOn.length) {
+          push(issues, 'INVALID_SHAPE', `${path}.dependencyHandoffs`, '前置任务交接确认结构无效。')
+        } else {
+          const seenDependencies = new Set<string>()
+          run.dependencyHandoffs.forEach((receipt, receiptIndex) => {
+            const receiptPath = `${path}.dependencyHandoffs[${receiptIndex}]`
+            if (!isRecord(receipt)
+              || !task.dependsOn.includes(String(receipt.dependencyTaskId))
+              || seenDependencies.has(String(receipt.dependencyTaskId))) {
+              push(issues, 'TASK_MISMATCH', receiptPath, '交接确认必须对应唯一的直接前置任务。')
+              return
+            }
+            seenDependencies.add(String(receipt.dependencyTaskId))
+            validatePathList(receipt.authorizedReadPaths, `${receiptPath}.authorizedReadPaths`, issues)
+            validatePathList(receipt.providedArtifactPaths, `${receiptPath}.providedArtifactPaths`, issues)
+            if (receipt.providedToProviderId !== undefined && !isProviderId(receipt.providedToProviderId)) {
+              push(issues, 'INVALID_SHAPE', `${receiptPath}.providedToProviderId`, '交接确认 Provider 无效。')
+            }
+          })
+        }
       }
 
       if (run.result !== undefined) {
@@ -274,6 +350,11 @@ export function validateTaskSession(value: unknown): TaskSessionValidationResult
           }
           validatePathList(run.result.changedFiles, `${path}.result.changedFiles`, issues)
           validateVerification(run.result.verification, expectedLabels(task), `${path}.result.verification`, issues)
+          validateHandoff(run.result.handoff, run.result.changedFiles, `${path}.result.handoff`, issues)
+          if (isRecord(run.draft) && run.draft.handoff !== undefined && run.result.handoff !== undefined
+            && JSON.stringify(run.draft.handoff) !== JSON.stringify(run.result.handoff)) {
+            push(issues, 'TASK_MISMATCH', `${path}.result.handoff`, '草稿与正式结果的交接信息必须保持一致。')
+          }
         }
       }
     })
@@ -299,6 +380,24 @@ export function validateTaskSession(value: unknown): TaskSessionValidationResult
       const verification = isRecord(run.result) ? run.result.verification : undefined
       if (!Array.isArray(verification) || !verification.every(item => isRecord(item) && item.status === 'passed')) {
         push(issues, 'INVALID_STATE', `runs.${task.id}.result.verification`, '任务完成前所有验收项必须通过。')
+      }
+    }
+    if (Array.isArray(run.dependencyHandoffs)) {
+      for (const receipt of run.dependencyHandoffs) {
+        if (!isRecord(receipt)) continue
+        const dependencyRun = runById.get(String(receipt.dependencyTaskId))
+        const handoff = isRecord(dependencyRun?.result) && isRecord(dependencyRun.result.handoff)
+          ? dependencyRun.result.handoff
+          : undefined
+        const artifacts = Array.isArray(handoff?.artifacts)
+          ? new Set(handoff.artifacts.flatMap(artifact => isRecord(artifact) && typeof artifact.path === 'string' ? [artifact.path] : []))
+          : new Set<string>()
+        for (const field of ['authorizedReadPaths', 'providedArtifactPaths'] as const) {
+          const paths = Array.isArray(receipt[field]) ? receipt[field] : []
+          if (paths.some(path => typeof path !== 'string' || !artifacts.has(path))) {
+            push(issues, 'TASK_MISMATCH', `runs.${task.id}.dependencyHandoffs.${field}`, '交接确认只能引用直接前置任务声明的文件。')
+          }
+        }
       }
     }
   }

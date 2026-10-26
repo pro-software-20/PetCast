@@ -326,6 +326,28 @@ if (!process.versions.electron) {
     if (status.includes('is-ready')) {
       await clickInCard(index, '复制任务 Prompt')
       assert.ok(await js(`document.querySelectorAll('.task-plan-card')[${index}].classList.contains('is-ready')`))
+      const handoffFileCount = await js(`document.querySelectorAll('.task-plan-card')[${index}].querySelectorAll('.task-handoff-artifact').length`)
+      if (handoffFileCount > 0) {
+        assert.equal(await js(`(()=>{
+          const card=document.querySelectorAll('.task-plan-card')[${index}];
+          const button=[...card.querySelectorAll('button')].find(candidate=>candidate.textContent.trim()==='已交给 AI，开始跟踪');
+          return Boolean(button?.disabled);
+        })()`), true)
+        await js(`(()=>{
+          const card=document.querySelectorAll('.task-plan-card')[${index}];
+          for(const label of card.querySelectorAll('.task-handoff-artifact label')){
+            if(label.textContent.includes('已提供给')){
+              const input=label.querySelector('input');
+              if(input && !input.checked && !input.disabled) input.click();
+            }
+          }
+        })()`)
+        await wait(`(()=>{
+          const card=document.querySelectorAll('.task-plan-card')[${index}];
+          const button=[...card.querySelectorAll('button')].find(candidate=>candidate.textContent.trim()==='已交给 AI，开始跟踪');
+          return Boolean(button && !button.disabled);
+        })()`, `task ${index + 1} handoff confirmed`)
+      }
       await clickInCard(index, '已交给 AI，开始跟踪')
       await wait(`document.querySelectorAll('.task-plan-card')[${index}].classList.contains('is-running')`, `task ${index + 1} running`)
     }
@@ -338,15 +360,36 @@ if (!process.versions.electron) {
         area.dispatchEvent(new Event('input',{bubbles:true}));
       })()`)
     })
-    await js(`(()=>{
-      const card=document.querySelectorAll('.task-plan-card')[${index}];
-      for(const select of card.querySelectorAll('.task-result-editor fieldset select')){
-        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,'passed');
-        select.dispatchEvent(new Event('change',{bubbles:true}));
-      }
-    })()`)
+    if (index !== 0) {
+      await js(`(()=>{
+        const card=document.querySelectorAll('.task-plan-card')[${index}];
+        for(const select of card.querySelectorAll('.task-result-editor fieldset select')){
+          Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,'passed');
+          select.dispatchEvent(new Event('change',{bubbles:true}));
+        }
+      })()`)
+    }
     await clickInCard(index, '提交待验收')
     await wait(`document.querySelectorAll('.task-plan-card')[${index}].classList.contains('is-review')`, `task ${index + 1} review`)
+    if (index === 0) {
+      assert.equal(await js(`(()=>{
+        const card=document.querySelectorAll('.task-plan-card')[0];
+        const button=[...card.querySelectorAll('button')].find(candidate=>candidate.textContent.trim()==='验收通过');
+        return Boolean(button?.disabled && card.querySelector('.task-acceptance-hint'));
+      })()`), true)
+      await js(`(()=>{
+        const card=document.querySelectorAll('.task-plan-card')[0];
+        for(const select of card.querySelectorAll('.task-result-editor fieldset select')){
+          Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,'passed');
+          select.dispatchEvent(new Event('change',{bubbles:true}));
+        }
+      })()`)
+      await wait(`(()=>{
+        const card=document.querySelectorAll('.task-plan-card')[0];
+        const button=[...card.querySelectorAll('button')].find(candidate=>candidate.textContent.trim()==='验收通过');
+        return Boolean(button && !button.disabled && !card.querySelector('.task-acceptance-hint'));
+      })()`, 'manual review verification unlocks acceptance')
+    }
     await clickInCard(index, '验收通过')
     await wait(`document.querySelectorAll('.task-plan-card')[${index}].classList.contains('is-done')`, `task ${index + 1} done`)
     const hasActionable = await js(`[...document.querySelectorAll('.task-plan-card')].some(card=>!card.classList.contains('is-done')&&(card.classList.contains('is-ready')||card.classList.contains('is-running')||card.classList.contains('is-needs-input')||card.classList.contains('is-review')))`)

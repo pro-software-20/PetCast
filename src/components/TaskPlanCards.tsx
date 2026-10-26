@@ -6,6 +6,13 @@ import { LOCAL_PROVIDER_PROFILE } from '../orchestration/providerProfiles'
 import { generateTaskSessionReport } from '../orchestration/taskReport'
 import { getTaskWorkspacePathScope, workspacePathScopesEqual } from '../orchestration/taskPathScope'
 import {
+  getDependencyHandoffArtifacts,
+  getEffectiveTaskWorkspaceScope,
+  getHandoffReadiness,
+  getHandoffReceipt,
+  taskScopeCanRead,
+} from '../orchestration/taskHandoff'
+import {
   canEditTaskDependencies,
   canEditTaskPlan,
   updateTaskSession,
@@ -123,7 +130,12 @@ const downloadMarkdown = (markdown: string, fileName: string) => {
 
 export function TaskPlanCards({ session, providers, onSessionChange, codexEnvironment = { status: 'browser' } }: TaskPlanCardsProps) {
   const [copyStatuses, setCopyStatuses] = useState<Record<string, CopyStatus>>({})
-  const [actionError, setActionError] = useState<string | null>(null)
+  const [actionErrorState, setActionErrorState] = useState<{ message: string; taskId?: string } | null>(null)
+  const actionError = actionErrorState?.message ?? null
+  const actionErrorTaskId = actionErrorState?.taskId
+  const setActionError = (message: string | null, taskId?: string) => {
+    setActionErrorState(message ? { message, taskId } : null)
+  }
   const [reportCopyStatus, setReportCopyStatus] = useState<CopyStatus>('idle')
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot | undefined>()
   const [pendingWorkspace, setPendingWorkspace] = useState<WorkspaceSnapshot | undefined>()
@@ -194,7 +206,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
     const previous = sessionRef.current
     const outcome = updateTaskSession(previous, action)
     if (!outcome.ok) {
-      setActionError(outcome.message)
+      setActionError(outcome.message, 'taskId' in action ? action.taskId : undefined)
       if ('taskId' in action) setExpandedTaskId(action.taskId)
       return false
     }
@@ -249,7 +261,8 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
   ) => {
     const current = sessionRef.current
     const task = current.plan.tasks.find(candidate => candidate.id === taskId)
-    if (!task || !current.plan.workspace || !codexExecutionAccess.available
+    const run = current.runs.find(candidate => candidate.taskId === taskId)
+    if (!task || !run || !current.plan.workspace || !codexExecutionAccess.available
       || !codexExecutionAccess.scopeId || !window.petcast?.prepareCodexTaskExecution) return
     setExpandedTaskId(taskId)
     const requestId = `prepare-${globalThis.crypto.randomUUID()}`
@@ -259,7 +272,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
     setActionError(null)
     setExecutionProgress('正在准备隔离副本…')
     try {
-      const scope = getTaskWorkspacePathScope(task.files)
+      const scope = getEffectiveTaskWorkspaceScope(task.files, run)
       const outcome = await window.petcast.prepareCodexTaskExecution({
         requestId,
         taskId,
@@ -478,15 +491,23 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
     setCopyStatuses(current => ({ ...current, [taskId]: copied ? 'success' : 'error' }))
   }
 
-  const updateVerification = (taskId: string, index: number, status: VerificationStatus) => {
+  const updateVerification = (
+    taskId: string,
+    index: number,
+    change: { status?: VerificationStatus; details?: string },
+  ) => {
     const run = session.runs.find(candidate => candidate.taskId === taskId)
     if (!run) return
-    if (run.status === 'review' && run.automaticExecution && run.automaticExecution.state !== 'review') {
-      applyAction({ type: 'set-automatic-verification', taskId, index, status })
+    const current = run.draft.verification[index]
+    if (!current) return
+    const status = change.status ?? current.status
+    const details = change.details ?? current.details
+    if (run.status === 'review' && run.automaticExecution?.state !== 'review') {
+      applyAction({ type: 'set-review-verification', taskId, index, status, details })
       return
     }
     const verification = run.draft.verification.map((item, itemIndex) => (
-      itemIndex === index ? { ...item, status } : item
+      itemIndex === index ? { ...item, status, details: details?.trim() || undefined } : item
     ))
     applyAction({ type: 'update-draft', taskId, draft: { verification } }, false)
   }
@@ -639,7 +660,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
       </div>
 
 
-      {actionError && <p className="task-plan-error" role="alert">{actionError}</p>}
+      {actionError && !actionErrorTaskId && <p className="task-plan-error" role="alert">{actionError}</p>}
 
       <ol className="task-plan-list">
         {session.plan.tasks.map((task, index) => {
@@ -657,16 +678,29 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
             const result = session.runs.find(candidate => candidate.taskId === dependencyId)?.result
             return result ? [result] : []
           })
-          const prompt = buildManualTaskPrompt(task, session.plan, selectedProviderId, dependencyResults)
+          const effectiveScope = getEffectiveTaskWorkspaceScope(task.files, run)
+          const prompt = buildManualTaskPrompt(
+            task,
+            session.plan,
+            selectedProviderId,
+            dependencyResults,
+            effectiveScope.readPaths,
+          )
+          const dependencyArtifacts = getDependencyHandoffArtifacts(session, task.id)
+          const manualHandoffReadiness = getHandoffReadiness(session, task.id, 'manual', selectedProviderId)
+          const automaticHandoffReadiness = getHandoffReadiness(session, task.id, 'local-agent')
+          const dependentTasks = session.plan.tasks.filter(candidate => candidate.dependsOn.includes(task.id))
           const copyStatus = copyStatuses[task.id] ?? 'idle'
           const dependencyNames = task.dependsOn.map(dependencyId => (
             session.plan.tasks.find(candidate => candidate.id === dependencyId)?.title ?? dependencyId
           ))
           const earlierTasks = session.plan.tasks.slice(0, index)
           const editable = run.status === 'running' || run.status === 'needs-input'
-          const verificationEditable = editable || Boolean(
-            run.status === 'review' && run.automaticExecution && run.automaticExecution.state !== 'review',
-          )
+          const reviewEditable = run.status === 'review' && run.automaticExecution?.state !== 'review'
+          const verificationEditable = editable || reviewEditable
+          const pendingAcceptanceCount = run.status === 'review'
+            ? (run.result?.verification.filter(item => item.status !== 'passed').length ?? 0)
+            : 0
           const canCopy = !preparedExecution && !preparingExecution && ['ready', 'running', 'needs-input'].includes(run.status)
           const automaticCategory = task.providerRecommendation?.category
           const automaticCandidate = Boolean(
@@ -676,6 +710,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
           )
           const canPrepareAutomatic = Boolean(
             automaticCandidate
+            && automaticHandoffReadiness.ready
             && workspace
             && workspace.workspaceId === session.plan.workspace?.id
             && codexExecutionAccess.available
@@ -743,6 +778,81 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
                 </div>
               </div>
 
+              {dependencyResults.length > 0 && (
+                <section className="task-handoff-received" aria-label="前置任务交接">
+                  <header>
+                    <strong>前置任务交接</strong>
+                    <span>{dependencyArtifacts.length ? `${dependencyArtifacts.length} 个相关文件` : '无需额外文件'}</span>
+                  </header>
+                  {dependencyResults.map((result) => {
+                    const dependencyTask = session.plan.tasks.find(candidate => candidate.id === result.taskId)
+                    const handoff = result.handoff
+                    return (
+                      <div className="task-handoff-dependency" key={result.taskId}>
+                        <strong>{dependencyTask?.title ?? result.taskId}</strong>
+                        <p>{handoff?.summary ?? result.summary}</p>
+                        {handoff?.keyDecisions.length ? <div><b>关键决策</b><ul>{handoff.keyDecisions.map(item => <li key={item}>{item}</li>)}</ul></div> : null}
+                        <div><b>验收结果</b><ul>{result.verification.map(item => <li key={item.label}>{item.label}：{verificationLabels[item.status]}{item.details ? `（${item.details}）` : ''}</li>)}</ul></div>
+                        {handoff?.openQuestions.length ? <div><b>遗留问题</b><ul>{handoff.openQuestions.map(item => <li key={item}>{item}</li>)}</ul></div> : null}
+                        {handoff?.artifacts.map((artifact) => {
+                          const receipt = getHandoffReceipt(run, result.taskId)
+                          const staticallyReadable = taskScopeCanRead(artifact.path, task.files)
+                          const explicitlyAuthorized = receipt?.authorizedReadPaths.includes(artifact.path) ?? false
+                          const readable = staticallyReadable || explicitlyAuthorized
+                          const provided = receipt?.providedToProviderId === selectedProviderId
+                            && receipt.providedArtifactPaths.includes(artifact.path)
+                          return (
+                            <div className="task-handoff-artifact" key={`${result.taskId}:${artifact.path}`}>
+                              <div><code>{artifact.path}</code><span>{artifact.description}</span></div>
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  checked={readable}
+                                  disabled={staticallyReadable || run.status !== 'ready' || !session.plan.workspace}
+                                  onChange={event => applyAction({
+                                    type: 'authorize-handoff-path',
+                                    taskId: task.id,
+                                    dependencyTaskId: result.taskId,
+                                    path: artifact.path,
+                                    authorized: event.target.checked,
+                                  })}
+                                />
+                                <span>{readable ? '工作区已授权读取' : '授权本机 Codex 读取'}</span>
+                              </label>
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  checked={provided}
+                                  disabled={run.status !== 'ready'}
+                                  onChange={event => applyAction({
+                                    type: 'confirm-handoff-artifact',
+                                    taskId: task.id,
+                                    dependencyTaskId: result.taskId,
+                                    path: artifact.path,
+                                    provided: event.target.checked,
+                                  })}
+                                />
+                                <span>已提供给 {selectedProviderName}</span>
+                              </label>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )
+                  })}
+                  {!manualHandoffReadiness.ready && run.status === 'ready' && (
+                    <p className="task-handoff-warning" role="status">
+                      人工开始前还需确认提供 {manualHandoffReadiness.missing.length} 个文件；复制 Prompt 不受影响。
+                    </p>
+                  )}
+                  {automaticCandidate && !automaticHandoffReadiness.ready && run.status === 'ready' && (
+                    <p className="task-handoff-warning" role="status">
+                      Codex 自动执行前还需授权读取 {automaticHandoffReadiness.missing.length} 个文件。
+                    </p>
+                  )}
+                </section>
+              )}
+
               <div className="task-plan-copy-row">
                 <button
                   type="button"
@@ -756,7 +866,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
                   <button
                     type="button"
                     className="is-primary"
-                    disabled={Boolean(preparedExecution) || Boolean(preparingExecution)}
+                    disabled={!manualHandoffReadiness.ready || Boolean(preparedExecution) || Boolean(preparingExecution)}
                     onClick={() => applyAction({ type: 'start', taskId: task.id })}
                   >
                     已交给 AI，开始跟踪
@@ -874,7 +984,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
                       <p>{codexExecutionAccess.authMode === 'chatgpt-oauth'
                         ? '使用已连接的 ChatGPT 计划；访问令牌不会发送到页面或写入任务记录。'
                         : '使用本机 Codex 登录实验回退；公开使用时建议连接 ChatGPT。'}</p>
-                      <WorkspaceScopeSummary scope={getTaskWorkspacePathScope(task.files)} compact />
+                      <WorkspaceScopeSummary scope={effectiveScope} compact />
                       <details><summary>实际发送给 Codex 的 Prompt</summary><pre>{preparedExecution.prompt}</pre></details>
                       <button type="button" className="is-primary" disabled={executionBusy || !codexExecutionAccess.available} onClick={() => void runPreparedExecution()}>确认并开始</button>
                       <button type="button" disabled={executionBusy} onClick={cancelPreparedExecution}>取消</button>
@@ -937,12 +1047,21 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
                   <fieldset disabled={!verificationEditable}>
                     <legend>逐项验收</legend>
                     {run.draft.verification.map((item, checkIndex) => (
-                      <label key={item.label}>
-                        <span>{item.label}</span>
-                        <select value={item.status} onChange={event => updateVerification(task.id, checkIndex, event.target.value as VerificationStatus)}>
-                          {Object.entries(verificationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                        </select>
-                      </label>
+                      <div className="task-verification-item" key={item.label}>
+                        <label>
+                          <span>{item.label}</span>
+                          <select value={item.status} onChange={event => updateVerification(task.id, checkIndex, { status: event.target.value as VerificationStatus })}>
+                            {Object.entries(verificationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                          </select>
+                        </label>
+                        <input
+                          aria-label={`${item.label}验收说明`}
+                          value={item.details ?? ''}
+                          maxLength={2_000}
+                          placeholder="验收说明（可选）"
+                          onChange={event => updateVerification(task.id, checkIndex, { details: event.target.value })}
+                        />
+                      </div>
                     ))}
                   </fieldset>
 
@@ -950,13 +1069,94 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
                   <textarea
                     id={`task-note-${task.id}`}
                     value={run.draft.reviewNote}
-                    disabled={!editable}
+                    disabled={!editable && !reviewEditable}
                     rows={2}
-                    onChange={event => applyAction({ type: 'update-draft', taskId: task.id, draft: { reviewNote: event.target.value } }, false)}
+                    onChange={event => reviewEditable
+                      ? applyAction({ type: 'set-review-note', taskId: task.id, note: event.target.value }, false)
+                      : applyAction({ type: 'update-draft', taskId: task.id, draft: { reviewNote: event.target.value } }, false)}
                   />
+
+                  {dependentTasks.length > 0 && run.result?.handoff && (
+                    <section className="task-handoff-editor">
+                      <header>
+                        <strong>交接给后续任务</strong>
+                        <span>将提供给：{dependentTasks.map(candidate => candidate.title).join('、')}</span>
+                      </header>
+                      <label htmlFor={`task-handoff-summary-${task.id}`}>交接摘要</label>
+                      <textarea
+                        id={`task-handoff-summary-${task.id}`}
+                        defaultValue={run.result.handoff.summary}
+                        disabled={!reviewEditable}
+                        rows={2}
+                        maxLength={2_000}
+                        onBlur={event => applyAction({
+                          type: 'set-review-handoff',
+                          taskId: task.id,
+                          handoff: { ...run.result!.handoff!, summary: event.target.value },
+                        }, false)}
+                      />
+                      <label htmlFor={`task-handoff-decisions-${task.id}`}>关键决策（每行一项）</label>
+                      <textarea
+                        id={`task-handoff-decisions-${task.id}`}
+                        defaultValue={run.result.handoff.keyDecisions.join('\n')}
+                        disabled={!reviewEditable}
+                        rows={3}
+                        onBlur={event => applyAction({
+                          type: 'set-review-handoff',
+                          taskId: task.id,
+                          handoff: {
+                            ...run.result!.handoff!,
+                            keyDecisions: event.target.value.split(/\r?\n/),
+                          },
+                        }, false)}
+                      />
+                      {run.result.handoff.artifacts.length > 0 && (
+                        <div className="task-handoff-artifact-descriptions">
+                          <strong>交接文件说明</strong>
+                          {run.result.handoff.artifacts.map((artifact, artifactIndex) => (
+                            <label key={artifact.path}>
+                              <code>{artifact.path}</code>
+                              <input
+                                defaultValue={artifact.description}
+                                disabled={!reviewEditable}
+                                maxLength={1_000}
+                                onBlur={event => applyAction({
+                                  type: 'set-review-handoff',
+                                  taskId: task.id,
+                                  handoff: {
+                                    ...run.result!.handoff!,
+                                    artifacts: run.result!.handoff!.artifacts.map((candidate, index) => (
+                                      index === artifactIndex ? { ...candidate, description: event.target.value } : candidate
+                                    )),
+                                  },
+                                }, false)}
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                      <label htmlFor={`task-handoff-questions-${task.id}`}>遗留问题（每行一项）</label>
+                      <textarea
+                        id={`task-handoff-questions-${task.id}`}
+                        defaultValue={run.result.handoff.openQuestions.join('\n')}
+                        disabled={!reviewEditable}
+                        rows={3}
+                        onBlur={event => applyAction({
+                          type: 'set-review-handoff',
+                          taskId: task.id,
+                          handoff: {
+                            ...run.result!.handoff!,
+                            openQuestions: event.target.value.split(/\r?\n/),
+                          },
+                        }, false)}
+                      />
+                      <small>不会包含完整 AI 返回正文；只交接已验收摘要、相对路径和人工补充内容。</small>
+                    </section>
+                  )}
                 </section>
               )}
 
+              {actionErrorTaskId === task.id && <p className="task-card-action-error" role="alert">{actionError}</p>}
               <div className="task-run-actions">
                 {['ready', 'waiting'].includes(run.status) && <button type="button" onClick={() => applyAction({ type: 'cancel', taskId: task.id })}>取消任务</button>}
                 {run.status === 'running' && run.automaticExecution?.state !== 'running' && <>
@@ -971,7 +1171,15 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
                   <button type="button" onClick={() => applyAction({ type: 'cancel', taskId: task.id })}>取消</button>
                 </>}
                 {run.status === 'review' && run.automaticExecution?.state !== 'review' && <>
-                  <button type="button" className="is-primary" onClick={() => applyAction({ type: 'accept', taskId: task.id })}>验收通过</button>
+                  {pendingAcceptanceCount > 0 && (
+                    <p className="task-acceptance-hint" role="status">还有 {pendingAcceptanceCount} 项验收未通过，请逐项确认。</p>
+                  )}
+                  <button
+                    type="button"
+                    className="is-primary"
+                    disabled={pendingAcceptanceCount > 0}
+                    onClick={() => applyAction({ type: 'accept', taskId: task.id })}
+                  >验收通过</button>
                   <button type="button" onClick={() => applyAction({ type: 'request-changes', taskId: task.id, message: run.draft.reviewNote })}>退回修改</button>
                   <button type="button" onClick={() => applyAction({ type: 'fail', taskId: task.id, message: run.draft.reviewNote })}>标记失败</button>
                 </>}

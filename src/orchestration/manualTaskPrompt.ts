@@ -42,12 +42,33 @@ export function buildManualTaskPrompt(
   plan: TaskPlan,
   providerId: ProviderId,
   dependencyResults: TaskExecutionResult[] = [],
+  additionalReadPaths: string[] = [],
 ): string {
   const providerName = providerNames[providerId] ?? providerId
   const dependencyNames = task.dependsOn.map((dependencyId) => (
     plan.tasks.find((candidate) => candidate.id === dependencyId)?.title ?? dependencyId
   ))
   const instructions = providerInstructions[providerId] ?? providerInstructions.deepseek
+  const readPaths = [...new Set([...(task.files.readPaths ?? []), ...additionalReadPaths])]
+  const dependencyContext = dependencyResults.flatMap((result) => {
+    const handoff = result.handoff
+    return [
+      `### ${result.taskId}`,
+      `- 已验收摘要：${handoff?.summary ?? result.summary}`,
+      ...(handoff?.keyDecisions.length
+        ? ['- 关键决策：', ...handoff.keyDecisions.map(item => `  - ${item}`)]
+        : ['- 关键决策：无额外记录。']),
+      '- 验证结果：',
+      ...result.verification.map(item => `  - ${item.label}：${item.status}${item.details ? `（${item.details}）` : ''}`),
+      ...(handoff?.artifacts.length
+        ? ['- 交接文件：', ...handoff.artifacts.map(artifact => `  - ${artifact.path}：${artifact.description}`)]
+        : ['- 交接文件：无。']),
+      ...(handoff?.openQuestions.length
+        ? ['- 遗留问题：', ...handoff.openQuestions.map(item => `  - ${item}`)]
+        : ['- 遗留问题：无。']),
+    ]
+  })
+  const requiredArtifacts = dependencyResults.flatMap(result => result.handoff?.artifacts ?? [])
 
   return [
     `执行角色：${providerName}`,
@@ -66,15 +87,21 @@ export function buildManualTaskPrompt(
       : ['- 无，可以立即开始。']),
     ...(dependencyResults.length > 0 ? [
       '',
-      '已验收的前置结果摘要：',
-      ...dependencyResults.map(result => `- ${result.taskId}：${result.summary}`),
+      '已验收的前置任务交接：',
+      ...dependencyContext,
+      '',
+      '需要同时提供或确保可读取的交接文件：',
+      ...(requiredArtifacts.length
+        ? requiredArtifacts.map(artifact => `- ${artifact.path}`)
+        : ['- 无。']),
+      '- 使用外部 AI 时，请由用户同时提供上述文件；使用本机 Codex 时，只能从已授权工作区读取。',
     ] : []),
     '',
     '输入文件：',
     ...formatInput(task.files.inputs),
     '',
     '允许读取的工作区位置：',
-    ...formatPaths(task.files.readPaths ?? [], '未授权读取工作区路径；如需读取，请先向用户确认。'),
+    ...formatPaths(readPaths, '未授权读取工作区路径；如需读取，请先向用户确认。'),
     '',
     '允许修改的工作区位置：',
     ...formatPaths(task.files.allowedWritePaths, '未授权直接修改工作区文件；如需修改，请先向用户确认具体路径。'),
