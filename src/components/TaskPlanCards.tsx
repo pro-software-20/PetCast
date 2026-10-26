@@ -12,6 +12,7 @@ import {
   type TaskSessionAction,
 } from '../orchestration/taskSession'
 import type {
+  AutomaticTaskExecutionState,
   ProviderId,
   ProviderProfile,
   TaskSessionV1,
@@ -79,6 +80,36 @@ const formatFile = (file: TaskSessionV1['plan']['tasks'][number]['files']['input
     : `${file.name}（${file.type}，${file.size.toLocaleString()} B）`
 )
 
+const taskFocusPriority: TaskStatus[] = ['needs-input', 'review', 'running', 'ready', 'waiting', 'failed', 'cancelled', 'done']
+
+const findFocusTaskId = (session: TaskSessionV1, excludedTaskId?: string) => {
+  for (const status of taskFocusPriority) {
+    const run = session.runs.find(candidate => candidate.taskId !== excludedTaskId && candidate.status === status)
+    if (run) return run.taskId
+  }
+  return session.runs[0]?.taskId ?? null
+}
+
+const nextStepText = (
+  status: TaskStatus,
+  dependencyNames: string[],
+  automaticState?: AutomaticTaskExecutionState,
+  automaticCandidate = false,
+) => {
+  if (automaticState === 'running') return '下一步：等待 Codex 完成，或取消自动执行。'
+  if (automaticState === 'review') return '下一步：查看 diff，并应用或丢弃文件改动。'
+  if (status === 'waiting') return `下一步：等待 ${dependencyNames.join('、') || '前置任务'} 完成。`
+  if (status === 'ready') return automaticCandidate
+    ? '下一步：复制 Prompt，或使用可用的 Codex 隔离执行。'
+    : '下一步：复制 Prompt 并开始任务。'
+  if (status === 'running') return '下一步：粘贴 AI 结果并提交待验收。'
+  if (status === 'needs-input') return '下一步：补充信息后继续任务。'
+  if (status === 'review') return '下一步：逐项检查并决定验收或退回。'
+  if (status === 'done') return '任务已完成，可展开查看只读结果。'
+  if (status === 'failed' || status === 'cancelled') return '下一步：检查原因并按需重试。'
+  return '查看任务详情。'
+}
+
 const downloadMarkdown = (markdown: string, fileName: string) => {
   const url = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }))
   const anchor = document.createElement('a')
@@ -116,6 +147,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
   const [executionProgress, setExecutionProgress] = useState<string | null>(null)
   const [executionBusy, setExecutionBusy] = useState(false)
   const [artifactViews, setArtifactViews] = useState<Record<string, TaskExecutionArtifactView>>({})
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(() => findFocusTaskId(session))
   const cancelRequested = useRef(new Set<string>())
   const preparingRequest = useRef<string | null>(null)
   const preparedExecutionRef = useRef(preparedExecution)
@@ -154,18 +186,32 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
     setPreparedExecution(null)
     setExecutionBusy(false)
     setExecutionProgress(null)
+    setExpandedTaskId(findFocusTaskId(session))
     executionSessionId.current = session.id
   }, [session.id])
 
   const applyAction = (action: TaskSessionAction, persistImmediately = true) => {
-    const outcome = updateTaskSession(sessionRef.current, action)
+    const previous = sessionRef.current
+    const outcome = updateTaskSession(previous, action)
     if (!outcome.ok) {
       setActionError(outcome.message)
+      if ('taskId' in action) setExpandedTaskId(action.taskId)
       return false
     }
     setActionError(null)
     sessionRef.current = outcome.session
     onSessionChange(outcome.session, persistImmediately)
+    if ('taskId' in action) {
+      if (action.type === 'accept') {
+        const newlyReady = outcome.session.runs.find(run => (
+          run.status === 'ready'
+          && previous.runs.find(candidate => candidate.taskId === run.taskId)?.status !== 'ready'
+        ))
+        setExpandedTaskId(newlyReady?.taskId ?? findFocusTaskId(outcome.session, action.taskId))
+      } else {
+        setExpandedTaskId(action.taskId)
+      }
+    }
     return true
   }
 
@@ -179,6 +225,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
       candidate.automaticExecution?.executionId === event.executionId
     ))
     if (!run || run.automaticExecution?.state !== 'review') return
+    setExpandedTaskId(run.taskId)
     setArtifactViews(current => {
       const next = { ...current }
       delete next[run.taskId]
@@ -204,6 +251,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
     const task = current.plan.tasks.find(candidate => candidate.id === taskId)
     if (!task || !current.plan.workspace || !codexExecutionAccess.available
       || !codexExecutionAccess.scopeId || !window.petcast?.prepareCodexTaskExecution) return
+    setExpandedTaskId(taskId)
     const requestId = `prepare-${globalThis.crypto.randomUUID()}`
     preparingRequest.current = requestId
     setPreparingExecution({ taskId, requestId })
@@ -559,16 +607,19 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
               {defaultScope ? '修改默认范围' : '设置默认范围'}
             </button>
           </header>
-          <WorkspaceScopeSummary scope={defaultScope ?? { readPaths: [], allowedWritePaths: [], forbiddenPaths: [], outputPaths: [] }} />
-          {defaultScope && tasksWithCustomScope > 0 && (
-            <div className="task-global-scope-apply">
-              <span>{tasksWithCustomScope} 个任务使用了单独授权。</span>
-              <button type="button" disabled={!planEditable} onClick={applyDefaultToAll}>
-                {confirmApplyDefault ? '再次点击确认覆盖' : '应用到所有任务'}
-              </button>
-              {confirmApplyDefault && <button type="button" onClick={() => setConfirmApplyDefault(false)}>取消</button>}
-            </div>
-          )}
+          <details className="task-global-scope-details">
+            <summary>查看完整授权范围{defaultScope ? '' : '（尚未设置）'}</summary>
+            <WorkspaceScopeSummary scope={defaultScope ?? { readPaths: [], allowedWritePaths: [], forbiddenPaths: [], outputPaths: [] }} />
+            {defaultScope && tasksWithCustomScope > 0 && (
+              <div className="task-global-scope-apply">
+                <span>{tasksWithCustomScope} 个任务使用了单独授权。</span>
+                <button type="button" disabled={!planEditable} onClick={applyDefaultToAll}>
+                  {confirmApplyDefault ? '再次点击确认覆盖' : '应用到所有任务'}
+                </button>
+                {confirmApplyDefault && <button type="button" onClick={() => setConfirmApplyDefault(false)}>取消</button>}
+              </div>
+            )}
+          </details>
         </section>
       )}
 
@@ -599,6 +650,8 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
           if (!run) return null
           const selectedProviderId = run.assignedProviderId
           const selectedKnown = selectableProviders.some(provider => provider.id === selectedProviderId)
+          const selectedProviderName = selectableProviders.find(provider => provider.id === selectedProviderId)?.displayName
+            ?? selectedProviderId
           const recommendedProviderName = selectableProviders.find(
             provider => provider.id === task.recommendedProviderId,
           )?.displayName ?? task.recommendedProviderId
@@ -632,16 +685,33 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
             && window.petcast?.prepareCodexTaskExecution,
           )
           const taskArtifact = artifactViews[task.id]
+          const expanded = expandedTaskId === task.id
+          const taskPanelId = `task-plan-card-body-${task.id}`
+          const taskNextStep = nextStepText(run.status, dependencyNames, run.automaticExecution?.state, automaticCandidate)
 
           return (
-            <li className={`task-plan-card is-${run.status}`} key={task.id}>
-              <header>
+            <li className={`task-plan-card is-${run.status}${expanded ? ' is-expanded' : ''}`} key={task.id}>
+              <button
+                type="button"
+                className="task-plan-card-toggle"
+                aria-expanded={expanded}
+                aria-controls={taskPanelId}
+                onClick={() => setExpandedTaskId(current => current === task.id ? null : task.id)}
+              >
                 <span>任务 {index + 1}</span>
-                <strong>{task.title}</strong>
+                <strong title={task.title}>{task.title}</strong>
                 <em className={`task-run-status is-${run.status}`}>{statusLabels[run.status]}</em>
-              </header>
+                <i aria-hidden="true">{expanded ? '−' : '+'}</i>
+              </button>
+              <div className="task-plan-card-glance">
+                <span>AI：{selectedProviderName}{manuallyOverridden ? '（人工改选）' : ''}</span>
+                <span>依赖：{dependencyNames.length ? dependencyNames.join('、') : '无，可并行'}</span>
+                <strong>{taskNextStep}</strong>
+              </div>
+
+              {expanded && <div id={taskPanelId} className="task-plan-card-body">
               <p className="task-plan-description">{task.description}</p>
-              {run.statusMessage && <p className="task-run-message">{run.statusMessage}</p>}
+              {run.statusMessage && <p className="task-run-message" role="status">{run.statusMessage}</p>}
 
               <div className="task-plan-assignment">
                 <label htmlFor={`task-provider-${task.id}`}>本次复制给</label>
@@ -676,69 +746,6 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
                 </div>
               </div>
 
-              <TaskDefinitionEditor
-                key={`${task.id}:${session.plan.workspace?.id ?? 'none'}`}
-                task={task}
-                taskType={session.analysisResult.taskType}
-                providers={providers}
-                workspace={workspace}
-                defaultScope={defaultScope}
-                disabled={!planEditable}
-                onSave={definition => applyAction({
-                  type: 'update-task-definition',
-                  taskId: task.id,
-                  task: definition,
-                })}
-              />
-
-              <fieldset className="task-dependency-editor" disabled={!dependenciesEditable}>
-                <legend>前置任务</legend>
-                {earlierTasks.length === 0
-                  ? <p>无前置任务，可立即开始。</p>
-                  : <>
-                    <div>
-                      {earlierTasks.map((candidate, candidateIndex) => (
-                        <label key={candidate.id}>
-                          <input
-                            type="checkbox"
-                            checked={task.dependsOn.includes(candidate.id)}
-                            onChange={(event) => {
-                              const nextDependencies = event.target.checked
-                                ? [...task.dependsOn, candidate.id]
-                                : task.dependsOn.filter(dependencyId => dependencyId !== candidate.id)
-                              const orderedDependencies = earlierTasks
-                                .filter(earlierTask => nextDependencies.includes(earlierTask.id))
-                                .map(earlierTask => earlierTask.id)
-                              applyAction({
-                                type: 'set-task-dependencies',
-                                taskId: task.id,
-                                dependsOn: orderedDependencies,
-                              })
-                            }}
-                          />
-                          <span>任务 {candidateIndex + 1}：{candidate.title}</span>
-                        </label>
-                      ))}
-                    </div>
-                    <small>{dependencyNames.length ? `等待：${dependencyNames.join('、')}` : '未选择前置任务，可与其他根任务并行。'}</small>
-                  </>}
-              </fieldset>
-
-              <dl className="task-plan-meta">
-                <div><dt>前置依赖</dt><dd>{dependencyNames.length ? dependencyNames.join('、') : '无，可立即开始'}</dd></div>
-                <div><dt>浏览器附件</dt><dd>{task.files.inputs.some(file => file.kind === 'attachment') ? task.files.inputs.filter(file => file.kind === 'attachment').map(formatFile).join('、') : '未提供'}</dd></div>
-              </dl>
-              <WorkspaceScopeSummary
-                scope={getTaskWorkspacePathScope(task.files)}
-                inherited={Boolean(defaultScope && workspacePathScopesEqual(getTaskWorkspacePathScope(task.files), defaultScope))}
-                compact
-              />
-
-              <details className="task-plan-prompt">
-                <summary>查看将要复制的完整 Prompt</summary>
-                <pre>{prompt}</pre>
-              </details>
-
               <div className="task-plan-copy-row">
                 <button
                   type="button"
@@ -754,6 +761,74 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
                   </span>
                 )}
               </div>
+
+              <details className="task-plan-settings">
+                <summary>任务设置与文件授权</summary>
+                <div>
+                  <TaskDefinitionEditor
+                    key={`${task.id}:${session.plan.workspace?.id ?? 'none'}`}
+                    task={task}
+                    taskType={session.analysisResult.taskType}
+                    providers={providers}
+                    workspace={workspace}
+                    defaultScope={defaultScope}
+                    disabled={!planEditable}
+                    onSave={definition => applyAction({
+                      type: 'update-task-definition',
+                      taskId: task.id,
+                      task: definition,
+                    })}
+                  />
+
+                  <fieldset className="task-dependency-editor" disabled={!dependenciesEditable}>
+                    <legend>前置任务</legend>
+                    {earlierTasks.length === 0
+                      ? <p>无前置任务，可立即开始。</p>
+                      : <>
+                        <div>
+                          {earlierTasks.map((candidate, candidateIndex) => (
+                            <label key={candidate.id}>
+                              <input
+                                type="checkbox"
+                                checked={task.dependsOn.includes(candidate.id)}
+                                onChange={(event) => {
+                                  const nextDependencies = event.target.checked
+                                    ? [...task.dependsOn, candidate.id]
+                                    : task.dependsOn.filter(dependencyId => dependencyId !== candidate.id)
+                                  const orderedDependencies = earlierTasks
+                                    .filter(earlierTask => nextDependencies.includes(earlierTask.id))
+                                    .map(earlierTask => earlierTask.id)
+                                  applyAction({
+                                    type: 'set-task-dependencies',
+                                    taskId: task.id,
+                                    dependsOn: orderedDependencies,
+                                  })
+                                }}
+                              />
+                              <span>任务 {candidateIndex + 1}：{candidate.title}</span>
+                            </label>
+                          ))}
+                        </div>
+                        <small>{dependencyNames.length ? `等待：${dependencyNames.join('、')}` : '未选择前置任务，可与其他根任务并行。'}</small>
+                      </>}
+                  </fieldset>
+
+                  <dl className="task-plan-meta">
+                    <div><dt>前置依赖</dt><dd>{dependencyNames.length ? dependencyNames.join('、') : '无，可立即开始'}</dd></div>
+                    <div><dt>浏览器附件</dt><dd>{task.files.inputs.some(file => file.kind === 'attachment') ? task.files.inputs.filter(file => file.kind === 'attachment').map(formatFile).join('、') : '未提供'}</dd></div>
+                  </dl>
+                  <WorkspaceScopeSummary
+                    scope={getTaskWorkspacePathScope(task.files)}
+                    inherited={Boolean(defaultScope && workspacePathScopesEqual(getTaskWorkspacePathScope(task.files), defaultScope))}
+                    compact
+                  />
+                </div>
+              </details>
+
+              <details className="task-plan-prompt">
+                <summary>查看将要复制的完整 Prompt</summary>
+                <pre>{prompt}</pre>
+              </details>
 
               {(automaticCandidate || run.automaticExecution) && (
                 <section className="task-codex-execution">
@@ -895,6 +970,7 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
                 </>}
                 {['failed', 'cancelled'].includes(run.status) && <button type="button" className="is-primary" onClick={() => applyAction({ type: 'retry', taskId: task.id })}>重试任务</button>}
               </div>
+              </div>}
             </li>
           )
         })}

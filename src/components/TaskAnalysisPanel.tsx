@@ -95,6 +95,7 @@ export function TaskAnalysisPanel({
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [clearArmed, setClearArmed] = useState(false)
+  const [analysisDetailsOpen, setAnalysisDetailsOpen] = useState(true)
   const analysisRequestId = useRef(0)
   const planningController = useRef<AbortController | null>(null)
   const restoreRequestId = useRef(0)
@@ -206,6 +207,7 @@ export function TaskAnalysisPanel({
     setCompletedSession(null)
     setPlanError(null)
     setError(null)
+    setAnalysisDetailsOpen(false)
   }
 
   useEffect(() => {
@@ -252,6 +254,7 @@ export function TaskAnalysisPanel({
     setIsAnalyzing(false)
     setCopyStatus('idle')
     setClearArmed(false)
+    setAnalysisDetailsOpen(true)
     void sessionStore.clear().then((outcome) => {
       if (!outcome.ok) setStorageNotice(outcome.message)
       else {
@@ -287,6 +290,7 @@ export function TaskAnalysisPanel({
     setIsAnalyzing(true)
     setCopyStatus('idle')
     setClearArmed(false)
+    setAnalysisDetailsOpen(true)
     void sessionStore.clear().then((outcome) => {
       if (!outcome.ok) setStorageNotice(outcome.message)
       else {
@@ -325,6 +329,7 @@ export function TaskAnalysisPanel({
           })
           if (sessionOutcome.ok) {
             setTaskSession(sessionOutcome.session)
+            setAnalysisDetailsOpen(false)
             void persistSession(sessionOutcome.session)
           } else {
             setPlanError(`${sessionOutcome.message}（${sessionOutcome.code}）`)
@@ -371,6 +376,7 @@ export function TaskAnalysisPanel({
     setIsAnalyzing(false)
     setCopyStatus('idle')
     setClearArmed(false)
+    setAnalysisDetailsOpen(true)
     void sessionStore.clear().then((outcome) => {
       setStorageNotice(outcome.ok ? null : outcome.message)
       if (outcome.ok) setStorageBlocked(false)
@@ -389,8 +395,13 @@ export function TaskAnalysisPanel({
 
   const sessionStarted = Boolean(taskSession?.runs.some(run => run.attempt > 0 || !['waiting', 'ready'].includes(run.status)))
   const sessionLocked = sessionStarted || Boolean(completedSession) || storageBlocked
+  const completedTaskCount = taskSession?.runs.filter(run => run.status === 'done').length ?? 0
   const codexEnvironmentPresentation = describeCodexEnvironment(codexEnvironment)
   const chatGptAuthPresentation = describeChatGptAuth(chatGptAuth)
+
+  useEffect(() => {
+    if (error || planError) setAnalysisDetailsOpen(true)
+  }, [error, planError])
 
   return (
     <section
@@ -467,6 +478,27 @@ export function TaskAnalysisPanel({
         </div>
       )}
 
+      {result && taskSession && (
+        <section className="task-analysis-overview" aria-label="任务分析摘要">
+          <div>
+            <strong>{taskSession.plan.title}</strong>
+            <span>{result.taskType} · {result.complexity} · {completedTaskCount}/{taskSession.runs.length} 已完成</span>
+          </div>
+          <span className={`task-analysis-optimization-source is-${result.promptOptimizationSource}`}>
+            {result.promptOptimizationSource === 'deepseek' ? 'DeepSeek AI 优化' : '本地规则优化'}
+          </span>
+          <button
+            type="button"
+            aria-expanded={analysisDetailsOpen}
+            aria-controls="task-analysis-details"
+            onClick={() => setAnalysisDetailsOpen(open => !open)}
+          >
+            {analysisDetailsOpen ? '收起输入与分析' : '查看输入与完整分析'}
+          </button>
+        </section>
+      )}
+
+      <div id="task-analysis-details" hidden={Boolean(result && taskSession) && !analysisDetailsOpen}>
       <div className="task-analysis-inputs">
         <label htmlFor="task-analysis-prompt">Prompt</label>
         <textarea
@@ -589,6 +621,7 @@ export function TaskAnalysisPanel({
       {result && planError && (
         <p className="task-plan-error" role="alert">分析已完成，但任务拆解失败：{planError}</p>
       )}
+      </div>
 
       {result && taskSession && (
         <TaskPlanCards

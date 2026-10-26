@@ -281,13 +281,22 @@ if (!process.versions.electron) {
     Object.getOwnPropertyDescriptor(prototype,'value').set.call(element,${JSON.stringify(value)});
     element.dispatchEvent(new Event(element instanceof HTMLSelectElement?'change':'input',{bubbles:true}));
   })()`)
-  const clickInCard = (index, label) => js(`(()=>{
+  const openCard = async index => {
+    const expanded = await js(`document.querySelectorAll('.task-plan-card')[${index}]?.classList.contains('is-expanded')`)
+    if (expanded) return
+    await js(`document.querySelectorAll('.task-plan-card')[${index}]?.querySelector('.task-plan-card-toggle')?.click()`)
+    await wait(`document.querySelectorAll('.task-plan-card')[${index}]?.classList.contains('is-expanded')`, `task ${index + 1} expanded`)
+  }
+  const clickInCard = async (index, label) => {
+    await openCard(index)
+    return js(`(()=>{
     const card=document.querySelectorAll('.task-plan-card')[${index}];
     if(!card) throw Error('missing task card '+${index});
     const button=[...card.querySelectorAll('button')].find(candidate=>candidate.textContent.trim()===${JSON.stringify(label)});
     if(!button) throw Error('missing task button: '+${JSON.stringify(label)});
     button.click();
   })()`)
+  }
   const openTaskAnalysis = async () => {
     await wait("!!document.querySelector('main')", 'application shell')
     if (await js("!!document.querySelector('.shell-home')")) {
@@ -312,6 +321,7 @@ if (!process.versions.electron) {
     input.dispatchEvent(new Event('change',{bubbles:true}));
   })()`)
   const completeManualCard = async index => {
+    await openCard(index)
     const status = await js(`document.querySelectorAll('.task-plan-card')[${index}].className`)
     if (status.includes('is-ready')) {
       await clickInCard(index, '复制并开始任务')
@@ -337,6 +347,10 @@ if (!process.versions.electron) {
     await wait(`document.querySelectorAll('.task-plan-card')[${index}].classList.contains('is-review')`, `task ${index + 1} review`)
     await clickInCard(index, '验收通过')
     await wait(`document.querySelectorAll('.task-plan-card')[${index}].classList.contains('is-done')`, `task ${index + 1} done`)
+    const hasActionable = await js(`[...document.querySelectorAll('.task-plan-card')].some(card=>!card.classList.contains('is-done')&&(card.classList.contains('is-ready')||card.classList.contains('is-running')||card.classList.contains('is-needs-input')||card.classList.contains('is-review')))`)
+    if (hasActionable) {
+      assert.equal(await js("!!document.querySelector('.task-plan-card.is-expanded:not(.is-done)')"), true)
+    }
   }
   const completeAllManualTasks = async () => {
     for (let guard = 0; guard < 20; guard += 1) {
@@ -396,10 +410,20 @@ if (!process.versions.electron) {
     await analyze(mixedPrompt)
     console.log('Task UI: mixed plan created')
     assert.equal(await js("document.querySelectorAll('.task-plan-card').length"), 4)
+    assert.equal(await js("!!document.querySelector('.task-analysis-overview')"), true)
+    assert.equal(await js("document.querySelector('#task-analysis-details').hidden"), true)
+    assert.equal(await js("document.querySelectorAll('.task-plan-card.is-expanded').length"), 1)
+    await openCard(1)
+    assert.equal(await js("document.querySelectorAll('.task-plan-card.is-expanded').length"), 1)
+    assert.equal(await js("document.querySelectorAll('.task-plan-card')[0].classList.contains('is-expanded')"), false)
+    await js("document.querySelectorAll('.task-plan-card')[1].querySelector('.task-plan-settings > summary').click()")
+    assert.equal(await js("document.querySelectorAll('.task-plan-card')[1].querySelector('.task-plan-settings').open"), true)
+    await js("document.querySelectorAll('.task-plan-card')[1].querySelector('.task-plan-prompt > summary').click()")
+    assert.equal(await js("document.querySelectorAll('.task-plan-card')[1].querySelector('.task-plan-prompt').open"), true)
     const planText = await js("document.querySelector('.task-plan-panel').textContent")
-    assert.match(planText, /推荐：DeepSeek/)
-    assert.match(planText, /推荐：Codex/)
-    assert.match(planText, /推荐：豆包/)
+    assert.match(planText, /AI：DeepSeek/)
+    assert.match(planText, /AI：Codex/)
+    assert.match(planText, /AI：豆包/)
     assert.ok(await js("document.querySelectorAll('.task-plan-card.is-ready').length >= 2"))
     assert.ok(await js("document.querySelectorAll('.task-plan-card.is-waiting').length >= 1"))
 
@@ -415,6 +439,7 @@ if (!process.versions.electron) {
     await openTaskAnalysis()
     await wait("document.querySelectorAll('.task-plan-card').length === 4", 'unfinished session restored')
     assert.ok(await js("document.querySelectorAll('.task-plan-card.is-running').length === 1"))
+    assert.ok(await js("document.querySelector('.task-plan-card.is-running').classList.contains('is-expanded')"))
     await completeAllManualTasks()
     console.log('Task UI: manual tasks completed')
     await passFinalAcceptance()
