@@ -15,7 +15,7 @@
 
 ## Windows 内部测试安装包
 
-当前提供 Windows 10/11 x64 的 0.1.1 预发布安装版：[下载安装包](https://github.com/pro-software-20/PetCast/releases/tag/v0.1.1)。本地输出为 `release/windows/PetCast-Setup-0.1.1-x64.exe`。供本人和组员测试，仅当前账号安装，未签名；下载者不需要开发环境。安装、外部功能条件、构建与异机检查见 [C 安装包说明](docs/C_WINDOWS_INSTALLER.md)。
+当前提供 Windows 10/11 x64 的 0.1.2 预发布安装版：[下载安装包](https://github.com/pro-software-20/PetCast/releases/tag/v0.1.2)。本地输出为 `release/windows/PetCast-Setup-0.1.2-x64.exe`。供本人和组员测试，仅当前账号安装，未签名；下载者不需要开发环境。安装、外部功能条件、构建与异机检查见 [C 安装包说明](docs/C_WINDOWS_INSTALLER.md)。
 
 ## 运行
 
