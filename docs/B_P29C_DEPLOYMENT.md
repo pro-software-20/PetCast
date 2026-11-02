@@ -91,4 +91,4 @@ Key 从被 Git 忽略的 `.env.local` 或当前进程环境读取。脚本会先
 
 当前仓库环境未安装 Docker，因此使用 `npm run test:server-package` 验证编译服务、健康检查、限流恢复、优雅停止和 Dockerfile 静态安全属性。发布前还需要在已安装 Docker 的机器或云端构建环境执行一次实际 `docker build`。
 
-2026-11-02 的首次真实联调按当时上限执行了两次请求，两次均安全返回 `UPSTREAM_UNAVAILABLE`，未进行自动重试。P2.9C.1 增加上游诊断后，`/models` 预检取得 `READY`，确认当前 Key、网络和 `deepseek-flash` 模型可用；随后唯一一次规划调用被上游以 HTTP 402 拒绝，安全分类为 `INSUFFICIENT_BALANCE`，没有自动重试。账号余额恢复后仍需重新执行一次成功路径验收；成功报告生成前，不应把模拟测试、预检通过或安全回退视为真实 DeepSeek 规划验收通过。
+2026-11-02 的首次真实联调按当时上限执行了两次请求，两次均安全返回 `UPSTREAM_UNAVAILABLE`，未进行自动重试。P2.9C.1 增加上游诊断后，`/models` 预检取得 `READY`，并将首次规划失败准确定位为 HTTP 402 `INSUFFICIENT_BALANCE`。账号余额恢复后重新运行验收，预检再次返回 `READY`，随后唯一一次规划调用在约 9.3 秒内成功生成 5 个子任务：Codex 2 个、DeepSeek 2 个、豆包 1 个；任务图严格校验和质量检查均通过。每次运行最多发送一次规划请求且不会自动重试，报告未保存 API Key、完整 Prompt、任务正文或上游响应正文。
