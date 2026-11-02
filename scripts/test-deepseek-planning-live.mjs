@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { diagnoseDeepSeekUpstream } from '../dist-server/server/deepSeekDiagnostics.js'
 import { planTasksWithDeepSeek } from '../dist-server/server/deepSeekTaskPlanner.js'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
@@ -11,10 +12,9 @@ if (process.env.PETCAST_RUN_LIVE_AI_TESTS !== '1') {
 }
 
 const apiKey = process.env.DEEPSEEK_API_KEY?.trim()
-if (!apiKey) {
-  console.log('Skipped live DeepSeek planning: DEEPSEEK_API_KEY is not configured.')
-  process.exit(0)
-}
+const model = process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-flash'
+const outputDirectory = path.join(root, 'work')
+const outputPath = path.join(outputDirectory, 'deepseek-planning-live-report.json')
 
 const providers = [
   { id: 'local', displayName: '本地规则', capabilities: ['planning', 'text-generation'], executionModes: ['manual'] },
@@ -23,8 +23,8 @@ const providers = [
   { id: 'doubao', displayName: '豆包', capabilities: ['text-generation', 'research', 'vision'], executionModes: ['manual', 'api'] },
 ]
 
-const analysis = (taskType, parallel) => ({
-  taskType,
+const analysis = {
+  taskType: 'mixed',
   complexity: 'high',
   estimatedInputTokens: { min: 100, max: 500 },
   estimatedOutputTokens: { min: 1200, max: 3500 },
@@ -32,78 +32,83 @@ const analysis = (taskType, parallel) => ({
   assumptions: ['结果仅基于 Prompt 与附件元信息。'],
   optimizedPrompt: '请保持原任务范围，输出明确交付物与验收方式。',
   promptOptimizationSource: 'local',
-  canRunInParallel: parallel,
-  parallelPlan: parallel ? ['独立分支并行，最后汇总。'] : ['按依赖顺序执行。'],
+  canRunInParallel: true,
+  parallelPlan: ['独立分支并行，最后汇总。'],
   warnings: [],
-})
-
-const cases = [
-  {
-    name: 'mixed-workflow',
-    prompt: '分析记账 App 需求，实现核心 React 页面和测试，撰写用户说明，最后汇总并检查一致性。',
-    analysis: analysis('mixed', true),
-  },
-  {
-    name: 'parallel-and-join',
-    prompt: '1. 独立调研技术方案。2. 独立设计测试策略。3. 基于任务 1 和任务 2 汇总实施计划。',
-    analysis: analysis('analysis', true),
-  },
-]
+}
 
 const report = {
   generatedAt: new Date().toISOString(),
-  model: process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-flash',
+  model,
+  diagnostic: await diagnoseDeepSeekUpstream({ apiKey, model, timeoutMs: 15_000 }),
   calls: [],
 }
 
-for (const item of cases) {
-  const started = Date.now()
-  const result = await planTasksWithDeepSeek({
-    prompt: item.prompt,
-    analysis: item.analysis,
-    files: [],
-    providers,
-  }, {
-    apiKey,
-    model: report.model,
-    timeoutMs: 30_000,
-  })
-  const entry = {
-    name: item.name,
-    durationMs: Date.now() - started,
-    ok: result.ok,
-  }
-  if (result.ok) {
-    const roots = result.plan.tasks.filter(task => task.dependsOn.length === 0)
-    const dependencies = result.plan.tasks.reduce((total, task) => total + task.dependsOn.length, 0)
-    const providerDistribution = Object.fromEntries(providers.map(provider => [
-      provider.id,
-      result.plan.tasks.filter(task => task.recommendedProviderId === provider.id).length,
-    ]).filter(([, count]) => count > 0))
-    Object.assign(entry, {
-      taskCount: result.plan.tasks.length,
-      rootTaskCount: roots.length,
-      dependencyCount: dependencies,
-      providerDistribution,
-      validationPassed: true,
-    })
-    assert(result.plan.tasks.length >= 1 && result.plan.tasks.length <= 12)
-    if (item.name === 'parallel-and-join') {
-      assert(roots.length >= 2, 'Parallel scenario should preserve multiple root tasks.')
-      assert(dependencies >= 2, 'Join scenario should depend on direct outputs.')
-    }
-  } else {
-    Object.assign(entry, { errorCode: result.code, validationPassed: false })
-  }
-  report.calls.push(entry)
+const writeReport = async () => {
+  await mkdir(outputDirectory, { recursive: true })
+  await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
 }
 
-const outputDirectory = path.join(root, 'work')
-await mkdir(outputDirectory, { recursive: true })
-await writeFile(
-  path.join(outputDirectory, 'deepseek-planning-live-report.json'),
-  `${JSON.stringify(report, null, 2)}\n`,
-  'utf8',
-)
-assert(report.calls.every(call => call.ok), 'At least one live DeepSeek planning call failed.')
-console.log('DeepSeek live planning acceptance completed with two bounded calls.')
+if (!report.diagnostic.ready) {
+  await writeReport()
+  throw new Error(`DeepSeek preflight failed safely: ${report.diagnostic.code}. No inference request was sent.`)
+}
+
+const request = {
+  prompt: '分析记账 App 需求，实现核心 React 页面和测试，撰写用户说明，最后汇总并检查一致性。',
+  analysis,
+  files: [],
+  providers,
+}
+const started = Date.now()
+let upstreamDiagnostic
+const result = await planTasksWithDeepSeek(request, {
+  apiKey,
+  model,
+  timeoutMs: 30_000,
+  onDiagnostic: event => { upstreamDiagnostic = event },
+})
+const entry = {
+  name: 'mixed-workflow',
+  durationMs: Date.now() - started,
+  ok: result.ok,
+}
+
+if (result.ok) {
+  const roots = result.plan.tasks.filter(task => task.dependsOn.length === 0)
+  const dependencies = result.plan.tasks.reduce((total, task) => total + task.dependsOn.length, 0)
+  const providerDistribution = Object.fromEntries(providers.map(provider => [
+    provider.id,
+    result.plan.tasks.filter(task => task.recommendedProviderId === provider.id).length,
+  ]).filter(([, count]) => count > 0))
+  const qualityPassed = result.plan.tasks.length >= 2
+    && result.plan.tasks.length <= 6
+    && roots.length >= 1
+    && result.plan.tasks.every(task => (
+      task.prompt.trim().length > 0
+      && task.expectedDeliverables.length > 0
+      && task.acceptanceChecks.length > 0
+    ))
+  Object.assign(entry, {
+    taskCount: result.plan.tasks.length,
+    rootTaskCount: roots.length,
+    dependencyCount: dependencies,
+    providerDistribution,
+    validationPassed: true,
+    qualityPassed,
+  })
+  assert.equal(qualityPassed, true, 'Live DeepSeek plan failed the bounded quality acceptance.')
+} else {
+  Object.assign(entry, {
+    errorCode: result.code,
+    upstreamDiagnostic,
+    validationPassed: false,
+    qualityPassed: false,
+  })
+}
+report.calls.push(entry)
+await writeReport()
+
+assert.equal(report.calls.length, 1, 'Live acceptance must perform at most one inference call.')
+assert.equal(result.ok, true, `DeepSeek live planning failed: ${result.code ?? 'unknown'}`)
+console.log('DeepSeek live planning acceptance completed with one bounded inference call.')

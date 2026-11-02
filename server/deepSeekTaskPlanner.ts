@@ -4,6 +4,11 @@ import {
   type TaskPlanningRequest,
   type TaskPlanningServiceResult,
 } from '../electron/taskPlanningProtocol.js'
+import {
+  classifyDeepSeekHttpStatus,
+  mapDeepSeekDiagnosticToServiceCode,
+  type DeepSeekDiagnosticEvent,
+} from './deepSeekDiagnostics.js'
 
 const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions'
 
@@ -42,11 +47,23 @@ export interface DeepSeekTaskPlannerOptions {
   model?: string
   timeoutMs?: number
   fetchImpl?: typeof fetch
+  onDiagnostic?: (event: DeepSeekDiagnosticEvent) => void
 }
 
 const retryAfter = (response: Response) => {
   const seconds = Number(response.headers.get('retry-after'))
   return Number.isSafeInteger(seconds) && seconds > 0 ? seconds : undefined
+}
+
+const emitDiagnostic = (
+  options: DeepSeekTaskPlannerOptions,
+  event: DeepSeekDiagnosticEvent,
+) => {
+  try {
+    options.onDiagnostic?.(event)
+  } catch {
+    // Diagnostics must never alter the public planning outcome.
+  }
 }
 
 export async function planTasksWithDeepSeek(
@@ -89,41 +106,68 @@ export async function planTasksWithDeepSeek(
       signal: controller.signal,
     })
     if (response.status === 429) {
+      emitDiagnostic(options, {
+        code: 'RATE_LIMITED',
+        stage: 'planning',
+        httpStatus: response.status,
+        retryAfterSeconds: retryAfter(response),
+      })
       return { ok: false, code: 'RATE_LIMITED', retryAfterSeconds: retryAfter(response) }
     }
-    if (!response.ok) return { ok: false, code: 'UPSTREAM_UNAVAILABLE' }
+    if (!response.ok) {
+      const diagnosticCode = classifyDeepSeekHttpStatus(response.status)
+      emitDiagnostic(options, {
+        code: diagnosticCode,
+        stage: 'planning',
+        httpStatus: response.status,
+      })
+      return { ok: false, code: mapDeepSeekDiagnosticToServiceCode(diagnosticCode) }
+    }
     const declaredLength = Number(response.headers.get('content-length') ?? 0)
     if (Number.isFinite(declaredLength) && declaredLength > TASK_PLANNING_MAX_RESPONSE_BYTES) {
+      emitDiagnostic(options, { code: 'INVALID_RESPONSE', stage: 'planning', httpStatus: response.status })
       return { ok: false, code: 'INVALID_RESPONSE' }
     }
     const text = await response.text()
     if (Buffer.byteLength(text) > TASK_PLANNING_MAX_RESPONSE_BYTES) {
+      emitDiagnostic(options, { code: 'INVALID_RESPONSE', stage: 'planning', httpStatus: response.status })
       return { ok: false, code: 'INVALID_RESPONSE' }
     }
     let payload: DeepSeekResponse
     try {
       payload = JSON.parse(text) as DeepSeekResponse
     } catch {
+      emitDiagnostic(options, { code: 'INVALID_RESPONSE', stage: 'planning', httpStatus: response.status })
       return { ok: false, code: 'INVALID_RESPONSE' }
     }
     const content = payload.choices?.[0]?.message?.content
-    if (typeof content !== 'string' || !content.trim()) return { ok: false, code: 'INVALID_RESPONSE' }
+    if (typeof content !== 'string' || !content.trim()) {
+      emitDiagnostic(options, { code: 'INVALID_RESPONSE', stage: 'planning', httpStatus: response.status })
+      return { ok: false, code: 'INVALID_RESPONSE' }
+    }
     let generated: unknown
     try {
       generated = JSON.parse(content)
     } catch {
+      emitDiagnostic(options, { code: 'INVALID_RESPONSE', stage: 'planning', httpStatus: response.status })
       return { ok: false, code: 'INVALID_RESPONSE' }
     }
     if (!generated || typeof generated !== 'object' || Array.isArray(generated)
       || Object.keys(generated).length !== 1 || !Object.prototype.hasOwnProperty.call(generated, 'plan')) {
+      emitDiagnostic(options, { code: 'INVALID_RESPONSE', stage: 'planning', httpStatus: response.status })
       return { ok: false, code: 'INVALID_RESPONSE' }
     }
     const plan = sanitizeRemoteTaskPlan((generated as { plan?: unknown }).plan, input)
-    return plan
-      ? { ok: true, plan, provider: 'deepseek' }
-      : { ok: false, code: 'INVALID_RESPONSE' }
+    if (!plan) {
+      emitDiagnostic(options, { code: 'INVALID_RESPONSE', stage: 'planning', httpStatus: response.status })
+      return { ok: false, code: 'INVALID_RESPONSE' }
+    }
+    emitDiagnostic(options, { code: 'READY', stage: 'planning', httpStatus: response.status })
+    return { ok: true, plan, provider: 'deepseek' }
   } catch {
-    return { ok: false, code: timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE' }
+    const diagnosticCode = timedOut ? 'UPSTREAM_TIMEOUT' : 'NETWORK_UNAVAILABLE'
+    emitDiagnostic(options, { code: diagnosticCode, stage: 'planning' })
+    return { ok: false, code: mapDeepSeekDiagnosticToServiceCode(diagnosticCode) }
   } finally {
     clearTimeout(timeout)
   }

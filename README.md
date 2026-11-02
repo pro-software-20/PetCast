@@ -59,6 +59,14 @@ pnpm dev
 
 P2.9C 提供通用 Docker 服务和公开安装包地址内置流程。服务部署、HTTPS、持久化限流、真实联调及 `dist:win:public` 使用方式见 [DeepSeek 规划服务部署说明](docs/B_P29C_DEPLOYMENT.md)。远程规划成功后，任务拆分和依赖保持 DeepSeek 结果，子任务执行 AI 则由本地能力规则重新核对；远程服务异常时继续安全回退本地规则。
 
+上游连接问题可先执行零推理诊断：
+
+```powershell
+pnpm diagnose:deepseek
+```
+
+该命令只调用 DeepSeek 的 `/models` 接口，检查 Key、余额、限流、服务状态和模型可用性，不发送任务 Prompt，也不产生规划推理。脱敏结果写入被 Git 忽略的 `work/deepseek-upstream-diagnostic.json`。只有诊断结果为 `READY` 后，才应显式启用 `pnpm test:task-planning:live`；真实验收每次最多发送一次规划请求且不会自动重试。
+
 ### ChatGPT 连接与 Codex 自动执行（试点）
 
 桌面版任务分析页可通过 **Continue with ChatGPT** 在系统浏览器中完成授权。PetCast 使用 PKCE 和回环回调，访问凭据仅在 Electron 主进程中使用，并通过操作系统安全存储加密；React 页面、任务存档和执行日志不会收到 Token。
