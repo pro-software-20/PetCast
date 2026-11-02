@@ -1134,6 +1134,28 @@ pnpm test:task-ui
 git diff --check
 ```
 
+## 22.10. B 模块 P2.9B：DeepSeek 任务拆解大脑
+
+- 团队 AI 服务新增 `POST /v1/task/plan`，与 Prompt 优化共用 DeepSeek Key、匿名安装标识和限流状态；桌面端优先读取 `PETCAST_AI_API_URL`，并兼容旧的 `PETCAST_PROMPT_API_URL`。
+- Renderer 只通过 `planTaskWithDeepSeek()` 和 `cancelDeepSeekTaskPlan()` 两个 preload 白名单方法发起规划；主进程限制为可信主窗口主 frame，并在取消、导航或窗口销毁时终止请求。
+- 远程请求只包含原始 Prompt、本地分析结果、附件元信息和 Provider 公开能力，不包含附件内容、工作区路径、账号、额度或密钥。
+- DeepSeek 仅生成 `manual` 任务图。服务端会重建允许字段并校验 Provider 白名单、附件元信息、空工作区权限、依赖 DAG 和任务数量；远程返回的 `planningBrain`、workspace 或其他权限字段不会被信任。
+- DeepSeek 成功时记录 `deepseek/deepseek`；未配置、限流、超时、服务异常或非法响应时只尝试一次本地回退，并保留请求大脑、实际大脑和安全错误码。
+- 恢复已有会话时继续使用静态方案，不重新调用远程大脑。Prompt 优化来源、任务拆解大脑和子任务执行 AI 仍是三个独立概念。
+
+本机联调可在 `.env.local` 中设置 `DEEPSEEK_API_KEY` 后运行 `pnpm dev:ai`。自动测试使用模拟上游响应，不产生真实模型调用费用。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
+
 ## 23. D 模块后续接入说明
 
 D v4 已提供 `recommendTaskPlan(pendingTask, taskRecords, modelCapacities, now)` 及对应页面。B 可直接传入待办条件与各模型当前资源，获取同一任务的模型 / 时间方案。详见 `docs/D_UNIFIED_PLAN.md`。执行前仍需重新确认资源，不能把 recheck 当成确定排期；D 不负责自动调用或队列资源预留。

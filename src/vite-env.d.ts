@@ -18,6 +18,10 @@ interface Window {
     optimizeTaskPrompt: (
       input: import('../electron/promptOptimizationProtocol').PromptOptimizationRequest,
     ) => Promise<import('../electron/promptOptimizationProtocol').PromptOptimizationResult>
+    planTaskWithDeepSeek: (
+      input: import('../electron/taskPlanningProtocol').TaskPlanningIpcRequest,
+    ) => Promise<import('../electron/taskPlanningProtocol').TaskPlanningServiceResult>
+    cancelDeepSeekTaskPlan: (requestId: string) => void
     selectTaskWorkspace: (
       requestId: string,
     ) => Promise<import('../electron/workspaceProtocol').WorkspaceSelectionResult>

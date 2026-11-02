@@ -13,6 +13,10 @@ contextBridge.exposeInMainWorld('petcast', {
   optimizeTaskPrompt: (input: import('./promptOptimizationProtocol.js').PromptOptimizationRequest) => (
     ipcRenderer.invoke('prompt:optimize', input)
   ),
+  planTaskWithDeepSeek: (input: import('./taskPlanningProtocol.js').TaskPlanningIpcRequest) => (
+    ipcRenderer.invoke('task-plan:create', input)
+  ),
+  cancelDeepSeekTaskPlan: (requestId: string) => ipcRenderer.send('task-plan:cancel', requestId),
   selectTaskWorkspace: (requestId: string) => ipcRenderer.invoke('workspace:select', requestId),
   cancelTaskWorkspace: (requestId: string) => ipcRenderer.send('workspace:cancel', requestId),
   prepareCodexTaskExecution: (input: import('./taskExecutionProtocol.js').PrepareCodexTaskExecutionRequest) => (

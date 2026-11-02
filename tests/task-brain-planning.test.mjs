@@ -55,7 +55,7 @@ test('local brain creates a sourced plan without calling DeepSeek', async () => 
   assert.equal(deepSeekCalls, 0)
 })
 
-test('unconfigured DeepSeek is attempted once and safely falls back to local', async () => {
+test('unavailable DeepSeek bridge is attempted once and safely falls back to local', async () => {
   let deepSeekCalls = 0
   const set = providers()
   const placeholder = set.deepseek
@@ -73,7 +73,7 @@ test('unconfigured DeepSeek is attempted once and safely falls back to local', a
   assert.deepEqual(outcome.plan.planningBrain, {
     requestedBrainId: 'deepseek',
     actualBrainId: 'local',
-    fallbackCode: 'NOT_CONFIGURED',
+    fallbackCode: 'UNAVAILABLE',
   })
 })
 

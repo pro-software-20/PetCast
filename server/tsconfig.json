@@ -10,5 +10,9 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["*.ts", "../electron/promptOptimizationProtocol.ts"]
+  "include": [
+    "*.ts",
+    "../electron/promptOptimizationProtocol.ts",
+    "../electron/taskPlanningProtocol.ts"
+  ]
 }

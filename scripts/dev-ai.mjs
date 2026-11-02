@@ -44,10 +44,11 @@ try {
       || path.resolve('work', 'prompt-rate-limits.local.json'),
     PETCAST_TRUST_PROXY: '0',
     PETCAST_PROMPT_API_URL: 'http://127.0.0.1:8787',
+    PETCAST_AI_API_URL: 'http://127.0.0.1:8787',
     VITE_DEV_SERVER_URL: 'http://127.0.0.1:5173',
   }
 
-  console.log('正在启动 PetCast 本地 AI 版本；API Key 仅传给本机 Prompt 服务。')
+  console.log('正在启动 PetCast 本地 AI 版本；API Key 仅传给本机 AI 服务。')
   await run(['run', 'dev:ai:processes'], { env: environment })
 } catch (error) {
   console.error(error instanceof Error ? error.message : '本地 AI 版本启动失败')

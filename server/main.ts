@@ -8,12 +8,19 @@ import {
   type PromptOptimizationResult,
 } from '../electron/promptOptimizationProtocol.js'
 import {
+  sanitizeTaskPlanningRequest,
+  TASK_PLANNING_MAX_BODY_BYTES,
+  type TaskPlanningRequest,
+  type TaskPlanningServiceResult,
+} from '../electron/taskPlanningProtocol.js'
+import {
   AnonymousRateLimiter,
   DEFAULT_ANONYMOUS_RATE_LIMITS,
   type AnonymousRateLimits,
   type RateLimitDecision,
 } from './anonymousRateLimiter.js'
 import { optimizePromptWithDeepSeek } from './deepSeekPromptOptimizer.js'
+import { planTasksWithDeepSeek } from './deepSeekTaskPlanner.js'
 
 const INSTALL_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -24,6 +31,7 @@ interface RateLimiterLike {
 export interface PromptOptimizationServerOptions {
   limiter: RateLimiterLike
   optimize(input: PromptOptimizationRequest): Promise<PromptOptimizationResult>
+  plan?(input: TaskPlanningRequest): Promise<TaskPlanningServiceResult>
   trustProxy?: boolean
 }
 
@@ -36,13 +44,13 @@ const sendJson = (response: ServerResponse, status: number, value: unknown) => {
   response.end(JSON.stringify(value))
 }
 
-const readBody = async (request: IncomingMessage) => {
+const readBody = async (request: IncomingMessage, maxBytes: number) => {
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += buffer.length
-    if (size > PROMPT_OPTIMIZATION_MAX_BODY_BYTES) throw new Error('BODY_TOO_LARGE')
+    if (size > maxBytes) throw new Error('BODY_TOO_LARGE')
     chunks.push(buffer)
   }
   return Buffer.concat(chunks).toString('utf8')
@@ -57,7 +65,7 @@ const clientIp = (request: IncomingMessage, trustProxy: boolean) => {
   return request.socket.remoteAddress ?? 'unknown'
 }
 
-const statusFor = (result: PromptOptimizationResult) => {
+const statusFor = (result: PromptOptimizationResult | TaskPlanningServiceResult) => {
   if (result.ok) return 200
   if (result.code === 'INVALID_REQUEST') return 400
   if (result.code === 'RATE_LIMITED') return 429
@@ -71,7 +79,9 @@ export function createPromptOptimizationServer(options: PromptOptimizationServer
       sendJson(response, 200, { ok: true })
       return
     }
-    if (request.method !== 'POST' || request.url !== '/v1/prompt/optimize') {
+    const isPromptRoute = request.method === 'POST' && request.url === '/v1/prompt/optimize'
+    const isPlanningRoute = request.method === 'POST' && request.url === '/v1/task/plan'
+    if (!isPromptRoute && !isPlanningRoute) {
       sendJson(response, 404, { ok: false, code: 'INVALID_REQUEST' })
       return
     }
@@ -85,12 +95,17 @@ export function createPromptOptimizationServer(options: PromptOptimizationServer
 
     let input: unknown
     try {
-      input = JSON.parse(await readBody(request))
+      input = JSON.parse(await readBody(
+        request,
+        isPlanningRoute ? TASK_PLANNING_MAX_BODY_BYTES : PROMPT_OPTIMIZATION_MAX_BODY_BYTES,
+      ))
     } catch {
       sendJson(response, 400, { ok: false, code: 'INVALID_REQUEST' })
       return
     }
-    const sanitized = sanitizePromptOptimizationRequest(input)
+    const sanitized = isPlanningRoute
+      ? sanitizeTaskPlanningRequest(input)
+      : sanitizePromptOptimizationRequest(input)
     if (!sanitized) {
       sendJson(response, 400, { ok: false, code: 'INVALID_REQUEST' })
       return
@@ -106,7 +121,11 @@ export function createPromptOptimizationServer(options: PromptOptimizationServer
         })
         return
       }
-      const result = await options.optimize(sanitized)
+      const result = isPlanningRoute
+        ? await (options.plan
+          ? options.plan(sanitized as TaskPlanningRequest)
+          : Promise.resolve({ ok: false, code: 'UPSTREAM_UNAVAILABLE' } as const))
+        : await options.optimize(sanitized as PromptOptimizationRequest)
       sendJson(response, statusFor(result), result)
     } catch {
       sendJson(response, 502, { ok: false, code: 'UPSTREAM_UNAVAILABLE' })
@@ -148,9 +167,13 @@ export function startPromptOptimizationServer() {
       apiKey,
       model: process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-flash',
     }),
+    plan: input => planTasksWithDeepSeek(input, {
+      apiKey,
+      model: process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-flash',
+    }),
   })
   server.listen(port, host, () => {
-    console.log(`PetCast prompt service listening on http://${host}:${port}`)
+    console.log(`PetCast AI service listening on http://${host}:${port}`)
   })
   return server
 }

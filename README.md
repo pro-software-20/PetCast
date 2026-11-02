@@ -38,9 +38,9 @@ pnpm build
 node .\node_modules\vite\bin\vite.js preview --host 127.0.0.1 --port 4173
 ```
 
-### DeepSeek Prompt 优化（可选）
+### DeepSeek Prompt 优化与任务拆解（可选）
 
-任务分析在未配置网络服务时仍会使用本地规则生成 Prompt。要启用 DeepSeek 优化，分别启动团队服务和桌面端：
+任务分析在未配置网络服务时仍会使用本地规则生成 Prompt 和任务方案。要启用 DeepSeek Prompt 优化及任务拆解，分别启动团队服务和桌面端：
 
 ```powershell
 # 终端一：仅在服务端设置密钥，不要写入源码或提交到 Git
@@ -49,11 +49,11 @@ $env:RATE_LIMIT_HASH_SECRET="至少 32 个字符的随机字符串"
 pnpm dev:prompt-api
 
 # 终端二：桌面端只需要非敏感的服务地址
-$env:PETCAST_PROMPT_API_URL="http://127.0.0.1:8787"
+$env:PETCAST_AI_API_URL="http://127.0.0.1:8787"
 pnpm dev
 ```
 
-本机验证可在被 Git 忽略的 `.env.local` 中设置 `DEEPSEEK_API_KEY`，再运行 `pnpm dev:ai`。服务只接收 Prompt 和文件名、MIME、大小，不读取或上传附件内容。API Key 不会进入 React 页面、构建产物或 EXE；调用失败、超时或限流时自动回退本地规则。公网部署必须使用 HTTPS、持久化限流目录和服务端消费上限。
+本机验证可在被 Git 忽略的 `.env.local` 中设置 `DEEPSEEK_API_KEY`，再运行 `pnpm dev:ai`。服务只接收 Prompt、本地分析结果、执行 Provider 的公开能力，以及文件名、MIME、大小；不读取或上传附件内容、工作区路径、账号或额度。API Key 不会进入 React 页面、构建产物或 EXE；调用失败、超时、限流或返回非法任务图时自动回退本地规则。`PETCAST_PROMPT_API_URL` 继续作为旧配置兼容项。公网部署必须使用 HTTPS、持久化限流目录和服务端消费上限。
 
 ### ChatGPT 连接与 Codex 自动执行（试点）
 
@@ -155,7 +155,7 @@ pnpm check:codex
 - 规则分析结合 Prompt 与文件名称、类型、大小等元信息，判断任务类型与复杂度，估算 Token 区间，并给出串行 / 并行建议。
 - Prompt 默认由本地规则优化；配置团队服务后可使用 DeepSeek 优化，失败、超时或限流时仍返回本地结果。
 - `LocalBrainProvider` 会生成经过严格 DAG 校验的 `TaskPlan`，按编程、研究、写作和测试能力推荐 Codex、DeepSeek、豆包或本地规则。
-- 任务拆解大脑与子任务执行 AI 已分离：默认使用离线本地规则；页面可选择 DeepSeek 规划入口，但 P2.9A 尚未连接远程规划，选择后会明确记录并安全回退本地规则，不会发起模型调用。
+- 任务拆解大脑与子任务执行 AI 已分离：默认使用离线本地规则；配置团队服务后可选择 DeepSeek 生成经过严格校验的任务图，失败时明确记录原因并安全回退本地规则。
 - 人工任务卡支持逐卡切换 AI、复制专属 Prompt、粘贴外部结果、逐项验收、依赖解锁和执行前人工调整依赖。
 - 最近一次任务会话独立保存；全部任务与最终验收通过后，可复制或下载不含完整 AI 正文的 Markdown 摘要报告。
 - 浏览器附件只使用名称、MIME 和大小，不读取文件正文；桌面工作区只在用户授权后向隔离副本复制受限 UTF-8 文本。
