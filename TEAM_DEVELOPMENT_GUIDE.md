@@ -1156,6 +1156,29 @@ pnpm test:task-ui
 git diff --check
 ```
 
+## 22.11. B 模块 P2.9C：DeepSeek 上线前收尾
+
+- DeepSeek 规划提示词改为优先生成 2–6 个高价值任务，保留明确编号任务和并行根节点，避免机械的“分析—执行—总结”串行模板。
+- 远程大脑负责拆分、依赖和任务内容；返回成功后，本地 `recommendTaskProvider()` 会重新计算执行 AI、中文理由、工作类型和可信度，不根据额度强制改选。
+- 增加内部质量检查，可识别过度拆分、空泛任务、无意义串行、缺少验收标准和不可用 Provider；不修改任务会话 schema。
+- 增加显式启用的真实 DeepSeek 联调脚本，单次最多两次调用，报告只写入被忽略的 `work/deepseek-planning-live-report.json`，不保存完整 Prompt、任务正文或 Key。
+- 增加多阶段 Dockerfile、`.dockerignore` 和部署说明。运行镜像只包含 `dist-server`，使用非 root 用户，将限流状态持久化到 `/data`，并支持健康检查和关闭信号。
+- 公开 Windows 安装包通过 `PETCAST_PUBLIC_AI_API_URL` 内置非敏感 HTTPS 服务地址；缺失或非法地址时 `dist:win:public` 失败。内部测试包和本机回环开发流程保持兼容。
+- 详细部署边界见 `docs/B_P29C_DEPLOYMENT.md`。当前电脑未安装 Docker，仓库内完成服务包启动与 Dockerfile 静态检查，实际镜像构建留到 Docker 或云端环境验收。
+- 2026-11-02 按上限完成两次真实规划尝试，均返回脱敏的 `UPSTREAM_UNAVAILABLE`，脚本未自动重试，报告未记录 Prompt、任务正文或 Key。后续需在可用网络下核对 Key、账号权限及上游状态，再补充一次成功路径验收。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+npm run test:server-package
+git diff --check
+```
+
 ## 23. D 模块后续接入说明
 
 D v4 已提供 `recommendTaskPlan(pendingTask, taskRecords, modelCapacities, now)` 及对应页面。B 可直接传入待办条件与各模型当前资源，获取同一任务的模型 / 时间方案。详见 `docs/D_UNIFIED_PLAN.md`。执行前仍需重新确认资源，不能把 recheck 当成确定排期；D 不负责自动调用或队列资源预留。

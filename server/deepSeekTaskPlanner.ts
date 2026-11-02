@@ -27,6 +27,16 @@ interface DeepSeekResponse {
   choices?: Array<{ message?: { content?: string | null } }>
 }
 
+export const TASK_PLANNING_QUALITY_INSTRUCTIONS = `${TASK_PLANNING_INSTRUCTIONS}
+
+规划质量要求：
+13. 普通目标优先生成 2–6 个高价值任务；只有用户目标确实复杂时才增加任务，禁止机械套用“分析—执行—总结”。
+14. 用户明确列出的编号任务应保留其独立意图；彼此不依赖的任务保持为根任务，不得为了排序而添加依赖。
+15. 汇总、整合或最终验收任务应依赖它实际使用的所有直接产出；不要让无关分支互相等待。
+16. 每个任务 Prompt 必须明确写出阶段目标、可用的前置输入、预期交付物和验收方式。
+17. recommendedProviderId 只需使用可用 Provider 中的合理值；客户端会依据公开能力重新计算最终执行 AI 推荐。
+18. 标题、描述、交付物和验收项必须具体，禁止使用“处理任务”“继续工作”“完成后续”等空泛表述。`
+
 export interface DeepSeekTaskPlannerOptions {
   apiKey: string
   model?: string
@@ -60,7 +70,7 @@ export async function planTasksWithDeepSeek(
       body: JSON.stringify({
         model: options.model ?? 'deepseek-flash',
         messages: [
-          { role: 'system', content: TASK_PLANNING_INSTRUCTIONS },
+          { role: 'system', content: TASK_PLANNING_QUALITY_INSTRUCTIONS },
           {
             role: 'user',
             content: JSON.stringify({

@@ -55,6 +55,10 @@ pnpm dev
 
 本机验证可在被 Git 忽略的 `.env.local` 中设置 `DEEPSEEK_API_KEY`，再运行 `pnpm dev:ai`。服务只接收 Prompt、本地分析结果、执行 Provider 的公开能力，以及文件名、MIME、大小；不读取或上传附件内容、工作区路径、账号或额度。API Key 不会进入 React 页面、构建产物或 EXE；调用失败、超时、限流或返回非法任务图时自动回退本地规则。`PETCAST_PROMPT_API_URL` 继续作为旧配置兼容项。公网部署必须使用 HTTPS、持久化限流目录和服务端消费上限。
 
+### DeepSeek 公网服务与公开安装包
+
+P2.9C 提供通用 Docker 服务和公开安装包地址内置流程。服务部署、HTTPS、持久化限流、真实联调及 `dist:win:public` 使用方式见 [DeepSeek 规划服务部署说明](docs/B_P29C_DEPLOYMENT.md)。远程规划成功后，任务拆分和依赖保持 DeepSeek 结果，子任务执行 AI 则由本地能力规则重新核对；远程服务异常时继续安全回退本地规则。
+
 ### ChatGPT 连接与 Codex 自动执行（试点）
 
 桌面版任务分析页可通过 **Continue with ChatGPT** 在系统浏览器中完成授权。PetCast 使用 PKCE 和回环回调，访问凭据仅在 Electron 主进程中使用，并通过操作系统安全存储加密；React 页面、任务存档和执行日志不会收到 Token。

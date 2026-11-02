@@ -5,6 +5,7 @@ import type {
 import type { BrainPlanningInput, BrainPlanningOutcome, BrainProvider } from './BrainProvider'
 import type { TaskPlan } from '../types/taskOrchestration'
 import { DEEPSEEK_TASK_BRAIN_PROFILE } from './taskBrainProfiles'
+import { inspectTaskPlanQuality, refreshTaskPlanRecommendations } from './taskPlanQuality'
 
 export interface DeepSeekTaskPlanningBridge {
   planTaskWithDeepSeek(input: TaskPlanningIpcRequest): Promise<TaskPlanningServiceResult>
@@ -71,7 +72,16 @@ export class DeepSeekBrainProvider implements BrainProvider {
         },
       })
       if (signal?.aborted) return { ok: false, code: 'CANCELLED', message: '任务拆解已取消。' }
-      return result.ok ? { ok: true, plan: result.plan as TaskPlan } : errorOutcome(result)
+      if (!result.ok) return errorOutcome(result)
+      const plan = refreshTaskPlanRecommendations(result.plan as TaskPlan, input)
+      if (inspectTaskPlanQuality(plan, input).length > 0) {
+        return {
+          ok: false,
+          code: 'INVALID_RESPONSE',
+          message: 'DeepSeek 返回的任务方案未通过规划质量检查。',
+        }
+      }
+      return { ok: true, plan }
     } catch {
       return signal?.aborted
         ? { ok: false, code: 'CANCELLED', message: '任务拆解已取消。' }

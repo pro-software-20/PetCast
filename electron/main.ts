@@ -13,6 +13,7 @@ import { createCodexScopeIdentity } from './codexScopeIdentity.js'
 import { registerTaskExecutionIpc } from './taskExecutionIpc.js'
 import { ChatGptAuthService } from './chatGptAuth.js'
 import { registerChatGptAuthIpc } from './chatGptAuthIpc.js'
+import { resolveAiServiceUrl } from './aiServiceConfig.js'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
 app.setAppUserModelId('io.github.pro-software-20.petcast')
@@ -147,7 +148,7 @@ const ownsInstance = app.requestSingleInstanceLock()
 if (!ownsInstance) app.quit()
 app.on('second-instance', () => { mainWindow?.show(); mainWindow?.focus() })
 
-if (ownsInstance) app.whenReady().then(() => {
+if (ownsInstance) app.whenReady().then(async () => {
   const rendererUrl = process.env.VITE_DEV_SERVER_URL
     ?? pathToFileURL(path.join(currentDir, '../dist/index.html')).href
   const workspaceRegistry = new WorkspaceRegistry()
@@ -178,7 +179,12 @@ if (ownsInstance) app.whenReady().then(() => {
     experimentalLocalAuth: process.env.PETCAST_EXPERIMENTAL_LOCAL_CODEX_AUTH === '1',
   })
   registerUsageHistoryIpc(() => mainWindow, app.getPath('userData'), rendererUrl)
-  const aiApiUrl = process.env.PETCAST_AI_API_URL ?? process.env.PETCAST_PROMPT_API_URL ?? ''
+  const aiApiUrl = await resolveAiServiceUrl({
+    configPath: path.join(currentDir, 'ai-service-config.json'),
+    runtimeUrl: process.env.PETCAST_AI_API_URL,
+    legacyRuntimeUrl: process.env.PETCAST_PROMPT_API_URL,
+    allowRuntimeOverride: !app.isPackaged,
+  })
   registerPromptOptimizationIpc(
     () => mainWindow,
     app.getPath('userData'),
