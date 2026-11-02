@@ -21,7 +21,10 @@
     "test:task-ui": "npm run build && node scripts/test-task-analysis-ui.mjs",
     "test:ui": "npm run build && node scripts/test-usage-ui.mjs",
     "test:history-ui": "npm run build && node scripts/test-history-ui.mjs",
-    "dist:win": "pnpm run build && node scripts/package-windows.mjs"
+    "dist:win": "pnpm run build && node scripts/package-windows.mjs",
+    "dist:win:public": "cross-env PETCAST_REQUIRE_PUBLIC_AI_API_URL=1 npm run dist:win",
+    "test:server-package": "npm run build:server && node scripts/test-server-package.mjs",
+    "test:task-planning:live": "npm run build:server && node --env-file-if-exists=.env.local scripts/test-deepseek-planning-live.mjs"
   },
   "dependencies": {
     "jose": "5.9.6",

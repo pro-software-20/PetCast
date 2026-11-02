@@ -76,7 +76,7 @@ const statusFor = (result: PromptOptimizationResult | TaskPlanningServiceResult)
 export function createPromptOptimizationServer(options: PromptOptimizationServerOptions) {
   return createServer(async (request, response) => {
     if (request.method === 'GET' && request.url === '/health') {
-      sendJson(response, 200, { ok: true })
+      sendJson(response, 200, { ok: true, service: 'petcast-ai', version: 1 })
       return
     }
     const isPromptRoute = request.method === 'POST' && request.url === '/v1/prompt/optimize'
@@ -181,7 +181,23 @@ export function startPromptOptimizationServer() {
 const entry = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : ''
 if (entry === import.meta.url) {
   try {
-    startPromptOptimizationServer()
+    const server = startPromptOptimizationServer()
+    let closing = false
+    const shutdown = (signal: NodeJS.Signals) => {
+      if (closing) return
+      closing = true
+      const forceExit = setTimeout(() => process.exit(1), 10_000)
+      forceExit.unref()
+      server.close(error => {
+        clearTimeout(forceExit)
+        if (error) {
+          console.error(`PetCast AI service failed to close after ${signal}`)
+          process.exitCode = 1
+        }
+      })
+    }
+    process.once('SIGTERM', () => shutdown('SIGTERM'))
+    process.once('SIGINT', () => shutdown('SIGINT'))
   } catch (error) {
     console.error(error instanceof Error ? error.message : 'Prompt service failed to start')
     process.exitCode = 1

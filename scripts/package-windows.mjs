@@ -4,6 +4,7 @@ import { cp, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promi
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
+import { createPublicAiServiceConfig } from './public-ai-config.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const require = createRequire(import.meta.url)
@@ -30,6 +31,17 @@ await cp(path.join(root, 'dist'), path.join(staging, 'dist'), {
 await cp(path.join(root, 'dist-electron'), path.join(staging, 'dist-electron'), {
   recursive: true, filter: source => !/\.(?:map|tsbuildinfo)$/i.test(source),
 })
+const publicAiUrl = process.env.PETCAST_PUBLIC_AI_API_URL?.trim()
+const requirePublicAiUrl = process.env.PETCAST_REQUIRE_PUBLIC_AI_API_URL === '1'
+if (publicAiUrl) {
+  const publicConfig = createPublicAiServiceConfig(publicAiUrl)
+  await writeFile(
+    path.join(staging, 'dist-electron', 'ai-service-config.json'),
+    `${JSON.stringify(publicConfig, null, 2)}\n`,
+  )
+} else if (requirePublicAiUrl) {
+  throw new Error('Public installer requires PETCAST_PUBLIC_AI_API_URL with an HTTPS origin.')
+}
 await cp(path.join(root, 'LICENSE'), path.join(staging, 'LICENSE'))
 
 const included = new Map()
