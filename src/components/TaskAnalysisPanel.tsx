@@ -595,12 +595,12 @@ export function TaskAnalysisPanel({
             }}
           >
             <option value="local">本地规则（默认）</option>
-            <option value="deepseek">DeepSeek（尚未接入）</option>
+            <option value="deepseek">DeepSeek</option>
           </select>
           {brainProvider ? (
             <p role="status">当前任务拆解大脑由调用方指定为 {brainProvider.profile.displayName}。</p>
           ) : selectedBrainId === 'deepseek' ? (
-            <p role="status">该拆解选项暂不额外发送 Prompt、文件元信息或调用模型；分析时会自动回退本地规则。Prompt 优化仍使用其独立设置。</p>
+            <p role="status">分析时会把 Prompt、本地分析结果和附件元信息发送到团队服务；不会上传附件内容、工作区路径、账号或额度。服务不可用时自动回退本地规则。</p>
           ) : (
             <p>本地规则不会联网，也不会产生模型调用费用。</p>
           )}
@@ -620,7 +620,7 @@ export function TaskAnalysisPanel({
             {clearArmed ? '再次点击确认清空' : sessionStarted ? '新建任务' : '清空输入'}
           </button>
         </div>
-        <p className="task-analysis-privacy">启用 AI 优化时发送任务描述和文件元信息，不读取或上传文件内容。</p>
+        <p className="task-analysis-privacy">启用 AI 优化或 DeepSeek 大脑时只发送任务描述、分析结果和文件元信息，不读取或上传文件内容。</p>
       </div>
 
       {error && (

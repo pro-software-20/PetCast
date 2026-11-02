@@ -36,6 +36,9 @@ test('preload runs in a sandbox-style CommonJS environment and exposes only name
   await bridge.openChatGptUsage()
   const promptInput = { prompt: 'test', taskType: 'general', files: [] }
   await bridge.optimizeTaskPrompt(promptInput)
+  const planningInput = { requestId: 'plan-1', input: { prompt: 'test' } }
+  await bridge.planTaskWithDeepSeek(planningInput)
+  bridge.cancelDeepSeekTaskPlan('plan-1')
   await bridge.selectTaskWorkspace('workspace-1')
   bridge.cancelTaskWorkspace('workspace-1')
   const executionInput = { requestId: 'prepare-1' }
@@ -56,6 +59,8 @@ test('preload runs in a sandbox-style CommonJS environment and exposes only name
     ['chatgpt-auth:sign-out'],
     ['chatgpt-auth:open-usage'],
     ['prompt:optimize', promptInput],
+    ['task-plan:create', planningInput],
+    ['task-plan:cancel', 'plan-1'],
     ['workspace:select', 'workspace-1'],
     ['workspace:cancel', 'workspace-1'],
     ['task-execution:prepare', executionInput],

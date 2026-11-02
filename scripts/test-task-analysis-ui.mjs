@@ -134,6 +134,8 @@ if (!process.versions.electron) {
       })
   ipcMain.on('codex:cancel-environment', () => undefined)
   ipcMain.handle('prompt:optimize', () => ({ ok: false, code: 'UPSTREAM_UNAVAILABLE' }))
+  ipcMain.handle('task-plan:create', () => ({ ok: false, code: 'UPSTREAM_UNAVAILABLE' }))
+  ipcMain.on('task-plan:cancel', () => undefined)
   ipcMain.handle('workspace:select', () => ({ ok: true, workspace }))
   ipcMain.on('workspace:cancel', () => undefined)
 
@@ -450,7 +452,7 @@ if (!process.versions.electron) {
     await setValue('#task-planning-brain', 'deepseek')
     assert.match(
       await js("document.querySelector('.task-brain-selector').textContent"),
-      /不额外发送 Prompt、文件元信息或调用模型/,
+      /Prompt、本地分析结果和附件元信息发送到团队服务/,
     )
     assert.equal(await js("document.querySelectorAll('.codex-setup-status .chatgpt-auth-status').length"), 1)
     assert.equal(await js("document.querySelectorAll('.codex-setup-status .codex-environment-status').length"), 1)
@@ -466,7 +468,7 @@ if (!process.versions.electron) {
     )
     assert.match(
       await js("document.querySelector('.task-analysis-overview').textContent"),
-      /DeepSeek 任务规划尚未接入/,
+      /DeepSeek 任务规划当前不可用/,
     )
     assert.match(
       await js("document.querySelector('.task-analysis-overview').textContent"),

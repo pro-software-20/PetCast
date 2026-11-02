@@ -6,6 +6,7 @@ import { registerCodexUsageIpc } from './codexIpc.js'
 import { registerCodexEnvironmentIpc } from './codexEnvironmentIpc.js'
 import { registerUsageHistoryIpc } from './historyIpc.js'
 import { registerPromptOptimizationIpc } from './promptOptimizationIpc.js'
+import { registerTaskPlanningIpc } from './taskPlanningIpc.js'
 import { registerWorkspaceIpc } from './workspaceIpc.js'
 import { WorkspaceRegistry } from './workspaceRegistry.js'
 import { createCodexScopeIdentity } from './codexScopeIdentity.js'
@@ -98,6 +99,8 @@ const createWindow = () => {
           && typeof window.petcast?.signInWithChatGpt === 'function'
           && typeof window.petcast?.signOutChatGpt === 'function'
           && typeof window.petcast?.optimizeTaskPrompt === 'function'
+          && typeof window.petcast?.planTaskWithDeepSeek === 'function'
+          && typeof window.petcast?.cancelDeepSeekTaskPlan === 'function'
           && typeof window.petcast?.selectTaskWorkspace === 'function'
           && typeof window.petcast?.prepareCodexTaskExecution === 'function'
           && typeof window.petcast?.runCodexTaskExecution === 'function'
@@ -175,11 +178,18 @@ if (ownsInstance) app.whenReady().then(() => {
     experimentalLocalAuth: process.env.PETCAST_EXPERIMENTAL_LOCAL_CODEX_AUTH === '1',
   })
   registerUsageHistoryIpc(() => mainWindow, app.getPath('userData'), rendererUrl)
+  const aiApiUrl = process.env.PETCAST_AI_API_URL ?? process.env.PETCAST_PROMPT_API_URL ?? ''
   registerPromptOptimizationIpc(
     () => mainWindow,
     app.getPath('userData'),
     rendererUrl,
-    process.env.PETCAST_PROMPT_API_URL ?? '',
+    aiApiUrl,
+  )
+  registerTaskPlanningIpc(
+    () => mainWindow,
+    app.getPath('userData'),
+    rendererUrl,
+    aiApiUrl,
   )
   registerWorkspaceIpc(() => mainWindow, app.getPath('userData'), rendererUrl, workspaceRegistry)
   const taskExecutionManager = registerTaskExecutionIpc({
