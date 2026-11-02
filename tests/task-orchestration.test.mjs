@@ -181,6 +181,32 @@ test('validation does not mutate its input', () => {
   assert.deepEqual(value, before)
 })
 
+test('validates optional planning brain source while keeping legacy plans valid', () => {
+  assert.equal(validateTaskPlan(plan()).ok, true)
+  assert.equal(validateTaskPlan(plan({
+    planningBrain: { requestedBrainId: 'local', actualBrainId: 'local' },
+  })).ok, true)
+  assert.equal(validateTaskPlan(plan({
+    planningBrain: {
+      requestedBrainId: 'deepseek',
+      actualBrainId: 'local',
+      fallbackCode: 'NOT_CONFIGURED',
+    },
+  })).ok, true)
+
+  const invalidSources = [
+    { requestedBrainId: 'unknown', actualBrainId: 'local' },
+    { requestedBrainId: 'deepseek', actualBrainId: 'local' },
+    { requestedBrainId: 'local', actualBrainId: 'local', fallbackCode: 'TIMEOUT' },
+    { requestedBrainId: 'local', actualBrainId: 'deepseek', fallbackCode: 'UNAVAILABLE' },
+    { requestedBrainId: 'deepseek', actualBrainId: 'local', fallbackCode: 'SECRET_PROVIDER_ERROR' },
+    { requestedBrainId: 'deepseek', actualBrainId: 'local', fallbackCode: 'CANCELLED' },
+  ]
+  for (const planningBrain of invalidSources) {
+    assert.ok(issueCodes(plan({ planningBrain })).includes('INVALID_SHAPE'))
+  }
+})
+
 test('malformed unknown JSON returns issues instead of throwing', () => {
   const values = [
     null,

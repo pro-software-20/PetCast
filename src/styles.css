@@ -338,6 +338,7 @@ button { font: inherit; }
 .task-analysis-overview > div { display: grid; min-width: 0; gap: 2px; }
 .task-analysis-overview strong { overflow: hidden; color: #386d76; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .task-analysis-overview > div span { color: #6e9092; font-size: 8px; }
+.task-analysis-overview .task-brain-fallback { margin: 2px 0 0; color: #9a7044; font-size: 8px; line-height: 1.4; }
 .task-analysis-overview button { min-height: 28px; padding: 5px 8px; border: 1px solid rgba(82,145,151,.35); border-radius: 7px; color: #44747b; background: #fff; cursor: pointer; font: inherit; font-size: 8px; font-weight: 800; }
 .task-analysis-overview button:hover, .task-analysis-overview button:focus-visible { color: #fff; border-color: #4f9895; background: #5ca7a2; outline: none; }
 .task-analysis-inputs { display: grid; gap: 7px; margin-top: 13px; }
@@ -355,6 +356,11 @@ button { font: inherit; }
 .task-analysis-file-list small { margin-top: 2px; color: #7b9b9d; font-size: 8px; }
 .task-analysis-file-list button, .task-analysis-actions button, .task-analysis-copy { border: 0; border-radius: 8px; color: #fff; background: #5da9a3; cursor: pointer; font-size: 8px; font-weight: 800; }
 .task-analysis-file-list button { flex: 0 0 auto; padding: 5px 7px; }
+.task-brain-selector { display: grid; grid-template-columns: minmax(110px, .55fr) minmax(0, 1fr); align-items: center; gap: 5px 8px; padding: 8px 9px; border: 1px solid rgba(82,145,151,.25); border-radius: 9px; background: rgba(226,245,239,.58); }
+.task-brain-selector label { color: #3f737b; }
+.task-brain-selector select { min-width: 0; min-height: 30px; padding: 5px 8px; border: 1px solid rgba(82,145,151,.35); border-radius: 7px; color: #3d6c73; background: #fff; font: inherit; font-size: 9px; font-weight: 800; }
+.task-brain-selector select:disabled { opacity: .62; cursor: default; }
+.task-brain-selector p { grid-column: 1 / -1; margin: 0; color: #6c8d8f; font-size: 8px; line-height: 1.45; }
 .task-analysis-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 2px; }
 .task-analysis-actions button { min-height: 32px; box-shadow: 0 4px 0 #3e827f; }
 .task-analysis-actions .task-analysis-clear { color: #7f655a; background: #f7ddb8; box-shadow: 0 4px 0 #c89d72; }

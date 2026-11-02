@@ -1,5 +1,35 @@
 import type { TaskAnalysisFile, TaskAnalysisInput, TaskAnalysisResult } from './taskAnalysis'
 
+export const TASK_BRAIN_IDS = ['local', 'deepseek'] as const
+export type TaskBrainId = (typeof TASK_BRAIN_IDS)[number]
+
+export const TASK_BRAIN_MODES = ['local', 'remote'] as const
+export type TaskBrainMode = (typeof TASK_BRAIN_MODES)[number]
+
+export const BRAIN_PLANNING_ERROR_CODES = [
+  'INVALID_INPUT',
+  'NOT_CONFIGURED',
+  'RATE_LIMITED',
+  'UNAVAILABLE',
+  'TIMEOUT',
+  'INVALID_RESPONSE',
+  'CANCELLED',
+  'FAILED',
+] as const
+export type BrainPlanningErrorCode = (typeof BRAIN_PLANNING_ERROR_CODES)[number]
+
+export interface TaskBrainProfile {
+  id: TaskBrainId
+  displayName: string
+  mode: TaskBrainMode
+}
+
+export interface TaskPlanningBrainSource {
+  requestedBrainId: TaskBrainId
+  actualBrainId: TaskBrainId
+  fallbackCode?: BrainPlanningErrorCode
+}
+
 export const BUILT_IN_PROVIDER_IDS = ['local', 'codex', 'deepseek', 'doubao'] as const
 export type BuiltInProviderId = (typeof BUILT_IN_PROVIDER_IDS)[number]
 export type CustomProviderId = `custom:${string}`
@@ -111,6 +141,8 @@ export interface TaskPlan {
   title: string
   goal: string
   assumptions: string[]
+  /** Optional so plans saved before P2.9A remain restorable. */
+  planningBrain?: TaskPlanningBrainSource
   workspace?: TaskWorkspaceContext
   tasks: TaskNode[]
   finalAcceptanceChecks: string[]

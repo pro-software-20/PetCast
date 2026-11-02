@@ -1,6 +1,6 @@
 import type { BrainPlanningInput, BrainPlanningOutcome, BrainProvider } from './BrainProvider'
 import { validateTaskPlan } from './taskPlanValidation'
-import { LOCAL_PROVIDER_PROFILE } from './providerProfiles'
+import { LOCAL_TASK_BRAIN_PROFILE } from './taskBrainProfiles'
 import { recommendTaskProvider } from './taskRecommendation'
 import type {
   ProviderProfile,
@@ -258,7 +258,7 @@ const isPlanningInput = (input: BrainPlanningInput) => Boolean(
 )
 
 export class LocalBrainProvider implements BrainProvider {
-  readonly profile = LOCAL_PROVIDER_PROFILE
+  readonly profile = LOCAL_TASK_BRAIN_PROFILE
 
   async createPlan(input: BrainPlanningInput, signal?: AbortSignal): Promise<BrainPlanningOutcome> {
     if (signal?.aborted) return { ok: false, code: 'CANCELLED', message: '任务拆解已取消。' }
@@ -288,6 +288,10 @@ export class LocalBrainProvider implements BrainProvider {
         id: `local-plan-${hashText(`${goal}\0${input.analysisResult.taskType}`)}`,
         title: `任务方案：${shortTitle(goal, '附件任务')}`,
         goal,
+        planningBrain: {
+          requestedBrainId: 'local',
+          actualBrainId: 'local',
+        },
         assumptions: [...new Set([
           ...input.analysisResult.assumptions,
           '当前方案由本地规则生成，任务将由用户人工复制给所选 AI。',

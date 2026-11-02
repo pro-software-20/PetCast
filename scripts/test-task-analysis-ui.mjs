@@ -446,6 +446,12 @@ if (!process.versions.electron) {
     assert.equal(await js("document.querySelector('.task-analysis-attachments').open"), true)
     assert.ok(await js("document.querySelector('#task-analysis-files').getBoundingClientRect().height>0"))
     await js("document.querySelector('.task-analysis-attachments > summary').click()")
+    assert.equal(await js("document.querySelector('#task-planning-brain').value"), 'local')
+    await setValue('#task-planning-brain', 'deepseek')
+    assert.match(
+      await js("document.querySelector('.task-brain-selector').textContent"),
+      /不额外发送 Prompt、文件元信息或调用模型/,
+    )
     assert.equal(await js("document.querySelectorAll('.codex-setup-status .chatgpt-auth-status').length"), 1)
     assert.equal(await js("document.querySelectorAll('.codex-setup-status .codex-environment-status').length"), 1)
     await wait("document.querySelector('.chatgpt-auth-status')?.textContent.includes('当前地区无法连接 ChatGPT')", 'regional fallback')
@@ -454,6 +460,18 @@ if (!process.versions.electron) {
     await wait("document.querySelector('.task-analysis-error')?.textContent.includes('EMPTY_INPUT')", 'empty input error')
 
     await analyze('请总结这段需求并给出建议。')
+    assert.match(
+      await js("document.querySelector('.task-analysis-overview').textContent"),
+      /计划选择：DeepSeek.*实际使用：本地规则/,
+    )
+    assert.match(
+      await js("document.querySelector('.task-analysis-overview').textContent"),
+      /DeepSeek 任务规划尚未接入/,
+    )
+    assert.match(
+      await js("document.querySelector('.task-analysis-overview').textContent"),
+      /Prompt 优化：/,
+    )
     await setValue('#task-analysis-prompt', '新的输入会清除旧结果。')
     assert.equal(await js("!!document.querySelector('.task-analysis-result')"), false)
     await addAnalysisFiles()

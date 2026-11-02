@@ -1,8 +1,10 @@
 import {
+  BRAIN_PLANNING_ERROR_CODES,
   BUILT_IN_PROVIDER_IDS,
   EXECUTION_MODES,
   PROVIDER_CAPABILITIES,
   RECOMMENDATION_CONFIDENCES,
+  TASK_BRAIN_IDS,
   TASK_WORK_CATEGORIES,
   type ProviderId,
   type TaskNode,
@@ -38,6 +40,16 @@ export type TaskPlanValidationResult =
 const PLAN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 const CUSTOM_PROVIDER_ID_PATTERN = /^custom:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
 const builtInProviderIds = new Set<string>(BUILT_IN_PROVIDER_IDS)
+const taskBrainIds = new Set<string>(TASK_BRAIN_IDS)
+const brainPlanningErrorCodes = new Set<string>(BRAIN_PLANNING_ERROR_CODES)
+const brainFallbackCodes = new Set<string>([
+  'NOT_CONFIGURED',
+  'RATE_LIMITED',
+  'UNAVAILABLE',
+  'TIMEOUT',
+  'INVALID_RESPONSE',
+  'FAILED',
+])
 const executionModes = new Set<string>(EXECUTION_MODES)
 const providerCapabilities = new Set<string>(PROVIDER_CAPABILITIES)
 const recommendationConfidences = new Set<string>(RECOMMENDATION_CONFIDENCES)
@@ -310,6 +322,46 @@ export function validateTaskPlan(value: unknown): TaskPlanValidationResult {
   validateRequiredString(value.goal, 'goal', issues)
   validateStringArray(value.assumptions, 'assumptions', issues, false)
   validateStringArray(value.finalAcceptanceChecks, 'finalAcceptanceChecks', issues, true)
+
+  if (value.planningBrain !== undefined) {
+    if (!isRecord(value.planningBrain)) {
+      pushIssue(issues, 'INVALID_SHAPE', 'planningBrain', '任务拆解大脑来源必须是对象。')
+    } else {
+      const source = value.planningBrain
+      const requestedValid = typeof source.requestedBrainId === 'string'
+        && taskBrainIds.has(source.requestedBrainId)
+      const actualValid = typeof source.actualBrainId === 'string'
+        && taskBrainIds.has(source.actualBrainId)
+      if (!requestedValid) {
+        pushIssue(issues, 'INVALID_SHAPE', 'planningBrain.requestedBrainId', '用户选择的任务拆解大脑无效。')
+      }
+      if (!actualValid) {
+        pushIssue(issues, 'INVALID_SHAPE', 'planningBrain.actualBrainId', '实际使用的任务拆解大脑无效。')
+      }
+      if (source.fallbackCode !== undefined
+        && (typeof source.fallbackCode !== 'string' || !brainPlanningErrorCodes.has(source.fallbackCode))) {
+        pushIssue(issues, 'INVALID_SHAPE', 'planningBrain.fallbackCode', '任务拆解回退原因无效。')
+      }
+      if (requestedValid && actualValid) {
+        const usedFallback = source.requestedBrainId !== source.actualBrainId
+        if (!usedFallback && source.fallbackCode !== undefined) {
+          pushIssue(issues, 'INVALID_SHAPE', 'planningBrain.fallbackCode', '未发生回退时不能记录回退原因。')
+        }
+        if (usedFallback && source.fallbackCode === undefined) {
+          pushIssue(issues, 'INVALID_SHAPE', 'planningBrain.fallbackCode', '发生大脑回退时必须记录原因。')
+        }
+        if (usedFallback && !brainFallbackCodes.has(String(source.fallbackCode ?? ''))) {
+          pushIssue(issues, 'INVALID_SHAPE', 'planningBrain.fallbackCode', '该错误不能触发任务拆解大脑回退。')
+        }
+        if (source.requestedBrainId === 'local' && source.actualBrainId !== 'local') {
+          pushIssue(issues, 'INVALID_SHAPE', 'planningBrain.actualBrainId', '本地规则大脑不能自动切换为远程大脑。')
+        }
+        if (source.actualBrainId === 'deepseek' && source.requestedBrainId !== 'deepseek') {
+          pushIssue(issues, 'INVALID_SHAPE', 'planningBrain.actualBrainId', '只有用户选择 DeepSeek 时才能记录为实际使用 DeepSeek。')
+        }
+      }
+    }
+  }
 
   const hasWorkspace = value.workspace !== undefined
   if (hasWorkspace) {
