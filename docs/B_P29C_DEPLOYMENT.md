@@ -72,15 +72,23 @@ pnpm dist:win:public
 
 ## 真实 DeepSeek 联调
 
-真实联调默认关闭，并且一次运行最多发起两次规划调用：
+先执行不产生规划推理的上游诊断：
+
+```powershell
+pnpm diagnose:deepseek
+```
+
+诊断通过 `GET https://api.deepseek.com/models` 区分未配置 Key、认证失败、余额不足、限流、上游异常、超时、无效响应和模型不可用。报告写入 `work/deepseek-upstream-diagnostic.json`，只包含脱敏分类、HTTP 状态、模型和耗时，不包含 Key、响应正文、Prompt 或账号信息。
+
+真实联调默认关闭，并且一次运行最多发起一次规划调用：
 
 ```powershell
 $env:PETCAST_RUN_LIVE_AI_TESTS="1"
 npm run test:task-planning:live
 ```
 
-Key 从被 Git 忽略的 `.env.local` 或当前进程环境读取。报告写入 `work/deepseek-planning-live-report.json`，只记录模型、耗时、任务/依赖数量、Provider 分布和校验结果，不记录完整 Prompt、任务正文或 Key。
+Key 从被 Git 忽略的 `.env.local` 或当前进程环境读取。脚本会先运行 `/models` 预检；预检失败时写入脱敏报告并以失败状态退出，不发送推理请求。预检成功后只发送一次混合任务规划请求，不自动重试。报告写入 `work/deepseek-planning-live-report.json`，只记录模型、耗时、任务/依赖数量、Provider 分布和校验结果，不记录完整 Prompt、任务正文、上游响应正文或 Key。
 
 当前仓库环境未安装 Docker，因此使用 `npm run test:server-package` 验证编译服务、健康检查、限流恢复、优雅停止和 Dockerfile 静态安全属性。发布前还需要在已安装 Docker 的机器或云端构建环境执行一次实际 `docker build`。
 
-2026-11-02 的首次真实联调按上限执行了两次请求，两次均安全返回 `UPSTREAM_UNAVAILABLE`，未进行自动重试。模型名称 `deepseek-flash` 与官方文档一致，因此后续需要在可用网络下核对当前 Key、账号权限和 DeepSeek 服务状态，再完成成功路径验收；本地回退与错误脱敏流程已按预期生效。
+2026-11-02 的首次真实联调按当时上限执行了两次请求，两次均安全返回 `UPSTREAM_UNAVAILABLE`，未进行自动重试。P2.9C.1 增加上游诊断后，`/models` 预检取得 `READY`，确认当前 Key、网络和 `deepseek-flash` 模型可用；随后唯一一次规划调用被上游以 HTTP 402 拒绝，安全分类为 `INSUFFICIENT_BALANCE`，没有自动重试。账号余额恢复后仍需重新执行一次成功路径验收；成功报告生成前，不应把模拟测试、预检通过或安全回退视为真实 DeepSeek 规划验收通过。

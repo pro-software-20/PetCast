@@ -1179,6 +1179,27 @@ npm run test:server-package
 git diff --check
 ```
 
+## 22.12. B 模块 P2.9C.1：DeepSeek 上游连接诊断与成功路径验收
+
+- 新增 `pnpm diagnose:deepseek` 零推理诊断命令，只访问 DeepSeek `/models`，不发送 Prompt 或任务内容。
+- 诊断可以区分配置缺失、网络不可用、认证失败、余额不足、限流、模型不可用、上游异常、超时和非法响应；详细分类只写入被 Git 忽略的本地报告，不进入 Renderer 协议。
+- DeepSeek 任务规划公开错误继续保持脱敏兼容；服务端可通过可选诊断回调记录安全分类，但不会记录 Key、Authorization、响应正文或完整 Prompt。
+- 真实规划验收改为预检通过后最多一次调用且不自动重试；预检失败时规划调用次数为零。
+- 2026-11-02 的 `/models` 零推理预检取得 `READY`，确认当前 Key、网络和模型可用；随后按上限执行的唯一一次规划调用返回 HTTP 402，安全分类为 `INSUFFICIENT_BALANCE`，脚本未自动重试。账号余额恢复后仍需补充一次成功规划报告，才算完成真实成功路径验收。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+pnpm test:server-package
+pnpm diagnose:deepseek
+git diff --check
+```
+
 ## 23. D 模块后续接入说明
 
 D v4 已提供 `recommendTaskPlan(pendingTask, taskRecords, modelCapacities, now)` 及对应页面。B 可直接传入待办条件与各模型当前资源，获取同一任务的模型 / 时间方案。详见 `docs/D_UNIFIED_PLAN.md`。执行前仍需重新确认资源，不能把 recheck 当成确定排期；D 不负责自动调用或队列资源预留。
