@@ -1114,6 +1114,26 @@ git diff --check
 
 UI 自动验收覆盖未确认时禁止开始、逐文件确认后继续、模拟 Codex 流程和会话恢复，全程禁止真实网络与模型调用。
 
+## 22.9. B 模块 P2.9A：任务拆解大脑选择与统一接口
+
+- 任务拆解大脑使用独立的 `TaskBrainProfile`，不再与 Codex、DeepSeek、豆包等子任务执行 Provider 混用。
+- 页面默认使用离线本地规则，也允许选择 DeepSeek 规划入口；P2.9A 不访问网络、不调用 IPC 或模型，DeepSeek 会返回 `NOT_CONFIGURED` 并自动回退本地规则。
+- 新任务方案记录用户选择和实际使用的大脑，以及安全回退原因；旧会话缺少来源字段时继续按“本地规则（旧会话）”恢复，不重新拆解。
+- 大脑选择使用独立本地偏好保存；输入变化、清空和页面卸载会取消进行中的规划，迟到结果不能覆盖新任务。
+- 页面分别展示 Prompt 优化来源、任务拆解大脑和子任务执行 AI，避免把三种能力混为一谈。
+- P2.9B 才会增加受限 Electron IPC、团队后端 `/v1/task/plan` 和真实 DeepSeek 结构化规划。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
+
 ## 23. D 模块后续接入说明
 
 D v4 已提供 `recommendTaskPlan(pendingTask, taskRecords, modelCapacities, now)` 及对应页面。B 可直接传入待办条件与各模型当前资源，获取同一任务的模型 / 时间方案。详见 `docs/D_UNIFIED_PLAN.md`。执行前仍需重新确认资源，不能把 recheck 当成确定排期；D 不负责自动调用或队列资源预留。

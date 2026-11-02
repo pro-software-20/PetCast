@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { BrainProvider } from '../orchestration/BrainProvider'
+import { DeepSeekBrainProvider } from '../orchestration/DeepSeekBrainProvider'
 import { LocalBrainProvider } from '../orchestration/LocalBrainProvider'
 import { DEFAULT_PROVIDER_PROFILES } from '../orchestration/providerProfiles'
+import { createPlanWithTaskBrain } from '../orchestration/taskBrainPlanning'
+import {
+  readTaskBrainPreference,
+  writeTaskBrainPreference,
+} from '../orchestration/taskBrainPreference'
+import { TASK_BRAIN_PROFILES } from '../orchestration/taskBrainProfiles'
 import {
   LocalTaskSessionStore,
   type TaskSessionStore,
@@ -21,7 +28,12 @@ import type {
   TaskAnalysisResult,
   TaskAnalyzer,
 } from '../types/taskAnalysis'
-import type { ProviderProfile, TaskSessionV1 } from '../types/taskOrchestration'
+import type {
+  BrainPlanningErrorCode,
+  ProviderProfile,
+  TaskBrainId,
+  TaskSessionV1,
+} from '../types/taskOrchestration'
 import { copyText } from '../utils/copyText'
 import { TaskPlanCards } from './TaskPlanCards'
 import {
@@ -46,8 +58,18 @@ export interface TaskAnalysisPanelProps {
 }
 
 const defaultAnalyzer = new HeuristicTaskAnalyzer(createDefaultPromptOptimizer())
-const defaultBrainProvider = new LocalBrainProvider()
+const defaultLocalBrainProvider = new LocalBrainProvider()
+const defaultDeepSeekBrainProvider = new DeepSeekBrainProvider()
 const defaultSessionStore = new LocalTaskSessionStore()
+
+const brainFallbackLabels: Partial<Record<BrainPlanningErrorCode, string>> = {
+  NOT_CONFIGURED: 'DeepSeek 任务规划尚未接入，已安全回退到本地规则。',
+  RATE_LIMITED: 'DeepSeek 任务规划请求受限，已安全回退到本地规则。',
+  UNAVAILABLE: 'DeepSeek 任务规划当前不可用，已安全回退到本地规则。',
+  TIMEOUT: 'DeepSeek 任务规划响应超时，已安全回退到本地规则。',
+  INVALID_RESPONSE: 'DeepSeek 返回的任务方案无效，已安全回退到本地规则。',
+  FAILED: 'DeepSeek 任务规划失败，已安全回退到本地规则。',
+}
 
 const errorLabels: Record<'EMPTY_INPUT' | 'INPUT_TOO_LARGE' | 'INVALID_FILE' | 'ANALYSIS_FAILED', string> = {
   EMPTY_INPUT: '缺少分析输入',
@@ -95,6 +117,9 @@ export function TaskAnalysisPanel({
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [clearArmed, setClearArmed] = useState(false)
+  const [selectedBrainId, setSelectedBrainId] = useState<TaskBrainId>(() => (
+    brainProvider?.profile.id ?? readTaskBrainPreference()
+  ))
   const [analysisDetailsOpen, setAnalysisDetailsOpen] = useState(true)
   const [codexSetupOpen, setCodexSetupOpen] = useState(false)
   const [attachmentsOpen, setAttachmentsOpen] = useState(initialFiles.length > 0)
@@ -188,6 +213,8 @@ export function TaskAnalysisPanel({
   useEffect(() => {
     void readChatGptSession().then(checkCodex)
     return () => {
+      planningController.current?.abort()
+      planningController.current = null
       const authRequestId = chatGptSignInRequest.current
       chatGptSignInRequest.current = null
       if (authRequestId) window.petcast?.cancelChatGptSignIn?.(authRequestId)
@@ -212,6 +239,7 @@ export function TaskAnalysisPanel({
     setPlanError(null)
     setError(null)
     setAnalysisDetailsOpen(false)
+    setSelectedBrainId(session.plan.planningBrain?.requestedBrainId ?? 'local')
   }
 
   useEffect(() => {
@@ -313,11 +341,20 @@ export function TaskAnalysisPanel({
         planningController.current = controller
         let planningOutcome
         try {
-          planningOutcome = await (brainProvider ?? defaultBrainProvider).createPlan({
-            analysisInput: { prompt, files },
-            analysisResult: outcome.result,
-            availableProviders: providers,
-          }, controller.signal)
+          const requestedBrainId = brainProvider?.profile.id ?? selectedBrainId
+          planningOutcome = await createPlanWithTaskBrain(
+            requestedBrainId,
+            {
+              analysisInput: { prompt, files },
+              analysisResult: outcome.result,
+              availableProviders: providers,
+            },
+            {
+              local: brainProvider?.profile.id === 'local' ? brainProvider : defaultLocalBrainProvider,
+              deepseek: brainProvider?.profile.id === 'deepseek' ? brainProvider : defaultDeepSeekBrainProvider,
+            },
+            controller.signal,
+          )
         } catch {
           if (requestId === analysisRequestId.current && !controller.signal.aborted) {
             setPlanError('任务拆解请求失败，请稍后重试。')
@@ -400,6 +437,19 @@ export function TaskAnalysisPanel({
   const sessionStarted = Boolean(taskSession?.runs.some(run => run.attempt > 0 || !['waiting', 'ready'].includes(run.status)))
   const sessionLocked = sessionStarted || Boolean(completedSession) || storageBlocked
   const completedTaskCount = taskSession?.runs.filter(run => run.status === 'done').length ?? 0
+  const planningBrain = taskSession?.plan.planningBrain
+  const requestedBrainName = planningBrain
+    ? TASK_BRAIN_PROFILES[planningBrain.requestedBrainId].displayName
+    : '本地规则'
+  const actualBrainName = planningBrain
+    ? TASK_BRAIN_PROFILES[planningBrain.actualBrainId].displayName
+    : '本地规则（旧会话）'
+  const planningBrainSummary = planningBrain?.requestedBrainId !== planningBrain?.actualBrainId
+    ? `计划选择：${requestedBrainName} · 实际使用：${actualBrainName}`
+    : `任务拆解大脑：${actualBrainName}`
+  const planningBrainFallback = planningBrain?.fallbackCode
+    ? brainFallbackLabels[planningBrain.fallbackCode]
+    : undefined
   const codexEnvironmentPresentation = describeCodexEnvironment(codexEnvironment)
   const chatGptAuthPresentation = describeChatGptAuth(chatGptAuth)
   const codexSetupChecking = ['loading', 'connecting', 'signing-out'].includes(chatGptAuth.status)
@@ -464,11 +514,12 @@ export function TaskAnalysisPanel({
           <div>
             <strong>{taskSession.plan.title}</strong>
             <div className="task-overview-meta">
-              <span>{completedTaskCount}/{taskSession.runs.length} 已完成 · 任务拆解：本地规则</span>
+              <span>{completedTaskCount}/{taskSession.runs.length} 已完成 · {planningBrainSummary}</span>
               <span className={`task-analysis-optimization-source is-${result.promptOptimizationSource}`}>
-                {result.promptOptimizationSource === 'deepseek' ? 'DeepSeek AI 优化' : '本地规则优化'}
+                Prompt 优化：{result.promptOptimizationSource === 'deepseek' ? 'DeepSeek' : '本地规则'}
               </span>
             </div>
+            {planningBrainFallback && <p className="task-brain-fallback" role="status">{planningBrainFallback}</p>}
           </div>
           <button
             type="button"
@@ -530,6 +581,30 @@ export function TaskAnalysisPanel({
         )}
           </div>
         </details>
+
+        <div className="task-brain-selector">
+          <label htmlFor="task-planning-brain">任务拆解大脑</label>
+          <select
+            id="task-planning-brain"
+            value={brainProvider?.profile.id ?? selectedBrainId}
+            disabled={sessionLocked || isAnalyzing || Boolean(brainProvider)}
+            onChange={(event) => {
+              const value = event.target.value as TaskBrainId
+              setSelectedBrainId(value)
+              writeTaskBrainPreference(value)
+            }}
+          >
+            <option value="local">本地规则（默认）</option>
+            <option value="deepseek">DeepSeek（尚未接入）</option>
+          </select>
+          {brainProvider ? (
+            <p role="status">当前任务拆解大脑由调用方指定为 {brainProvider.profile.displayName}。</p>
+          ) : selectedBrainId === 'deepseek' ? (
+            <p role="status">该拆解选项暂不额外发送 Prompt、文件元信息或调用模型；分析时会自动回退本地规则。Prompt 优化仍使用其独立设置。</p>
+          ) : (
+            <p>本地规则不会联网，也不会产生模型调用费用。</p>
+          )}
+        </div>
 
         <div className="task-analysis-actions">
           <button type="button" onClick={handleAnalyze} disabled={isAnalyzing || sessionLocked}>
