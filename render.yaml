@@ -6,7 +6,6 @@ services:
     plan: 0.5c-512mb
     numInstances: 1
     healthCheckPath: /health
-    maxShutdownDelaySeconds: 30
     dockerfilePath: ./Dockerfile
     dockerContext: .
     disk:
