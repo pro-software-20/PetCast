@@ -15,7 +15,7 @@
 
 ## Windows 内部测试安装包
 
-当前提供 Windows 10/11 x64 的 0.1.2 预发布安装版：[下载安装包](https://github.com/pro-software-20/PetCast/releases/tag/v0.1.2)。本地输出为 `release/windows/PetCast-Setup-0.1.2-x64.exe`。供本人和组员测试，仅当前账号安装，未签名；下载者不需要开发环境。安装、外部功能条件、构建与异机检查见 [C 安装包说明](docs/C_WINDOWS_INSTALLER.md)。
+当前公开可下载版本仍为 Windows 10/11 x64 的 0.1.2 预发布安装版：[下载安装包](https://github.com/pro-software-20/PetCast/releases/tag/v0.1.2)。P2.10 已将代码版本提升到 `0.1.3-beta.1`，该版本需在 Render 公网服务验收通过后生成 Draft Release，暂不宣称已发布。安装、外部功能条件、构建与异机检查见 [C 安装包说明](docs/C_WINDOWS_INSTALLER.md)。
 
 ## 运行
 
@@ -57,7 +57,7 @@ pnpm dev
 
 ### DeepSeek 公网服务与公开安装包
 
-P2.9C 提供通用 Docker 服务和公开安装包地址内置流程。服务部署、HTTPS、持久化限流、真实联调及 `dist:win:public` 使用方式见 [DeepSeek 规划服务部署说明](docs/B_P29C_DEPLOYMENT.md)。远程规划成功后，任务拆分和依赖保持 DeepSeek 结果，子任务执行 AI 则由本地能力规则重新核对；远程服务异常时继续安全回退本地规则。
+P2.9C 提供通用 Docker 服务和公开安装包地址内置流程；P2.10 增加 Render Blueprint、公网验收命令和 `0.1.3-beta.1` 团队包流程。部署、HTTPS、持久化限流及 `dist:win:public` 使用方式见 [DeepSeek 规划服务部署说明](docs/B_P29C_DEPLOYMENT.md)，实际 Render 与异机验收记录见 [P2.10 验收说明](docs/B_P210_ACCEPTANCE.md)。远程服务异常时继续安全回退本地规则。
 
 上游连接问题可先执行零推理诊断：
 

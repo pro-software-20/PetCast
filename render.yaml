@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: petcast-ai-pro-software-20-beta
+    runtime: docker
+    region: singapore
+    plan: 0.5c-512mb
+    numInstances: 1
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 30
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    disk:
+      name: petcast-ai-rate-limits
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: RATE_LIMIT_HASH_SECRET
+        generateValue: true
+      - key: DEEPSEEK_MODEL
+        value: deepseek-flash
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: "8787"
+      - key: PETCAST_TRUST_PROXY
+        value: "1"
+      - key: PROMPT_RATE_LIMIT_STATE_PATH
+        value: /data/rate-limits.json
+      - key: PROMPT_LIMIT_INSTALL_MINUTE
+        value: "3"
+      - key: PROMPT_LIMIT_INSTALL_DAY
+        value: "20"
+      - key: PROMPT_LIMIT_IP_MINUTE
+        value: "10"
+      - key: PROMPT_LIMIT_IP_DAY
+        value: "100"
+      - key: PROMPT_LIMIT_GLOBAL_DAY
+        value: "200"

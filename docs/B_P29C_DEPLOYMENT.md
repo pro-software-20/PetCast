@@ -37,6 +37,22 @@ curl http://127.0.0.1:8787/health
 4. 只有反向代理会可靠覆盖来源 IP 时才设置 `PETCAST_TRUST_PROXY=1`；否则保持 `0`，避免伪造转发头绕过限流。
 5. 配置平台健康检查路径 `/health`，并允许容器接收 `SIGTERM` 完成优雅关闭。
 
+### Render 团队测试部署
+
+P2.10 在仓库根目录提供 `render.yaml`，固定使用 Singapore 区域、`0.5c-512mb` 付费规格、单实例、`/health` 健康检查和 `/data` 持久磁盘。通过 Render **New → Blueprint** 导入仓库后，只需在控制台填写 `DEEPSEEK_API_KEY`；匿名限流哈希密钥由 Render 自动生成，所有非敏感运行参数由 Blueprint 管理。
+
+部署后的零推理与单次真实规划验收命令为：
+
+```powershell
+$env:PETCAST_PUBLIC_AI_API_URL="https://Render实际域名"
+pnpm test:public-ai
+$env:PETCAST_RUN_PUBLIC_AI_TESTS="1"
+pnpm test:public-ai
+Remove-Item Env:PETCAST_RUN_PUBLIC_AI_TESTS
+```
+
+完整创建、打包、异机验收和回滚步骤见 `docs/B_P210_ACCEPTANCE.md`。
+
 反向代理示例（域名和证书路径需替换）：
 
 ```nginx
