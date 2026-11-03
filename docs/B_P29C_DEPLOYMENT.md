@@ -37,9 +37,11 @@ curl http://127.0.0.1:8787/health
 4. 只有反向代理会可靠覆盖来源 IP 时才设置 `PETCAST_TRUST_PROXY=1`；否则保持 `0`，避免伪造转发头绕过限流。
 5. 配置平台健康检查路径 `/health`，并允许容器接收 `SIGTERM` 完成优雅关闭。
 
-### Render 团队测试部署
+### Render 免费团队演示部署
 
-P2.10 在仓库根目录提供 `render.yaml`，固定使用 Singapore 区域、`0.5c-512mb` 付费规格、单实例、`/health` 健康检查和 `/data` 持久磁盘。通过 Render **New → Blueprint** 导入仓库后，只需在控制台填写 `DEEPSEEK_API_KEY`；匿名限流哈希密钥由 Render 自动生成，所有非敏感运行参数由 Blueprint 管理。
+P2.10 在仓库根目录提供 `render.yaml`，使用 Singapore 区域、免费规格、单实例和 `/health` 健康检查。通过 Render **New → Blueprint** 导入仓库后，只需在控制台填写 `DEEPSEEK_API_KEY`；匿名限流哈希密钥由 Render 自动生成，所有非敏感运行参数由 Blueprint 管理。
+
+免费实例不支持持久磁盘，`/data/rate-limits.json` 会在重启、重新部署或平台回收后丢失，因此只适合课程展示和短期团队试用。若要长期公开使用，必须升级付费实例并挂载 `/data`，或把限流状态迁移到共享持久化存储。
 
 部署后的零推理与单次真实规划验收命令为：
 

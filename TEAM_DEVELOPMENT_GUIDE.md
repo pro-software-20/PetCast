@@ -1203,11 +1203,11 @@ git diff --check
 
 ## 22.13. B 模块 P2.10：Render 公网部署与团队安装包
 
-- 仓库根目录新增 Render Blueprint，使用 Singapore 区域、`0.5c-512mb` 付费规格、单实例、`/health` 健康检查和 `/data` 持久磁盘；`DEEPSEEK_API_KEY` 只在 Render 控制台填写，限流哈希密钥由平台生成。
+- 仓库根目录新增 Render Blueprint，使用 Singapore 区域、免费规格、单实例和 `/health` 健康检查；`DEEPSEEK_API_KEY` 只在 Render 控制台填写，限流哈希密钥由平台生成。
 - 团队测试限额设为单安装实例 3 次/分钟、20 次/日，单 IP 10 次/分钟、100 次/日，全局 200 次/日；当前仍是匿名限流测试版，不适合商业公开发布。
 - 新增 `pnpm test:public-ai`，默认只验证 HTTPS 服务健康状态和非法请求安全拒绝；显式设置 `PETCAST_RUN_PUBLIC_AI_TESTS=1` 后最多发送一次真实规划请求，并生成不含 Prompt、任务正文或密钥的脱敏本地报告。
 - 代码版本提升为 `0.1.3-beta.1`。公网验收通过后使用 `PETCAST_PUBLIC_AI_API_URL` 构建团队 Draft Release；安装包只内置非敏感 HTTPS origin，不包含后端、环境文件或 DeepSeek Key。
-- Render 账号、付费资源、Secret、实际域名、安装包 SHA-256 和异机结果必须在外部平台操作完成后填写，不能在尚未验收时宣称已经部署或发布。
+- Render 账号、Secret、实际域名、安装包 SHA-256 和异机结果必须在外部平台操作完成后填写，不能在尚未验收时宣称已经部署或发布。免费实例没有持久磁盘，限流计数可能在重启后重置，只适合短期演示。
 - 完整步骤和验收表见 `docs/B_P210_ACCEPTANCE.md`。
 
 验证命令：

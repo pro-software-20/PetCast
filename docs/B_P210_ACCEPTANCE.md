@@ -2,7 +2,7 @@
 
 ## 交付目标
 
-P2.10 将 PetCast AI 服务部署为 Render 新加坡区域的单实例付费 Web Service，并通过持久磁盘保存匿名限流状态。团队 Windows 测试包只内置非敏感 HTTPS 服务源地址，不包含 DeepSeek Key、后端代码或本地环境文件。
+P2.10 将 PetCast AI 服务部署为 Render 新加坡区域的免费演示 Web Service。免费实例不挂载持久磁盘，匿名限流文件会在实例重启、重新部署或平台回收后丢失，因此仅适合课程展示和短期团队试用。团队 Windows 测试包只内置非敏感 HTTPS 服务源地址，不包含 DeepSeek Key、后端代码或本地环境文件。
 
 本阶段仍属于匿名限流的团队测试版，不适合作为商业公开服务。DeepSeek、Render 或网络异常时，任务分析页继续回退本地规则大脑。
 
@@ -10,13 +10,13 @@ P2.10 将 PetCast AI 服务部署为 Render 新加坡区域的单实例付费 We
 
 1. 登录 Render，并确认已连接 `pro-software-20/PetCast` GitHub 仓库。
 2. 在 Render Dashboard 选择 **New → Blueprint**，导入仓库根目录的 `render.yaml`。
-3. 确认服务名为 `petcast-ai-pro-software-20-beta`、区域为 Singapore、规格为 `0.5c-512mb`、实例数为 1。
+3. 确认服务名为 `petcast-ai-pro-software-20-beta`、区域为 Singapore、规格为 `free`、实例数为 1。
 4. 在首次 Blueprint 配置中填写 `DEEPSEEK_API_KEY`。不要把 Key 写入 Git、聊天记录、安装包或普通环境说明。
-5. 确认 `/data` 挂载 1 GB 持久磁盘，健康检查路径为 `/health`。
+5. 确认没有付费持久磁盘，健康检查路径为 `/health`。
 6. 等待部署完成，记录 Render 实际分配的 `https://*.onrender.com` 地址。
 7. 在 DeepSeek 控制台设置消费上限，并在 Render 配置账单提醒。
 
-挂载持久磁盘的 Render 服务不支持自定义 `maxShutdownDelaySeconds`，Blueprint 不设置该字段，使用平台对磁盘服务的默认关闭行为。
+免费实例的 `/data/rate-limits.json` 位于临时文件系统。服务在当前运行周期内仍会执行匿名限流，但重启后计数会重置。正式公开服务必须升级为付费实例并恢复持久化存储，或者改用共享数据库限流。
 
 如果 Render 账号尚未连接 GitHub，先完成 GitHub 授权再创建 Blueprint。Secret 只在首次创建时填写；后续 Blueprint 同步不会覆盖 `sync: false` 的 Secret。
 
@@ -74,5 +74,5 @@ pnpm dist:win:public
 
 - 新部署健康检查失败时，在 Render Deploys 页面回滚到上一个成功部署。
 - DeepSeek 费用异常时先暂停 Render 服务或移除 Key，并在 DeepSeek 控制台停用对应 Key。
-- 持久磁盘服务部署时会短暂停机；测试期间不扩展为多实例。
+- 免费实例可能休眠、冷启动较慢，并会在重启或重新部署后丢失限流计数；测试期间不作为稳定生产服务。
 - 客户端无法访问服务时不自动重试收费规划，继续使用本地规则大脑。

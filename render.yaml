@@ -3,15 +3,11 @@ services:
     name: petcast-ai-pro-software-20-beta
     runtime: docker
     region: singapore
-    plan: 0.5c-512mb
+    plan: free
     numInstances: 1
     healthCheckPath: /health
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    disk:
-      name: petcast-ai-rate-limits
-      mountPath: /data
-      sizeGB: 1
     envVars:
       - key: DEEPSEEK_API_KEY
         sync: false
