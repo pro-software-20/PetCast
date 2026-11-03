@@ -16,6 +16,8 @@ P2.10 将 PetCast AI 服务部署为 Render 新加坡区域的单实例付费 We
 6. 等待部署完成，记录 Render 实际分配的 `https://*.onrender.com` 地址。
 7. 在 DeepSeek 控制台设置消费上限，并在 Render 配置账单提醒。
 
+挂载持久磁盘的 Render 服务不支持自定义 `maxShutdownDelaySeconds`，Blueprint 不设置该字段，使用平台对磁盘服务的默认关闭行为。
+
 如果 Render 账号尚未连接 GitHub，先完成 GitHub 授权再创建 Blueprint。Secret 只在首次创建时填写；后续 Blueprint 同步不会覆盖 `sync: false` 的 Secret。
 
 ## 公网服务验收
