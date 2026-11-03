@@ -1,6 +1,6 @@
 {
   "name": "petcast-stage1",
-  "version": "0.1.2",
+  "version": "0.1.3-beta.1",
   "private": true,
   "type": "module",
   "description": "PetCast Stage 1 desktop companion shell",
@@ -24,6 +24,7 @@
     "dist:win": "pnpm run build && node scripts/package-windows.mjs",
     "dist:win:public": "cross-env PETCAST_REQUIRE_PUBLIC_AI_API_URL=1 npm run dist:win",
     "test:server-package": "npm run build:server && node scripts/test-server-package.mjs",
+    "test:public-ai": "npm run build:server && node scripts/test-public-ai-deployment.mjs",
     "diagnose:deepseek": "npm run build:server && node --env-file-if-exists=.env.local scripts/diagnose-deepseek.mjs",
     "test:task-planning:live": "npm run build:server && node --env-file-if-exists=.env.local scripts/test-deepseek-planning-live.mjs"
   },
