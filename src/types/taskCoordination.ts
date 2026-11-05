@@ -100,6 +100,73 @@ export interface ExecutionAdapter {
   ): Promise<ExecutionAdapterOutcome<ExecutionSnapshot>>
 }
 
+export const TASK_COORDINATION_PHASES = [
+  'dispatching',
+  'queued',
+  'running',
+  'needs-input',
+  'completed',
+  'failed',
+  'cancelled',
+  'unknown',
+] as const
+export type TaskCoordinationPhase = (typeof TASK_COORDINATION_PHASES)[number]
+
+/**
+ * Durable B-side state for one adapter attempt. It deliberately lives outside
+ * TaskSessionV1 so the existing task-session schema remains compatible.
+ */
+export interface TaskCoordinationRecord {
+  taskId: string
+  providerId: ProviderId
+  attempt: number
+  dispatchId: string
+  phase: TaskCoordinationPhase
+  reference?: ExecutionReference
+  latestSnapshot?: ExecutionSnapshot
+  error?: ExecutionAdapterError
+  createdAt: string
+  updatedAt: string
+}
+
+export interface TaskCoordinationStateV1 {
+  schemaVersion: 1
+  sessionId: string
+  planId: string
+  updatedAt: string
+  records: TaskCoordinationRecord[]
+}
+
+export interface TaskCoordinationPolicy {
+  globalConcurrency: number
+  providerConcurrency: number
+  pollIntervalMs: number
+}
+
+export const TASK_COORDINATION_EFFECT_TYPES = [
+  'dispatch-accepted',
+  'execution-running',
+  'execution-needs-input',
+  'execution-completed',
+  'execution-failed',
+  'execution-cancelled',
+  'execution-unknown',
+] as const
+export type TaskCoordinationEffectType = (typeof TASK_COORDINATION_EFFECT_TYPES)[number]
+
+/** P3.1B will translate these effects into TaskSessionV1 actions. */
+export interface TaskCoordinationEffect {
+  type: TaskCoordinationEffectType
+  taskId: string
+  providerId: ProviderId
+  attempt: number
+  dispatchId: string
+  occurredAt: string
+  reference?: ExecutionReference
+  snapshot?: ExecutionSnapshot
+  error?: ExecutionAdapterError
+}
+
 export const EVALUATION_VERDICTS = ['accepted', 'revise', 'unknown'] as const
 export type EvaluationVerdict = (typeof EVALUATION_VERDICTS)[number]
 

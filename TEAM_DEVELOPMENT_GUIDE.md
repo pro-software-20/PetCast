@@ -1254,3 +1254,25 @@ pnpm test:desktop
 pnpm test:task-ui
 git diff --check
 ```
+
+## 25. B 模块 P3.1A：确定性调度核心与安全恢复
+
+- 新增独立 `TaskCoordinationStateV1`，使用 `petcast.task-coordination.v1` 保存任务、Provider、尝试次数、稳定派发 ID、执行引用、快照和安全错误，不修改 `TaskSessionV1` 或公共 schema。
+- 新增一次性 `runCoordinationCycle()`。核心不创建定时器，默认按全局并发 2、单 Provider 并发 1 派发 `api` 和 `local-agent` 任务，人工任务继续使用原流程。
+- 派发前先保存 `dispatching` 意图；收到收据后才保存执行引用。重启后已有引用只允许 `inspect()`，无收据的中断派发转为 `unknown` 和人工核对，禁止自动重派。
+- 多个独立根任务可以并行；依赖任务只有在全部直接前置任务完成后才可派发。交接只包含直接依赖的摘要、决策、验证、相对文件元信息和遗留问题，不包含完整输出。
+- 本机代理的交接文件必须先获得读取授权；缺少授权时输出 `needs-input` 建议，不调用执行适配器。
+- 新增 `TaskCoordinationEffect`，向 P3.1B 输出派发、运行、补充信息、完成、失败、取消和未知状态建议；P3.1A 不直接改变任务会话。
+- 新增本地与内存协调存储、Provider 适配器注册表、严格状态校验和统一取消入口。损坏、超限、会话不匹配、限流、超时和未知执行均不会触发自动重试或替代 Provider。
+- 完整调度边界、恢复原则和后续接入方式见 `docs/B_P31A_COORDINATION_SCHEDULER.md`。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
