@@ -1232,3 +1232,25 @@ D v5 增加事后评价日志、独立推荐历史、能力约束、显式指定
 
 
 D v6 要求 TaskLedger 同时实现 writeExecutionEvent / queryExecutions / reconcileExecutions，并合并 3 个新 IPC 与执行日志 schema/store。旧记录器适配器未接日志时会在付费调用之前拒绝运行。TASK_PERSISTENCE_FAILED 只能重试保存，不能自动重新运行调用；结束记录可由界面补存。模型稳定配置按匿名账号隔离保存，余额/资源确认每次重新输入。详见 docs/D_V6_RELIABILITY.md 与 D_TASK_LEDGER.md。
+
+## 24. B 模块 P3.0：任务协调边界与统一契约
+
+- 新增独立 `taskCoordination` 契约，冻结 B→A 执行派发与 D→B 评价报告的数据结构，不改变 `TaskPlan`、`TaskSessionV1` 和 `schemaVersion: 1`。
+- B 负责稳定派发 ID、依赖交接、状态策略、验收建议和恢复决策；A 负责具体 AI 执行；C 只向 A 提供电脑操作能力；D 提供评价与证据但不能直接改变任务状态。
+- `dispatchId` 是收费执行的幂等键。恢复时只允许 `inspect()`，状态未知时禁止自动重派，避免重复收费或重复修改文件。
+- 新增严格纯函数校验，拒绝未知字段、跨任务关联、绝对路径、路径穿越、完整前置输出、凭据字段以及状态与结果不一致。
+- 新增零网络内存执行夹具、D 评价夹具和旧 `WorkerProvider` 兼容适配器，为 P3.1 持续调度及跨组联调提供稳定入口。
+- 默认验收策略保持人工确认；受信评价模式也只有在评价方法受信、结论为 accepted 且全部检查通过时，才能生成 complete 建议。建议本身不修改任务会话。
+- 当前任务卡直连 Codex 的路径继续作为兼容实现，P3.1 再迁移到统一执行适配器。
+- 完整分工、数据边界和迁移路线见 `docs/B_P30_COORDINATION_CONTRACT.md`。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
