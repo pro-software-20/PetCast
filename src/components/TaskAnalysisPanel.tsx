@@ -14,6 +14,20 @@ import {
   LocalTaskSessionStore,
   type TaskSessionStore,
 } from '../orchestration/TaskSessionStore'
+import {
+  LocalTaskCoordinationStore,
+  type TaskCoordinationStore,
+} from '../orchestration/TaskCoordinationStore'
+import {
+  createIdleTaskCoordinationSnapshot,
+  createTaskCoordinationController,
+  type TaskCoordinationController,
+  type TaskCoordinationControllerSnapshot,
+} from '../orchestration/TaskCoordinationController'
+import {
+  MapExecutionAdapterRegistry,
+  type ExecutionAdapterRegistry,
+} from '../orchestration/taskCoordinator'
 import { createTaskSession, recoverInterruptedTaskExecutions } from '../orchestration/taskSession'
 import { HeuristicTaskAnalyzer, MAX_TASK_ANALYSIS_PROMPT_LENGTH } from '../task-analysis/HeuristicTaskAnalyzer'
 import { createDefaultPromptOptimizer } from '../task-analysis/RemotePromptOptimizer'
@@ -53,6 +67,8 @@ export interface TaskAnalysisPanelProps {
   brainProvider?: BrainProvider
   providers?: ProviderProfile[]
   sessionStore?: TaskSessionStore
+  coordinationAdapters?: ExecutionAdapterRegistry
+  coordinationStore?: TaskCoordinationStore
   codexExecutionScope?: { scopeId: string; fresh: boolean }
   onClose?: () => void
 }
@@ -61,6 +77,8 @@ const defaultAnalyzer = new HeuristicTaskAnalyzer(createDefaultPromptOptimizer()
 const defaultLocalBrainProvider = new LocalBrainProvider()
 const defaultDeepSeekBrainProvider = new DeepSeekBrainProvider()
 const defaultSessionStore = new LocalTaskSessionStore()
+const defaultCoordinationStore = new LocalTaskCoordinationStore()
+const defaultCoordinationAdapters = new MapExecutionAdapterRegistry()
 
 const brainFallbackLabels: Partial<Record<BrainPlanningErrorCode, string>> = {
   NOT_CONFIGURED: 'DeepSeek 任务规划尚未接入，已安全回退到本地规则。',
@@ -101,6 +119,8 @@ export function TaskAnalysisPanel({
   brainProvider,
   providers = DEFAULT_PROVIDER_PROFILES,
   sessionStore = defaultSessionStore,
+  coordinationAdapters = defaultCoordinationAdapters,
+  coordinationStore = defaultCoordinationStore,
   onClose,
 }: TaskAnalysisPanelProps) {
   const initialFileSelection = mergeTaskAnalysisFiles([], initialFiles)
@@ -109,6 +129,9 @@ export function TaskAnalysisPanel({
   const [fileNotice, setFileNotice] = useState<string | null>(() => initialFileSelection.notice)
   const [result, setResult] = useState<TaskAnalysisResult | null>(null)
   const [taskSession, setTaskSession] = useState<TaskSessionV1 | null>(null)
+  const [coordinationSnapshot, setCoordinationSnapshot] = useState<TaskCoordinationControllerSnapshot>(
+    createIdleTaskCoordinationSnapshot,
+  )
   const [completedSession, setCompletedSession] = useState<TaskSessionV1 | null>(null)
   const [planError, setPlanError] = useState<string | null>(null)
   const [storageNotice, setStorageNotice] = useState<string | null>(null)
@@ -125,6 +148,7 @@ export function TaskAnalysisPanel({
   const [attachmentsOpen, setAttachmentsOpen] = useState(initialFiles.length > 0)
   const analysisRequestId = useRef(0)
   const planningController = useRef<AbortController | null>(null)
+  const coordinationController = useRef<TaskCoordinationController | null>(null)
   const restoreRequestId = useRef(0)
   const codexEnvironmentRequest = useRef<string | null>(null)
   const chatGptSignInRequest = useRef<string | null>(null)
@@ -269,6 +293,31 @@ export function TaskAnalysisPanel({
     return () => window.clearTimeout(timer)
   }, [taskSession, sessionStore])
 
+  useEffect(() => {
+    coordinationController.current?.dispose()
+    coordinationController.current = null
+    setCoordinationSnapshot(createIdleTaskCoordinationSnapshot())
+    if (!taskSession) return
+    const controller = createTaskCoordinationController({
+      session: taskSession,
+      coordinationStore,
+      sessionStore,
+      adapters: coordinationAdapters,
+      onSessionChange: setTaskSession,
+    })
+    coordinationController.current = controller
+    const unsubscribe = controller.subscribe(setCoordinationSnapshot)
+    return () => {
+      unsubscribe()
+      controller.dispose()
+      if (coordinationController.current === controller) coordinationController.current = null
+    }
+  }, [taskSession?.id, coordinationAdapters, coordinationStore, sessionStore])
+
+  useEffect(() => {
+    if (taskSession) coordinationController.current?.updateSession(taskSession)
+  }, [taskSession])
+
   const handleSessionChange = (session: TaskSessionV1, persistImmediately = false) => {
     setTaskSession(session)
     if (persistImmediately) void persistSession(session)
@@ -287,6 +336,9 @@ export function TaskAnalysisPanel({
     setCopyStatus('idle')
     setClearArmed(false)
     setAnalysisDetailsOpen(true)
+    coordinationController.current?.dispose()
+    coordinationController.current = null
+    void coordinationStore.clear()
     void sessionStore.clear().then((outcome) => {
       if (!outcome.ok) setStorageNotice(outcome.message)
       else {
@@ -323,6 +375,9 @@ export function TaskAnalysisPanel({
     setCopyStatus('idle')
     setClearArmed(false)
     setAnalysisDetailsOpen(true)
+    coordinationController.current?.dispose()
+    coordinationController.current = null
+    void coordinationStore.clear()
     void sessionStore.clear().then((outcome) => {
       if (!outcome.ok) setStorageNotice(outcome.message)
       else {
@@ -418,6 +473,9 @@ export function TaskAnalysisPanel({
     setCopyStatus('idle')
     setClearArmed(false)
     setAnalysisDetailsOpen(true)
+    coordinationController.current?.dispose()
+    coordinationController.current = null
+    void coordinationStore.clear()
     void sessionStore.clear().then((outcome) => {
       setStorageNotice(outcome.ok ? null : outcome.message)
       if (outcome.ok) setStorageBlocked(false)
@@ -747,6 +805,14 @@ export function TaskAnalysisPanel({
           providers={providers}
           codexEnvironment={codexEnvironment}
           onSessionChange={handleSessionChange}
+          coordinationSnapshot={coordinationSnapshot}
+          coordinationAdapters={coordinationAdapters}
+          onCoordinationStart={() => coordinationController.current?.start() ?? Promise.resolve()}
+          onCoordinationPause={() => coordinationController.current?.pause()}
+          onCoordinationResume={() => coordinationController.current?.resume() ?? Promise.resolve()}
+          onCoordinationRunNow={() => coordinationController.current?.runNow() ?? Promise.resolve()}
+          onCoordinationCancelTask={(taskId) => coordinationController.current?.cancelTask(taskId) ?? Promise.resolve()}
+          onCoordinationClear={() => coordinationController.current?.clearState() ?? Promise.resolve()}
         />
       )}
     </section>

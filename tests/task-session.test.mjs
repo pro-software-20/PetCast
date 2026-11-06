@@ -3,6 +3,7 @@ import test from 'node:test'
 import { loadTs } from './load-ts.mjs'
 
 const {
+  canEditTaskExecutionMode,
   canEditTaskPlan,
   createTaskSession,
   updateTaskSession,
@@ -783,4 +784,40 @@ test('switching workspaces clears default and task path scopes but keeps attachm
   assert.equal(session.plan.workspace.defaultScope, undefined)
   assert.deepEqual(session.plan.tasks[0].files.inputs, source.plan.tasks[0].files.inputs)
   assert.deepEqual(session.plan.tasks[0].files.readPaths, [])
+})
+
+test('automatic execution mode blocks manual and legacy Codex start paths', () => {
+  let session = mustCreate()
+  session = mustUpdate(session, {
+    type: 'set-task-execution-mode', taskId: 'task-1', executionMode: 'api',
+  })
+  assert.equal(session.plan.tasks[0].executionMode, 'api')
+  assert.equal(session.runs[0].executionMode, 'manual')
+  assert.equal(updateTaskSession(session, { type: 'start', taskId: 'task-1' }, LATER).code, 'INVALID_TRANSITION')
+  assert.equal(updateTaskSession(session, {
+    type: 'start-automatic', taskId: 'task-1', executionId: 'execution-1', model: 'fixture',
+  }, LATER).code, 'INVALID_TRANSITION')
+})
+
+test('provider changes restore manual mode and later unstarted tasks remain configurable', () => {
+  const source = input()
+  source.plan = branchedPlan()
+  const created = createTaskSession(source, NOW)
+  assert.equal(created.ok, true, created.message)
+  let session = mustUpdate(created.session, {
+    type: 'set-task-execution-mode', taskId: 'task-1', executionMode: 'api',
+  })
+  session = mustUpdate(session, {
+    type: 'assign-provider', taskId: 'task-1', providerId: 'codex',
+  })
+  assert.equal(session.plan.tasks[0].executionMode, 'manual')
+  assert.equal(session.runs[0].executionMode, 'manual')
+
+  session = mustUpdate(session, { type: 'start', taskId: 'task-1' })
+  assert.equal(canEditTaskExecutionMode(session, 'task-1'), false)
+  assert.equal(canEditTaskExecutionMode(session, 'task-3'), true)
+  session = mustUpdate(session, {
+    type: 'set-task-execution-mode', taskId: 'task-3', executionMode: 'api',
+  })
+  assert.equal(session.plan.tasks.find(task => task.id === 'task-3').executionMode, 'api')
 })

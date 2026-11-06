@@ -273,6 +273,13 @@ test('passes only direct dependency handoff data and excludes complete output', 
   })
   apply({ type: 'submit-result', taskId: 'task-1' })
   apply({ type: 'accept', taskId: 'task-1' })
+  apply({
+    type: 'confirm-handoff-artifact',
+    taskId: 'task-2',
+    dependencyTaskId: 'task-1',
+    path: 'docs/decision.md',
+    provided: true,
+  })
 
   const adapter = createAdapter()
   const outcome = await runCoordinationCycle({
@@ -287,6 +294,43 @@ test('passes only direct dependency handoff data and excludes complete output', 
   assert.deepEqual(request.directDependencies.map(item => item.dependencyTaskId), ['task-1'])
   assert.equal(request.directDependencies[0].summary, 'Safe summary.')
   assert.equal(JSON.stringify(request).includes('PRIVATE COMPLETE OUTPUT'), false)
+})
+
+test('blocks API dispatch until dependency artifacts are confirmed for the selected provider', async () => {
+  let session = createSession([
+    task('task-1', 'deepseek', 'manual'),
+    task('task-2', 'codex', 'api', ['task-1']),
+  ])
+  const apply = (action) => {
+    const outcome = updateTaskSession(session, action, NEXT)
+    assert.equal(outcome.ok, true, outcome.message)
+    session = outcome.session
+  }
+  apply({ type: 'start', taskId: 'task-1' })
+  apply({
+    type: 'update-draft', taskId: 'task-1', draft: {
+      outputText: 'result', changedFiles: ['docs/decision.md'], reviewNote: '',
+      verification: [{ label: 'task-1 accepted', status: 'passed' }],
+      handoff: {
+        summary: 'Decision ready.', keyDecisions: [], openQuestions: [],
+        artifacts: [{ path: 'docs/decision.md', description: 'Decision record.' }],
+      },
+    },
+  })
+  apply({ type: 'submit-result', taskId: 'task-1' })
+  apply({ type: 'accept', taskId: 'task-1' })
+
+  const adapter = createAdapter()
+  const outcome = await runCoordinationCycle({
+    session,
+    store: new MemoryTaskCoordinationStore(),
+    adapters: registry([['codex', adapter.adapter]]),
+    now: fixedNow(NEXT),
+  })
+  assert.equal(outcome.ok, true)
+  assert.equal(adapter.calls.dispatch.length, 0)
+  assert.equal(outcome.value.state.records[0].phase, 'needs-input')
+  assert.equal(outcome.value.state.records[0].error.code, 'NEEDS_INPUT')
 })
 
 test('blocks local-agent dispatch until dependency artifacts are readable', async () => {

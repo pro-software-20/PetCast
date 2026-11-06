@@ -304,10 +304,13 @@ test('provider, attempt, result identity, checks and paths are strictly matched'
 
 test('late old attempts and conflicting terminal results cannot overwrite current data', () => {
   let session = createSession()
-  let updated = updateTaskSession(session, { type: 'start', taskId: 'task-1' }, NEXT)
-  assert.equal(updated.ok, true, updated.message)
-  session = updated.session
-  updated = updateTaskSession(session, { type: 'fail', taskId: 'task-1', message: 'manual failure' }, NEXT)
+  const started = reconcileTaskSessionWithCoordination({
+    session,
+    coordinationState: state(session, [record('queued')]),
+  })
+  assert.equal(started.ok, true, started.message)
+  session = started.session
+  let updated = updateTaskSession(session, { type: 'fail', taskId: 'task-1', message: 'manual failure' }, NEXT)
   assert.equal(updated.ok, true, updated.message)
   session = updated.session
   updated = updateTaskSession(session, { type: 'retry', taskId: 'task-1' }, NEXT)
