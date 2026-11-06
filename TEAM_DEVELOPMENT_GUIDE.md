@@ -1320,3 +1320,25 @@ pnpm test:desktop
 pnpm test:task-ui
 git diff --check
 ```
+
+## 28. B 模块 P3.2A：执行适配器合规测试与跨组接入规范
+
+- 新增可复用的 `runExecutionAdapterConformance()`，统一检查 A 组执行适配器的派发、查询、取消、恢复、状态映射和安全错误。
+- 合规套件覆盖正常完成、等待输入、失败、限流和取消；每个场景使用独立适配器，并使用有限轮询和超时。
+- 强制验证 `dispatchId` 幂等：相同请求必须返回同一执行引用，相同 ID 对应不同请求必须返回 `INVALID_INPUT`。
+- 恢复只允许 `inspect()`，未知引用返回 `EXECUTION_NOT_FOUND`；取消和重复取消必须保持幂等。
+- 报告只包含固定检查 ID、通过状态和安全摘要，不包含凭据、绝对路径、完整供应商响应或完整任务输出。
+- 新增 `createInMemoryExecutionAdapterConformanceFixture()` 作为零网络标准样例；默认命令不会连接真实 AI 或产生费用。
+- A/B/C/D 的接入职责、数据边界和恢复原则见 `docs/B_P32A_ADAPTER_CONFORMANCE.md`。
+
+验证命令：
+
+```powershell
+pnpm test:adapter-conformance
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
