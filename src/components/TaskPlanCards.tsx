@@ -13,11 +13,17 @@ import {
   taskScopeCanRead,
 } from '../orchestration/taskHandoff'
 import {
+  canEditTaskExecutionMode,
   canEditTaskDependencies,
   canEditTaskPlan,
   updateTaskSession,
   type TaskSessionAction,
 } from '../orchestration/taskSession'
+import type { ExecutionAdapterRegistry } from '../orchestration/taskCoordinator'
+import {
+  createIdleTaskCoordinationSnapshot,
+  type TaskCoordinationControllerSnapshot,
+} from '../orchestration/TaskCoordinationController'
 import type {
   AutomaticTaskExecutionState,
   ProviderId,
@@ -42,6 +48,14 @@ export interface TaskPlanCardsProps {
   providers: ProviderProfile[]
   onSessionChange: (session: TaskSessionV1, persistImmediately?: boolean) => void
   codexEnvironment?: CodexEnvironmentState
+  coordinationSnapshot?: TaskCoordinationControllerSnapshot
+  coordinationAdapters?: ExecutionAdapterRegistry
+  onCoordinationStart?: () => Promise<void>
+  onCoordinationPause?: () => void
+  onCoordinationResume?: () => Promise<void>
+  onCoordinationRunNow?: () => Promise<void>
+  onCoordinationCancelTask?: (taskId: string) => Promise<void>
+  onCoordinationClear?: () => Promise<void>
 }
 
 type CopyStatus = 'idle' | 'success' | 'error'
@@ -79,6 +93,22 @@ const confidenceLabels = {
   high: '高可信',
   medium: '中可信',
   low: '低可信',
+} as const
+
+const coordinationStatusLabels: Record<TaskCoordinationControllerSnapshot['status'], string> = {
+  idle: '未启动',
+  confirming: '等待确认',
+  running: '正在协调',
+  paused: '已暂停',
+  'waiting-user': '等待用户处理',
+  error: '发生错误',
+  disposed: '已关闭',
+}
+
+const executionModeLabels = {
+  manual: '人工执行',
+  api: 'API 自动执行',
+  'local-agent': '本地代理',
 } as const
 
 const formatFile = (file: TaskSessionV1['plan']['tasks'][number]['files']['inputs'][number]) => (
@@ -128,7 +158,20 @@ const downloadMarkdown = (markdown: string, fileName: string) => {
   URL.revokeObjectURL(url)
 }
 
-export function TaskPlanCards({ session, providers, onSessionChange, codexEnvironment = { status: 'browser' } }: TaskPlanCardsProps) {
+export function TaskPlanCards({
+  session,
+  providers,
+  onSessionChange,
+  codexEnvironment = { status: 'browser' },
+  coordinationSnapshot = createIdleTaskCoordinationSnapshot(),
+  coordinationAdapters,
+  onCoordinationStart,
+  onCoordinationPause,
+  onCoordinationResume,
+  onCoordinationRunNow,
+  onCoordinationCancelTask,
+  onCoordinationClear,
+}: TaskPlanCardsProps) {
   const [copyStatuses, setCopyStatuses] = useState<Record<string, CopyStatus>>({})
   const [actionErrorState, setActionErrorState] = useState<{ message: string; taskId?: string } | null>(null)
   const actionError = actionErrorState?.message ?? null
@@ -180,6 +223,9 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
     ? session.plan.tasks.filter(task => !workspacePathScopesEqual(getTaskWorkspacePathScope(task.files), defaultScope)).length
     : session.plan.tasks.length
   const codexExecutionAccess = getCodexExecutionAccess(codexEnvironment)
+  const connectedCoordinationProviders = providers.filter(provider => Boolean(coordinationAdapters?.get(provider.id)))
+  const automaticTaskCount = session.plan.tasks.filter(task => task.executionMode !== 'manual').length
+  const coordinationAvailable = connectedCoordinationProviders.length > 0 && automaticTaskCount > 0
 
   useEffect(() => () => {
     const requestId = workspaceRequest.current
@@ -595,6 +641,68 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
       </div>
       </header>
 
+      <section className={`task-coordination-controls is-${coordinationSnapshot.status}`} aria-label="自动协调">
+        <header>
+          <div>
+            <strong>自动协调</strong>
+            <span role="status">{coordinationStatusLabels[coordinationSnapshot.status]}</span>
+          </div>
+          <small>
+            已接入：{connectedCoordinationProviders.length
+              ? connectedCoordinationProviders.map(provider => provider.displayName).join('、')
+              : '暂无 A 组执行适配器'}；自动任务：{automaticTaskCount}；活动任务：{coordinationSnapshot.activeTaskIds.length}
+          </small>
+        </header>
+        {coordinationSnapshot.status === 'confirming' && (
+          <div className="task-coordination-confirm" role="alert">
+            <strong>确认启动自动协调</strong>
+            <p>将派发 {automaticTaskCount} 个已配置自动执行的任务；全局并发 2、同一 Provider 并发 1。外部调用可能产生费用，应用重启后需要重新确认。</p>
+          </div>
+        )}
+        {coordinationSnapshot.status === 'paused' && (
+          <p className="task-coordination-pause-note" role="status">
+            已停止新派发和轮询，外部执行可能仍在继续。如需终止任务，请单独点击取消执行。
+          </p>
+        )}
+        {!connectedCoordinationProviders.length && (
+          <p className="task-coordination-unavailable" role="status">
+            A 组执行适配器尚未接入；不会创建模拟执行或静默切换 Provider，人工流程仍可使用。
+          </p>
+        )}
+        {coordinationSnapshot.error && <p className="task-plan-error" role="alert">{coordinationSnapshot.error}</p>}
+        {coordinationSnapshot.notices.map(notice => (
+          <p key={`${notice.dispatchId}:${notice.code}`} className={`task-coordination-notice is-${notice.level}`} role={notice.level === 'error' ? 'alert' : 'status'}>
+            {notice.message}
+          </p>
+        ))}
+        <div className="task-coordination-actions">
+          {coordinationSnapshot.status === 'confirming' ? (
+            <>
+              <button type="button" className="is-primary" onClick={() => void onCoordinationStart?.()}>确认并启动</button>
+              <button type="button" onClick={onCoordinationPause}>取消</button>
+            </>
+          ) : coordinationSnapshot.status === 'running' ? (
+            <>
+              <button type="button" onClick={onCoordinationPause}>暂停</button>
+              <button type="button" onClick={() => void onCoordinationRunNow?.()}>立即检查</button>
+            </>
+          ) : coordinationSnapshot.status === 'paused' ? (
+            <>
+              <button type="button" className="is-primary" disabled={!coordinationAvailable} onClick={() => void onCoordinationResume?.()}>恢复</button>
+              <button type="button" onClick={() => void onCoordinationRunNow?.()}>仅检查已有执行</button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="is-primary" disabled={!coordinationAvailable} onClick={() => void onCoordinationStart?.()}>启动自动协调</button>
+              <button type="button" onClick={() => void onCoordinationRunNow?.()}>检查协调记录</button>
+            </>
+          )}
+          {(coordinationSnapshot.status === 'error' || coordinationSnapshot.error) && (
+            <button type="button" className="is-danger" onClick={() => void onCoordinationClear?.()}>清除协调记录</button>
+          )}
+        </div>
+      </section>
+
       <details className="task-workspace-details">
         <summary>项目文件与权限<span>{session.plan.workspace?.displayName ?? '可选，尚未选择'}</span></summary>
       <section className="task-workspace-selector">
@@ -670,6 +778,14 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
           const selectedKnown = selectableProviders.some(provider => provider.id === selectedProviderId)
           const selectedProviderName = selectableProviders.find(provider => provider.id === selectedProviderId)?.displayName
             ?? selectedProviderId
+          const selectedProviderProfile = providers.find(provider => provider.id === selectedProviderId)
+          const coordinationAdapterAvailable = Boolean(coordinationAdapters?.get(selectedProviderId))
+          const availableAutomaticModes = (selectedProviderProfile?.executionModes ?? [])
+            .filter(mode => mode !== 'manual')
+          const coordinationRecord = [...coordinationSnapshot.records]
+            .filter(record => record.taskId === task.id)
+            .sort((left, right) => right.attempt - left.attempt)[0]
+          const executionModeEditable = canEditTaskExecutionMode(session, task.id) && !coordinationRecord
           const recommendedProviderName = selectableProviders.find(
             provider => provider.id === task.recommendedProviderId,
           )?.displayName ?? task.recommendedProviderId
@@ -689,6 +805,10 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
           const dependencyArtifacts = getDependencyHandoffArtifacts(session, task.id)
           const manualHandoffReadiness = getHandoffReadiness(session, task.id, 'manual', selectedProviderId)
           const automaticHandoffReadiness = getHandoffReadiness(session, task.id, 'local-agent')
+          const automaticModeReadiness = {
+            api: manualHandoffReadiness,
+            'local-agent': automaticHandoffReadiness,
+          }
           const dependentTasks = session.plan.tasks.filter(candidate => candidate.dependsOn.includes(task.id))
           const copyStatus = copyStatuses[task.id] ?? 'idle'
           const dependencyNames = task.dependsOn.map(dependencyId => (
@@ -705,6 +825,8 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
           const automaticCategory = task.providerRecommendation?.category
           const automaticCandidate = Boolean(
             run.status === 'ready'
+            && task.executionMode === 'manual'
+            && run.executionMode === 'manual'
             && selectedProviderId === 'codex'
             && (automaticCategory === 'coding' || automaticCategory === 'testing'),
           )
@@ -777,6 +899,57 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
                     : <p>旧会话未记录推荐依据；仍可按实际需要人工选择 AI。</p>}
                 </div>
               </div>
+
+              <section className="task-execution-mode" aria-label="任务执行方式">
+                <label htmlFor={`task-execution-mode-${task.id}`}>执行方式</label>
+                <select
+                  id={`task-execution-mode-${task.id}`}
+                  value={task.executionMode}
+                  disabled={!executionModeEditable || Boolean(preparedExecution) || Boolean(preparingExecution)}
+                  onChange={event => applyAction({
+                    type: 'set-task-execution-mode',
+                    taskId: task.id,
+                    executionMode: event.target.value as 'manual' | 'api' | 'local-agent',
+                  })}
+                >
+                  <option value="manual">人工执行</option>
+                  {availableAutomaticModes.map(mode => (
+                    <option
+                      key={mode}
+                      value={mode}
+                      disabled={!coordinationAdapterAvailable || !automaticModeReadiness[mode].ready}
+                    >
+                      {executionModeLabels[mode]}
+                      {!coordinationAdapterAvailable
+                        ? '（适配器未接入）'
+                        : !automaticModeReadiness[mode].ready
+                          ? '（交接文件未就绪）'
+                          : ''}
+                    </option>
+                  ))}
+                  {task.executionMode !== 'manual' && !availableAutomaticModes.includes(task.executionMode) && (
+                    <option value={task.executionMode}>{executionModeLabels[task.executionMode]}</option>
+                  )}
+                </select>
+                <small>
+                  {coordinationAdapterAvailable
+                    ? availableAutomaticModes.some(mode => !automaticModeReadiness[mode].ready)
+                      ? '部分自动模式仍缺少交接文件确认或读取授权；补齐后才能启用。'
+                      : '自动模式由统一协调器派发；切换执行 AI 后会恢复为人工执行。'
+                    : '当前 Provider 的 A 组执行适配器尚未接入，只能使用人工流程。'}
+                </small>
+                {coordinationRecord && (
+                  <div className={`task-coordination-record is-${coordinationRecord.phase}`} role="status">
+                    <span>协调状态：{coordinationRecord.phase}</span>
+                    <code>派发 {coordinationRecord.dispatchId.slice(-8)}</code>
+                    <time dateTime={coordinationRecord.updatedAt}>{new Date(coordinationRecord.updatedAt).toLocaleString()}</time>
+                    {coordinationRecord.error && <strong>{coordinationRecord.error.message}</strong>}
+                    {coordinationRecord.reference && ['queued', 'running', 'needs-input', 'unknown'].includes(coordinationRecord.phase) && (
+                      <button type="button" onClick={() => void onCoordinationCancelTask?.(task.id)}>取消执行</button>
+                    )}
+                  </div>
+                )}
+              </section>
 
               {dependencyResults.length > 0 && (
                 <section className="task-handoff-received" aria-label="前置任务交接">
@@ -866,10 +1039,10 @@ export function TaskPlanCards({ session, providers, onSessionChange, codexEnviro
                   <button
                     type="button"
                     className="is-primary"
-                    disabled={!manualHandoffReadiness.ready || Boolean(preparedExecution) || Boolean(preparingExecution)}
+                    disabled={task.executionMode !== 'manual' || !manualHandoffReadiness.ready || Boolean(preparedExecution) || Boolean(preparingExecution)}
                     onClick={() => applyAction({ type: 'start', taskId: task.id })}
                   >
-                    已交给 AI，开始跟踪
+                    {task.executionMode === 'manual' ? '已交给 AI，开始跟踪' : '等待自动协调派发'}
                   </button>
                 )}
                 {copyStatus !== 'idle' && (

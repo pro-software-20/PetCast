@@ -44,6 +44,7 @@ export type EditableTaskDefinition = Pick<
 
 export type TaskSessionAction =
   | { type: 'assign-provider'; taskId: string; providerId: ProviderId }
+  | { type: 'set-task-execution-mode'; taskId: string; executionMode: ExecutionMode }
   | { type: 'set-task-dependencies'; taskId: string; dependsOn: string[] }
   | { type: 'set-workspace'; workspace: NonNullable<TaskPlan['workspace']> }
   | { type: 'set-workspace-default-scope'; scope: WorkspacePathScope; applyToAll: boolean }
@@ -160,6 +161,17 @@ export const canEditTaskDependencies = (session: TaskSessionV1) => session.runs.
 ))
 
 export const canEditTaskPlan = canEditTaskDependencies
+
+export const canEditTaskExecutionMode = (session: TaskSessionV1, taskId: string) => {
+  const run = session.runs.find(candidate => candidate.taskId === taskId)
+  return Boolean(run
+    && ['waiting', 'ready'].includes(run.status)
+    && run.attempt === 0
+    && !run.startedAt
+    && !run.completedAt
+    && !run.result
+    && !run.automaticExecution)
+}
 
 const refreshPreExecutionStatuses = (session: TaskSessionV1) => {
   const statusById = new Map(session.runs.map(run => [run.taskId, run.status]))
@@ -290,6 +302,18 @@ export function updateTaskSession(
           })
         }
         run.assignedProviderId = action.providerId
+        task.executionMode = 'manual'
+        run.executionMode = 'manual'
+        break
+      case 'set-task-execution-mode':
+        if (!canEditTaskExecutionMode(session, task.id)) {
+          return invalidTransition('任务开始后不能修改执行方式。')
+        }
+        if (!['manual', 'api', 'local-agent'].includes(action.executionMode)) {
+          return { ok: false, code: 'INVALID_DATA', message: '执行方式无效。' }
+        }
+        task.executionMode = action.executionMode
+        run.executionMode = 'manual'
         break
       case 'authorize-handoff-path': {
         if (!['waiting', 'ready'].includes(run.status) || run.attempt > 0) {
@@ -363,6 +387,9 @@ export function updateTaskSession(
       }
       case 'start':
         if (run.status !== 'ready') return invalidTransition('只有已就绪任务可以开始。')
+        if (task.executionMode !== 'manual' || run.executionMode !== 'manual') {
+          return invalidTransition('自动任务必须由统一协调器派发，不能从人工入口开始。')
+        }
         if (!getHandoffReadiness(session, task.id, 'manual', run.assignedProviderId).ready) {
           return invalidTransition('请先确认所有前置任务文件已经提供给当前 AI。')
         }
@@ -452,6 +479,7 @@ export function updateTaskSession(
         break
       case 'start-automatic':
         if (run.status !== 'ready' || run.assignedProviderId !== 'codex'
+          || task.executionMode !== 'manual'
           || !['coding', 'testing'].includes(task.providerRecommendation?.category ?? '')) {
           return invalidTransition('只有已就绪且选择 Codex 的任务可以自动执行。')
         }

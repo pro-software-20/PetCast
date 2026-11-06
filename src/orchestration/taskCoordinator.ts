@@ -77,6 +77,7 @@ export interface RunTaskCoordinationCycleInput {
   policy?: Partial<TaskCoordinationPolicy>
   signal?: AbortSignal
   now?: () => Date
+  canDispatch?: () => boolean
 }
 
 export interface CancelCoordinatedTaskInput {
@@ -360,6 +361,7 @@ export async function runCoordinationCycle(
 
   for (const task of session.plan.tasks) {
     if (aborted(input.signal)) return schedulerError('CANCELLED', '任务协调周期已取消。')
+    if (input.canDispatch && !input.canDispatch()) break
     if (active().length >= policyResult.value.globalConcurrency) break
     const run = session.runs.find(candidate => candidate.taskId === task.id)
     if (!run || run.status !== 'ready' || !['api', 'local-agent'].includes(task.executionMode)) continue
@@ -382,10 +384,14 @@ export async function runCoordinationCycle(
     if (!dependencies) continue
     state.records.push(record)
 
-    if (task.executionMode === 'local-agent') {
-      const handoff = getHandoffReadiness(session, task.id, 'local-agent', providerId)
+    if (task.executionMode === 'api' || task.executionMode === 'local-agent') {
+      const handoffMode = task.executionMode === 'local-agent' ? 'local-agent' : 'manual'
+      const handoff = getHandoffReadiness(session, task.id, handoffMode, providerId)
       if (!handoff.ready) {
-        setRecordFailure(record, safeAdapterError('NEEDS_INPUT', `仍有 ${handoff.missing.length} 个交接文件未获得读取授权。`), cycleTime, effects)
+        const message = task.executionMode === 'local-agent'
+          ? `仍有 ${handoff.missing.length} 个交接文件未获得读取授权。`
+          : `仍有 ${handoff.missing.length} 个交接文件未确认提供给当前 API 执行适配器。`
+        setRecordFailure(record, safeAdapterError('NEEDS_INPUT', message), cycleTime, effects)
         const saved = await saveState(input.store, state, cycleTime)
         if (!saved.ok) return saved
         continue
@@ -403,6 +409,16 @@ export async function runCoordinationCycle(
     // Persist the idempotency key before crossing the adapter boundary.
     const intentSaved = await saveState(input.store, state, cycleTime)
     if (!intentSaved.ok) return intentSaved
+
+    // Pause may be requested while the intent is being persisted. Do not cross
+    // the adapter boundary after that point, and remove the unspent intent so a
+    // later resume can safely create the same deterministic dispatch again.
+    if (input.canDispatch && !input.canDispatch()) {
+      state.records = state.records.filter(candidate => candidate !== record)
+      const pausedSaved = await saveState(input.store, state, cycleTime)
+      if (!pausedSaved.ok) return pausedSaved
+      break
+    }
 
     const request: ExecutionDispatchRequest = {
       dispatchId,

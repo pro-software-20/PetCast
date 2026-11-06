@@ -1297,3 +1297,26 @@ pnpm test:desktop
 pnpm test:task-ui
 git diff --check
 ```
+
+## 27. B 模块 P3.1C：持续协调控制与适配器联调入口
+
+- 新增 `TaskCoordinationController`，使用单次 `setTimeout` 按 `nextPollAt` 连续驱动 P3.1A 调度周期，避免固定间隔重叠执行。
+- 每个周期按“调度与查询 → P3.1B 写回 → 保存会话 → 发布安全状态 → 安排下一周期”执行；会话或协调存储失败时自动暂停。
+- 增加启动确认、暂停、恢复、立即检查、单任务取消和显式清除损坏协调记录。暂停只停止新派发和轮询，不会伪装成外部执行已终止。
+- 应用重启或重新打开包含自动任务的会话时默认暂停；恢复和手动检查会先查询已有执行引用，禁止隐式重复收费调用。
+- 任务卡新增人工、API 自动执行和本地代理选择。只有 Provider 声明支持且 A 组注册表已注入适配器时才能选择自动模式；切换 Provider 会恢复人工模式。
+- 默认发行版注册表为空，不产生模拟执行或外部调用；页面明确提示“A 组执行适配器尚未接入”，人工任务和旧 Codex 隔离执行流程继续可用。
+- 同一任务不能同时通过统一协调器、人工开始和旧 Codex 专用入口执行。自动任务必须由协调器派发，结果仍只进入 `review` 并等待人工验收。
+- 新增控制器和状态层测试，覆盖运行期确认、暂停恢复、仅查询恢复、取消、空注册表、执行模式互斥和后续任务独立配置。
+- A 组注入方式、安全边界和当前限制详见 `docs/B_P31C_COORDINATION_CONTROLLER.md`。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
