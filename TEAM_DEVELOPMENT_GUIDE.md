@@ -1276,3 +1276,24 @@ pnpm test:desktop
 pnpm test:task-ui
 git diff --check
 ```
+
+## 26. B 模块 P3.1B：协调效果接入任务会话
+
+- 新增 `reconcileTaskSessionWithCoordination()`，以持久化 `TaskCoordinationStateV1` 为恢复事实来源，将 A 组执行状态安全映射到 `TaskSessionV1`；临时 effects 只用于关联校验和即时提示。
+- `queued`、`running`、`needs-input`、`completed`、`failed`、`cancelled` 和 `unknown` 均有明确映射；`completed` 只进入 `review`，不会绕过人工验收自动完成任务。
+- 协调开始、恢复、等待输入、完成、失败和取消使用专用会话操作。任务尝试次数只在首次确认派发后增加一次，重复恢复不会重复计数。
+- 严格核对会话、计划、任务、Provider、尝试次数、派发 ID、执行引用、验收标签和安全相对路径；旧尝试、迟到结果和错误关联不能覆盖当前结果。
+- `dispatching` 无收据、派发前失败或未知执行不会伪装成运行中，也不会自动重派或切换 Provider；存储失败时保留原会话，后续可从协调状态重新恢复。
+- 会话校验兼容统一适配器的 `api` 执行模式；现有人工流程和 Codex 专用自动执行元信息保持兼容。
+- 详细状态映射和恢复边界见 `docs/B_P31B_COORDINATION_SESSION.md`。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```

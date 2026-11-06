@@ -255,7 +255,7 @@ export function validateTaskSession(value: unknown): TaskSessionValidationResult
       runById.set(run.taskId, run)
       if (!statuses.has(String(run.status))) push(issues, 'INVALID_STATE', `${path}.status`, '任务状态无效。')
       if (!isProviderId(run.assignedProviderId)) push(issues, 'INVALID_SHAPE', `${path}.assignedProviderId`, 'Provider ID 无效。')
-      if (!['manual', 'local-agent'].includes(String(run.executionMode))) {
+      if (!['manual', 'api', 'local-agent'].includes(String(run.executionMode))) {
         push(issues, 'INVALID_STATE', `${path}.executionMode`, '任务执行模式无效。')
       }
       if (!Number.isInteger(run.attempt) || Number(run.attempt) < 0) push(issues, 'INVALID_SHAPE', `${path}.attempt`, '尝试次数必须是非负整数。')
@@ -296,8 +296,6 @@ export function validateTaskSession(value: unknown): TaskSessionValidationResult
             push(issues, 'INVALID_STATE', `${path}.automaticExecution.state`, '中断执行必须等待用户确认。')
           }
         }
-      } else if (run.executionMode === 'local-agent') {
-        push(issues, 'INVALID_STATE', `${path}.automaticExecution`, '本地代理任务必须记录自动执行元信息。')
       }
 
       if (!isRecord(run.draft) || typeof run.draft.outputText !== 'string' || typeof run.draft.reviewNote !== 'string') {
