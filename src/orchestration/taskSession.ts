@@ -11,12 +11,14 @@ import {
   normalizeTaskHandoffPackage,
 } from './taskHandoff'
 import type {
+  ExecutionMode,
   ProviderId,
   TaskFileScope,
   TaskHandoffPackage,
   TaskNode,
   TaskPlan,
   TaskProviderRecommendation,
+  TaskExecutionResult,
   TaskResultDraft,
   TaskRunRecord,
   TaskSessionV1,
@@ -48,6 +50,12 @@ export type TaskSessionAction =
   | { type: 'apply-workspace-default-scope'; taskId: string }
   | { type: 'update-task-definition'; taskId: string; task: EditableTaskDefinition }
   | { type: 'start'; taskId: string }
+  | { type: 'coordination-start'; taskId: string; providerId: ProviderId; attempt: number; executionMode: Exclude<ExecutionMode, 'manual'>; message?: string }
+  | { type: 'coordination-resume'; taskId: string; providerId: ProviderId; attempt: number; message?: string }
+  | { type: 'coordination-needs-input'; taskId: string; providerId: ProviderId; attempt: number; message: string }
+  | { type: 'coordination-complete'; taskId: string; providerId: ProviderId; attempt: number; result: TaskExecutionResult }
+  | { type: 'coordination-fail'; taskId: string; providerId: ProviderId; attempt: number; message: string }
+  | { type: 'coordination-cancel'; taskId: string; providerId: ProviderId; attempt: number; message?: string }
   | { type: 'start-automatic'; taskId: string; executionId: string; model: string }
   | { type: 'complete-automatic'; taskId: string; artifactId?: string; summary: string; outputText: string; changedFiles: string[]; usage?: { inputTokens: number; outputTokens: number } }
   | { type: 'apply-automatic'; taskId: string }
@@ -363,6 +371,84 @@ export function updateTaskSession(
         run.completedAt = undefined
         run.statusMessage = undefined
         run.attempt += 1
+        break
+      case 'coordination-start':
+        if (run.status !== 'ready') return invalidTransition('只有已就绪任务可以接收协调执行。')
+        if (run.assignedProviderId !== action.providerId || task.executionMode !== action.executionMode) {
+          return { ok: false, code: 'INVALID_DATA', message: '协调执行与任务 Provider 或执行模式不一致。' }
+        }
+        if (action.attempt !== run.attempt + 1) {
+          return { ok: false, code: 'INVALID_DATA', message: '协调执行尝试次数与任务会话不一致。' }
+        }
+        run.status = 'running'
+        run.executionMode = action.executionMode
+        run.startedAt = now
+        run.completedAt = undefined
+        run.statusMessage = action.message?.trim() || undefined
+        run.attempt = action.attempt
+        break
+      case 'coordination-resume':
+        if (run.status !== 'needs-input' || run.assignedProviderId !== action.providerId
+          || run.attempt !== action.attempt || run.executionMode === 'manual') {
+          return invalidTransition('当前任务不能根据协调状态恢复运行。')
+        }
+        run.status = 'running'
+        run.statusMessage = action.message?.trim() || undefined
+        break
+      case 'coordination-needs-input':
+        if (run.status !== 'running' || run.assignedProviderId !== action.providerId
+          || run.attempt !== action.attempt || run.executionMode === 'manual') {
+          return invalidTransition('当前任务不能进入协调等待状态。')
+        }
+        run.status = 'needs-input'
+        run.statusMessage = action.message.trim() || '执行适配器需要补充信息。'
+        break
+      case 'coordination-complete': {
+        if (!['running', 'needs-input'].includes(run.status)
+          || run.assignedProviderId !== action.providerId
+          || run.attempt !== action.attempt
+          || run.executionMode === 'manual') {
+          return invalidTransition('当前任务不能接收协调执行结果。')
+        }
+        if (action.result.taskId !== run.taskId || action.result.providerId !== run.assignedProviderId) {
+          return { ok: false, code: 'INVALID_DATA', message: '协调执行结果与当前任务不一致。' }
+        }
+        const outputText = action.result.outputText?.trim() || action.result.summary.trim()
+        if (!outputText) return { ok: false, code: 'INVALID_DATA', message: '协调执行结果不能为空。' }
+        run.draft = {
+          outputText,
+          changedFiles: clone(action.result.changedFiles),
+          verification: clone(action.result.verification),
+          reviewNote: action.result.reviewNote ?? '',
+          ...(action.result.handoff ? { handoff: clone(action.result.handoff) } : {}),
+        }
+        run.result = {
+          ...clone(action.result),
+          outputText,
+        }
+        run.status = 'review'
+        run.statusMessage = undefined
+        break
+      }
+      case 'coordination-fail':
+        if (!['running', 'needs-input'].includes(run.status)
+          || run.assignedProviderId !== action.providerId
+          || run.attempt !== action.attempt
+          || run.executionMode === 'manual') {
+          return invalidTransition('当前任务不能接收协调失败状态。')
+        }
+        run.status = 'failed'
+        run.statusMessage = action.message.trim() || '协调执行失败。'
+        break
+      case 'coordination-cancel':
+        if (!['running', 'needs-input'].includes(run.status)
+          || run.assignedProviderId !== action.providerId
+          || run.attempt !== action.attempt
+          || run.executionMode === 'manual') {
+          return invalidTransition('当前任务不能接收协调取消状态。')
+        }
+        run.status = 'cancelled'
+        run.statusMessage = action.message?.trim() || '协调执行已取消。'
         break
       case 'start-automatic':
         if (run.status !== 'ready' || run.assignedProviderId !== 'codex'
