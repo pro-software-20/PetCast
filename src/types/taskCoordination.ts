@@ -204,6 +204,37 @@ export interface EvaluationReport {
   createdAt: string
 }
 
+/**
+ * Minimal, non-sensitive execution material that B may send to a D evaluator.
+ * It intentionally excludes the provider's complete output and any credentials.
+ */
+export interface TaskEvaluationRequest {
+  evaluationId: string
+  sessionId: string
+  planId: string
+  taskId: string
+  dispatchId: string
+  attempt: number
+  providerId: ProviderId
+  task: Pick<
+    TaskNode,
+    'id' | 'title' | 'description' | 'expectedDeliverables' | 'acceptanceChecks'
+  >
+  result: {
+    summary: string
+    verification: TaskVerificationResult[]
+    changedFiles: string[]
+    evidence: EvaluationEvidenceRef[]
+  }
+}
+
+export interface TaskEvaluationAdapter {
+  evaluate(
+    request: TaskEvaluationRequest,
+    signal: AbortSignal,
+  ): Promise<EvaluationReport>
+}
+
 export type AcceptancePolicyMode = 'manual' | 'trusted-evaluation'
 
 export interface AcceptancePolicy {
@@ -240,5 +271,27 @@ export interface AcceptanceDecision {
   action: AcceptanceDecisionAction
   reason: AcceptanceDecisionReason
   requiresHumanConfirmation: boolean
+}
+
+export type TaskAcceptanceRecordStatus = 'received' | 'decided'
+
+/** Durable B-side evaluation state. It remains separate from TaskSessionV1. */
+export interface TaskAcceptanceRecord {
+  evaluationId: string
+  taskId: string
+  dispatchId: string
+  attempt: number
+  report: EvaluationReport
+  status: TaskAcceptanceRecordStatus
+  decision?: AcceptanceDecision
+  receivedAt: string
+}
+
+export interface TaskAcceptanceStateV1 {
+  schemaVersion: 1
+  sessionId: string
+  planId: string
+  updatedAt: string
+  records: TaskAcceptanceRecord[]
 }
 

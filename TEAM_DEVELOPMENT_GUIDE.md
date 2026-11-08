@@ -1342,3 +1342,27 @@ pnpm test:desktop
 pnpm test:task-ui
 git diff --check
 ```
+
+## 29. B 模块 P3.3A：D 评价适配器合规测试与验收决策桥接
+
+- 新增 `TaskEvaluationRequest` 与 `TaskEvaluationAdapter`，只向 D 提供任务目标、交付物、验收标准、执行摘要、逐项验证、安全相对路径和非敏感证据引用。
+- 新增 `runTaskEvaluationAdapterConformance()`，使用零网络 fixture 检查 accepted、revise、unknown、取消、非法响应、关联一致性、幂等和输入不可变。
+- 新增独立 `TaskAcceptanceStateV1` 与 `petcast.task-acceptance.v1` 存储，不修改 `TaskSessionV1`、`TaskCoordinationStateV1` 或公共 schema。
+- `reconcileTaskEvaluation()` 只接收处于 `review` 的当前任务及最新派发、最新尝试报告；旧 Provider、迟到派发、跨任务报告和冲突评价 ID 均被拒绝。
+- 默认 `manual` 策略始终生成 `manual-review`。受信策略也只有在评价方法受信、结论为 accepted 且全部验收项通过时才能生成 complete 建议。
+- P3.3A 仅生成并保存 B 侧验收建议，不自动完成任务、不自动返工、不自动重试，也不产生网络请求或模型费用。
+- D 组历史评价账本继续用于报告与统计，不能替代带有最新 `dispatchId`、逐项验证和证据关联的实时评价报告。
+- 完整 D 组接入要求、数据边界和恢复规则见 `docs/B_P33A_EVALUATION_CONFORMANCE.md`。
+
+验证命令：
+
+```powershell
+pnpm test:evaluation-conformance
+pnpm test:adapter-conformance
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
