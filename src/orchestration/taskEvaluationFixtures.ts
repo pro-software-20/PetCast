@@ -10,7 +10,7 @@ import type {
 
 const fingerprint = (value: unknown) => JSON.stringify(value)
 
-class InMemoryTaskEvaluationAdapter implements TaskEvaluationAdapter {
+export class InMemoryTaskEvaluationAdapter implements TaskEvaluationAdapter {
   private readonly requests = new Map<string, string>()
   private readonly reports = new Map<string, EvaluationReport>()
 
@@ -92,3 +92,7 @@ export const createInMemoryTaskEvaluationAdapterConformanceFixture = (
   createAdapter: scenario => new InMemoryTaskEvaluationAdapter(scenario),
   createRequest: createTaskEvaluationRequestFixture,
 })
+
+export const createInMemoryTaskEvaluationAdapter = (
+  scenario: TaskEvaluationAdapterConformanceScenario = 'accepted',
+): TaskEvaluationAdapter => new InMemoryTaskEvaluationAdapter(scenario)

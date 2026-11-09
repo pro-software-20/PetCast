@@ -70,6 +70,7 @@ export type TaskSessionAction =
   | { type: 'confirm-handoff-artifact'; taskId: string; dependencyTaskId: string; path: string; provided: boolean }
   | { type: 'update-draft'; taskId: string; draft: Partial<TaskResultDraft> }
   | { type: 'needs-input'; taskId: string; message: string }
+  | { type: 'review-needs-input'; taskId: string; message?: string }
   | { type: 'resume'; taskId: string }
   | { type: 'submit-result'; taskId: string }
   | { type: 'accept'; taskId: string }
@@ -615,6 +616,14 @@ export function updateTaskSession(
         if (run.status !== 'running') return invalidTransition('只有进行中的任务可以等待补充信息。')
         run.status = 'needs-input'
         run.statusMessage = action.message.trim() || '需要补充信息。'
+        break
+      case 'review-needs-input':
+        if (run.status !== 'review' || !run.result) return invalidTransition('只有待验收任务可以按评价建议补充信息。')
+        if (run.automaticExecution?.state === 'review') {
+          return invalidTransition('请先应用或丢弃 Codex 文件改动，再补充信息。')
+        }
+        run.status = 'needs-input'
+        run.statusMessage = action.message?.trim() || '评价建议补充信息，请核对后继续。'
         break
       case 'resume':
         if (run.status !== 'needs-input') return invalidTransition('当前任务不处于等待补充信息状态。')

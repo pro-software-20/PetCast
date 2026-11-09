@@ -343,6 +343,32 @@ test('allows manual verification and notes to be completed during review', () =>
   assert.deepEqual(session.runs.map(run => run.status), ['done', 'ready'])
 })
 
+test('allows an explicit human decision to request more information during review', () => {
+  let session = mustUpdate(mustCreate(), { type: 'start', taskId: 'task-1' })
+  session = mustUpdate(session, {
+    type: 'update-draft',
+    taskId: 'task-1',
+    draft: { outputText: '已有结果，但评价建议补充关键依据。' },
+  })
+  session = mustUpdate(session, { type: 'submit-result', taskId: 'task-1' })
+  const originalResult = structuredClone(session.runs[0].result)
+
+  session = mustUpdate(session, {
+    type: 'review-needs-input',
+    taskId: 'task-1',
+    message: '请补充数据来源。',
+  })
+  assert.equal(session.runs[0].status, 'needs-input')
+  assert.equal(session.runs[0].statusMessage, '请补充数据来源。')
+  assert.deepEqual(session.runs[0].result, originalResult)
+
+  const invalid = updateTaskSession(mustCreate(), {
+    type: 'review-needs-input',
+    taskId: 'task-1',
+  }, DONE)
+  assert.equal(invalid.ok, false)
+})
+
 test('supports needs-input, failure, cancellation and retry transitions', () => {
   let session = mustUpdate(mustCreate(), { type: 'start', taskId: 'task-1' })
   session = mustUpdate(session, { type: 'needs-input', taskId: 'task-1', message: '缺少目标平台。' })

@@ -25,6 +25,13 @@ import {
   type TaskCoordinationControllerSnapshot,
 } from '../orchestration/TaskCoordinationController'
 import type {
+  AcceptanceDecisionAction,
+  AcceptanceDecisionReason,
+  EvaluationVerdict,
+  TaskAcceptanceRecord,
+  TaskAcceptanceStateV1,
+} from '../types/taskCoordination'
+import type {
   AutomaticTaskExecutionState,
   ProviderId,
   ProviderProfile,
@@ -56,6 +63,12 @@ export interface TaskPlanCardsProps {
   onCoordinationRunNow?: () => Promise<void>
   onCoordinationCancelTask?: (taskId: string) => Promise<void>
   onCoordinationClear?: () => Promise<void>
+  acceptanceState?: TaskAcceptanceStateV1 | null
+  evaluationAdapterAvailable?: boolean
+  evaluatingTaskId?: string | null
+  evaluationError?: { taskId: string; message: string } | null
+  onRequestEvaluation?: (taskId: string) => Promise<void> | void
+  onCancelEvaluation?: (taskId: string) => void
 }
 
 type CopyStatus = 'idle' | 'success' | 'error'
@@ -111,6 +124,31 @@ const executionModeLabels = {
   'local-agent': '本地代理',
 } as const
 
+const evaluationVerdictLabels: Record<EvaluationVerdict, string> = {
+  accepted: '通过',
+  revise: '建议修改',
+  unknown: '无法判断',
+}
+
+const acceptanceActionLabels: Record<AcceptanceDecisionAction, string> = {
+  complete: '建议确认完成',
+  'request-changes': '建议退回修改',
+  retry: '建议退回并重试',
+  'needs-input': '建议补充信息',
+  'manual-review': '继续人工复核',
+  fail: '建议标记失败',
+}
+
+const acceptanceReasonLabels: Record<AcceptanceDecisionReason, string> = {
+  MANUAL_POLICY: '当前采用人工验收策略，评价仅供参考。',
+  UNTRUSTED_METHOD: '当前评价方法不在受信列表中。',
+  ACCEPTED_AND_VERIFIED: '评价结论为通过，且全部验收项已通过。',
+  ACCEPTED_WITH_INCOMPLETE_CHECKS: '评价建议通过，但仍有验收项未通过。',
+  REVISION_REQUESTED: '评价建议修改当前结果。',
+  MAX_ATTEMPTS_REACHED: '已达到最大尝试次数，需要人工复核。',
+  EVALUATION_UNKNOWN: '评价器无法给出确定结论。',
+}
+
 const formatFile = (file: TaskSessionV1['plan']['tasks'][number]['files']['inputs'][number]) => (
   file.kind === 'workspace'
     ? file.path
@@ -158,6 +196,45 @@ const downloadMarkdown = (markdown: string, fileName: string) => {
   URL.revokeObjectURL(url)
 }
 
+const EvaluationRecordDetails = ({ record }: { record: TaskAcceptanceRecord }) => (
+  <div className={`task-evaluation-report is-${record.report.verdict}`}>
+    <header>
+      <strong>评价结论：{evaluationVerdictLabels[record.report.verdict]}</strong>
+      <time dateTime={record.receivedAt}>{new Date(record.receivedAt).toLocaleString()}</time>
+    </header>
+    <dl>
+      <div><dt>评价方法</dt><dd>{record.report.method}</dd></div>
+      <div><dt>规则版本</dt><dd>{record.report.ruleVersion}</dd></div>
+      <div><dt>比较依据</dt><dd>{record.report.comparisonBasis}</dd></div>
+    </dl>
+    <ul className="task-evaluation-verification">
+      {record.report.verification.map(item => (
+        <li key={item.label}>
+          <strong>{item.label}</strong>
+          <span>{verificationLabels[item.status]}</span>
+          {item.details && <small>{item.details}</small>}
+        </li>
+      ))}
+    </ul>
+    {record.report.evidence.length > 0 && <details>
+      <summary>脱敏证据摘要（{record.report.evidence.length}）</summary>
+      <ul>{record.report.evidence.map(evidence => (
+        <li key={`${evidence.type}:${evidence.reference}`}>
+          <strong>{evidence.type}</strong>
+          <code>{evidence.reference}</code>
+          <span>{evidence.summary}</span>
+        </li>
+      ))}</ul>
+    </details>}
+    {record.report.note && <p>安全备注：{record.report.note}</p>}
+    {record.decision && <div className="task-evaluation-decision" role="status">
+      <strong>B 建议：{acceptanceActionLabels[record.decision.action]}</strong>
+      <span>{acceptanceReasonLabels[record.decision.reason]}</span>
+      <small>所有状态变化仍需用户确认。</small>
+    </div>}
+  </div>
+)
+
 export function TaskPlanCards({
   session,
   providers,
@@ -171,6 +248,12 @@ export function TaskPlanCards({
   onCoordinationRunNow,
   onCoordinationCancelTask,
   onCoordinationClear,
+  acceptanceState,
+  evaluationAdapterAvailable = false,
+  evaluatingTaskId,
+  evaluationError,
+  onRequestEvaluation,
+  onCancelEvaluation,
 }: TaskPlanCardsProps) {
   const [copyStatuses, setCopyStatuses] = useState<Record<string, CopyStatus>>({})
   const [actionErrorState, setActionErrorState] = useState<{ message: string; taskId?: string } | null>(null)
@@ -785,6 +868,19 @@ export function TaskPlanCards({
           const coordinationRecord = [...coordinationSnapshot.records]
             .filter(record => record.taskId === task.id)
             .sort((left, right) => right.attempt - left.attempt)[0]
+          const taskEvaluationRecords = [...(acceptanceState?.records ?? [])]
+            .filter(record => record.taskId === task.id)
+            .sort((left, right) => right.attempt - left.attempt
+              || right.receivedAt.localeCompare(left.receivedAt))
+          const currentEvaluationRecord = run.status === 'review'
+            ? taskEvaluationRecords.find(record => (
+              record.attempt === run.attempt
+              && record.dispatchId === coordinationRecord?.dispatchId
+            ))
+            : undefined
+          const historicalEvaluationRecords = taskEvaluationRecords.filter(
+            record => record.evaluationId !== currentEvaluationRecord?.evaluationId,
+          )
           const executionModeEditable = canEditTaskExecutionMode(session, task.id) && !coordinationRecord
           const recommendedProviderName = selectableProviders.find(
             provider => provider.id === task.recommendedProviderId,
@@ -821,6 +917,19 @@ export function TaskPlanCards({
           const pendingAcceptanceCount = run.status === 'review'
             ? (run.result?.verification.filter(item => item.status !== 'passed').length ?? 0)
             : 0
+          const evaluationBusy = evaluatingTaskId === task.id
+          const evaluationEligible = Boolean(
+            run.status === 'review'
+            && coordinationRecord?.phase === 'completed'
+            && coordinationRecord.reference
+            && coordinationRecord.attempt === run.attempt
+            && coordinationRecord.providerId === run.assignedProviderId,
+          )
+          const evaluationUnavailableReason = !evaluationAdapterAvailable
+            ? 'D 评价适配器尚未接入；当前仍可继续人工验收。'
+            : !evaluationEligible
+              ? '当前结果没有匹配的统一协调派发记录，不能发送给 D 评价器；人工任务和旧 Codex 流程仍使用人工验收。'
+              : null
           const canCopy = !preparedExecution && !preparingExecution && ['ready', 'running', 'needs-input'].includes(run.status)
           const automaticCategory = task.providerRecommendation?.category
           const automaticCandidate = Boolean(
@@ -1325,6 +1434,80 @@ export function TaskPlanCards({
                       />
                       <small>不会包含完整 AI 返回正文；只交接已验收摘要、相对路径和人工补充内容。</small>
                     </section>
+                  )}
+                </section>
+              )}
+
+              {(run.status === 'review' || taskEvaluationRecords.length > 0) && (
+                <section className="task-evaluation-review" aria-label="D 评价建议">
+                  <header>
+                    <div>
+                      <h4>D 评价建议</h4>
+                      <p>评价结论仅供参考，任务状态必须由你确认后才会改变。</p>
+                    </div>
+                    {run.status === 'review' && !currentEvaluationRecord && (
+                      evaluationBusy
+                        ? <button type="button" onClick={() => onCancelEvaluation?.(task.id)}>取消评价</button>
+                        : <button
+                          type="button"
+                          disabled={Boolean(evaluationUnavailableReason) || !onRequestEvaluation}
+                          onClick={() => void onRequestEvaluation?.(task.id)}
+                        >请求评价</button>
+                    )}
+                  </header>
+
+                  {run.status === 'review' && evaluationBusy && <p role="status">正在评价，请稍候…</p>}
+                  {run.status === 'review' && evaluationUnavailableReason && !currentEvaluationRecord && (
+                    <p className="task-evaluation-unavailable" role="status">{evaluationUnavailableReason}</p>
+                  )}
+                  {evaluationError?.taskId === task.id && (
+                    <p className="task-card-action-error" role="alert">{evaluationError.message}</p>
+                  )}
+
+                  {currentEvaluationRecord && <>
+                    <EvaluationRecordDetails record={currentEvaluationRecord} />
+                    {currentEvaluationRecord.decision?.action !== 'manual-review' && run.status === 'review' && (
+                      <div className="task-evaluation-actions">
+                        {currentEvaluationRecord.decision?.action === 'complete' && (
+                          <button
+                            type="button"
+                            className="is-primary"
+                            disabled={pendingAcceptanceCount > 0 || run.automaticExecution?.state === 'review'}
+                            onClick={() => applyAction({ type: 'accept', taskId: task.id })}
+                          >按建议确认完成</button>
+                        )}
+                        {(['request-changes', 'retry'] as AcceptanceDecisionAction[]).includes(currentEvaluationRecord.decision?.action ?? 'manual-review') && (
+                          <button
+                            type="button"
+                            onClick={() => applyAction({ type: 'request-changes', taskId: task.id, message: run.draft.reviewNote })}
+                          >按建议退回修改</button>
+                        )}
+                        {currentEvaluationRecord.decision?.action === 'needs-input' && (
+                          <button
+                            type="button"
+                            onClick={() => applyAction({ type: 'review-needs-input', taskId: task.id, message: run.draft.reviewNote })}
+                          >按建议补充信息</button>
+                        )}
+                        {currentEvaluationRecord.decision?.action === 'fail' && (
+                          <button
+                            type="button"
+                            onClick={() => applyAction({ type: 'fail', taskId: task.id, message: run.draft.reviewNote })}
+                          >按建议标记失败</button>
+                        )}
+                      </div>
+                    )}
+                    {currentEvaluationRecord.decision?.action === 'manual-review' && (
+                      <p className="task-evaluation-manual" role="status">当前策略要求继续使用下方人工逐项验收。</p>
+                    )}
+                  </>}
+
+                  {historicalEvaluationRecords.length > 0 && (
+                    <details className="task-evaluation-history">
+                      <summary>历史评价（{historicalEvaluationRecords.length}）</summary>
+                      {historicalEvaluationRecords.map(record => (
+                        <EvaluationRecordDetails key={record.evaluationId} record={record} />
+                      ))}
+                    </details>
                   )}
                 </section>
               )}

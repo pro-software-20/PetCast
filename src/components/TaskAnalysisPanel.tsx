@@ -19,6 +19,11 @@ import {
   type TaskCoordinationStore,
 } from '../orchestration/TaskCoordinationStore'
 import {
+  LocalTaskAcceptanceStore,
+  type TaskAcceptanceStore,
+} from '../orchestration/TaskAcceptanceStore'
+import { requestTaskEvaluation } from '../orchestration/taskEvaluationWorkflow'
+import {
   createIdleTaskCoordinationSnapshot,
   createTaskCoordinationController,
   type TaskCoordinationController,
@@ -42,6 +47,11 @@ import type {
   TaskAnalysisResult,
   TaskAnalyzer,
 } from '../types/taskAnalysis'
+import type {
+  AcceptancePolicy,
+  TaskAcceptanceStateV1,
+  TaskEvaluationAdapter,
+} from '../types/taskCoordination'
 import type {
   BrainPlanningErrorCode,
   ProviderProfile,
@@ -69,6 +79,9 @@ export interface TaskAnalysisPanelProps {
   sessionStore?: TaskSessionStore
   coordinationAdapters?: ExecutionAdapterRegistry
   coordinationStore?: TaskCoordinationStore
+  evaluationAdapter?: TaskEvaluationAdapter
+  acceptanceStore?: TaskAcceptanceStore
+  acceptancePolicy?: AcceptancePolicy
   codexExecutionScope?: { scopeId: string; fresh: boolean }
   onClose?: () => void
 }
@@ -79,6 +92,12 @@ const defaultDeepSeekBrainProvider = new DeepSeekBrainProvider()
 const defaultSessionStore = new LocalTaskSessionStore()
 const defaultCoordinationStore = new LocalTaskCoordinationStore()
 const defaultCoordinationAdapters = new MapExecutionAdapterRegistry()
+const defaultAcceptanceStore = new LocalTaskAcceptanceStore()
+const defaultAcceptancePolicy: AcceptancePolicy = {
+  mode: 'manual',
+  trustedMethods: [],
+  maxAttempts: 3,
+}
 
 const brainFallbackLabels: Partial<Record<BrainPlanningErrorCode, string>> = {
   NOT_CONFIGURED: 'DeepSeek 任务规划尚未接入，已安全回退到本地规则。',
@@ -121,6 +140,9 @@ export function TaskAnalysisPanel({
   sessionStore = defaultSessionStore,
   coordinationAdapters = defaultCoordinationAdapters,
   coordinationStore = defaultCoordinationStore,
+  evaluationAdapter,
+  acceptanceStore = defaultAcceptanceStore,
+  acceptancePolicy = defaultAcceptancePolicy,
   onClose,
 }: TaskAnalysisPanelProps) {
   const initialFileSelection = mergeTaskAnalysisFiles([], initialFiles)
@@ -132,6 +154,11 @@ export function TaskAnalysisPanel({
   const [coordinationSnapshot, setCoordinationSnapshot] = useState<TaskCoordinationControllerSnapshot>(
     createIdleTaskCoordinationSnapshot,
   )
+  const [acceptanceState, setAcceptanceState] = useState<TaskAcceptanceStateV1 | null>(null)
+  const [acceptanceNotice, setAcceptanceNotice] = useState<string | null>(null)
+  const [acceptanceBlocked, setAcceptanceBlocked] = useState(false)
+  const [evaluatingTaskId, setEvaluatingTaskId] = useState<string | null>(null)
+  const [evaluationError, setEvaluationError] = useState<{ taskId: string; message: string } | null>(null)
   const [completedSession, setCompletedSession] = useState<TaskSessionV1 | null>(null)
   const [planError, setPlanError] = useState<string | null>(null)
   const [storageNotice, setStorageNotice] = useState<string | null>(null)
@@ -149,6 +176,8 @@ export function TaskAnalysisPanel({
   const analysisRequestId = useRef(0)
   const planningController = useRef<AbortController | null>(null)
   const coordinationController = useRef<TaskCoordinationController | null>(null)
+  const evaluationController = useRef<{ taskId: string; sessionId: string; controller: AbortController } | null>(null)
+  const acceptanceLoadId = useRef(0)
   const restoreRequestId = useRef(0)
   const codexEnvironmentRequest = useRef<string | null>(null)
   const chatGptSignInRequest = useRef<string | null>(null)
@@ -239,6 +268,8 @@ export function TaskAnalysisPanel({
     return () => {
       planningController.current?.abort()
       planningController.current = null
+      evaluationController.current?.controller.abort()
+      evaluationController.current = null
       const authRequestId = chatGptSignInRequest.current
       chatGptSignInRequest.current = null
       if (authRequestId) window.petcast?.cancelChatGptSignIn?.(authRequestId)
@@ -315,12 +346,97 @@ export function TaskAnalysisPanel({
   }, [taskSession?.id, coordinationAdapters, coordinationStore, sessionStore])
 
   useEffect(() => {
+    const requestId = acceptanceLoadId.current + 1
+    acceptanceLoadId.current = requestId
+    setAcceptanceState(null)
+    setAcceptanceNotice(null)
+    setAcceptanceBlocked(false)
+    setEvaluationError(null)
+    if (!taskSession) return
+    let active = true
+    void acceptanceStore.load({
+      sessionId: taskSession.id,
+      planId: taskSession.plan.id,
+      taskIds: taskSession.plan.tasks.map(task => task.id),
+    }).then((outcome) => {
+      if (!active || requestId !== acceptanceLoadId.current) return
+      if (outcome.ok) {
+        setAcceptanceState(outcome.state)
+        return
+      }
+      setAcceptanceBlocked(true)
+      setAcceptanceNotice(`${outcome.message}（${outcome.code}）`)
+    })
+    return () => { active = false }
+  }, [taskSession?.id, acceptanceStore])
+
+  useEffect(() => {
+    const pending = evaluationController.current
+    if (!pending) return
+    const run = taskSession?.id === pending.sessionId
+      ? taskSession.runs.find(item => item.taskId === pending.taskId)
+      : undefined
+    if (run?.status === 'review') return
+    pending.controller.abort()
+    evaluationController.current = null
+    setEvaluatingTaskId(null)
+  }, [taskSession])
+
+  useEffect(() => {
     if (taskSession) coordinationController.current?.updateSession(taskSession)
   }, [taskSession])
 
   const handleSessionChange = (session: TaskSessionV1, persistImmediately = false) => {
     setTaskSession(session)
     if (persistImmediately) void persistSession(session)
+  }
+
+  const handleRequestEvaluation = async (taskId: string) => {
+    if (!taskSession || acceptanceBlocked || evaluationController.current) return
+    const controller = new AbortController()
+    const sessionId = taskSession.id
+    evaluationController.current = { taskId, sessionId, controller }
+    setEvaluatingTaskId(taskId)
+    setEvaluationError(null)
+    const outcome = await requestTaskEvaluation({
+      session: taskSession,
+      taskId,
+      adapter: evaluationAdapter,
+      coordinationStore,
+      acceptanceStore,
+      policy: acceptancePolicy,
+      signal: controller.signal,
+    })
+    const current = evaluationController.current
+    if (!current || current.controller !== controller || current.sessionId !== sessionId) return
+    evaluationController.current = null
+    setEvaluatingTaskId(null)
+    if (outcome.ok) {
+      setAcceptanceState(outcome.state)
+      setAcceptanceNotice(outcome.reused ? '已加载当前派发的既有评价，没有再次调用 D 评价器。' : null)
+    } else if (outcome.code !== 'CANCELLED') {
+      setEvaluationError({ taskId, message: `${outcome.message}（${outcome.code}）` })
+    }
+  }
+
+  const handleCancelEvaluation = (taskId: string) => {
+    const pending = evaluationController.current
+    if (!pending || pending.taskId !== taskId) return
+    pending.controller.abort()
+    evaluationController.current = null
+    setEvaluatingTaskId(null)
+  }
+
+  const clearAcceptanceState = async () => {
+    const outcome = await acceptanceStore.clear()
+    if (!outcome.ok) {
+      setAcceptanceNotice(outcome.message)
+      return
+    }
+    setAcceptanceState(null)
+    setAcceptanceNotice(null)
+    setAcceptanceBlocked(false)
+    setEvaluationError(null)
   }
 
   const invalidateAnalysis = () => {
@@ -338,7 +454,16 @@ export function TaskAnalysisPanel({
     setAnalysisDetailsOpen(true)
     coordinationController.current?.dispose()
     coordinationController.current = null
+    evaluationController.current?.controller.abort()
+    evaluationController.current = null
+    setAcceptanceState(null)
+    setEvaluatingTaskId(null)
+    setEvaluationError(null)
     void coordinationStore.clear()
+    if (!acceptanceBlocked) {
+      setAcceptanceNotice(null)
+      void acceptanceStore.clear()
+    }
     void sessionStore.clear().then((outcome) => {
       if (!outcome.ok) setStorageNotice(outcome.message)
       else {
@@ -364,6 +489,11 @@ export function TaskAnalysisPanel({
   }
 
   const handleAnalyze = async () => {
+    if (acceptanceBlocked) {
+      setAcceptanceNotice('请先明确清除损坏的评价记录，再开始新的分析。')
+      return
+    }
+
     const requestId = analysisRequestId.current + 1
     analysisRequestId.current = requestId
     setError(null)
@@ -377,7 +507,15 @@ export function TaskAnalysisPanel({
     setAnalysisDetailsOpen(true)
     coordinationController.current?.dispose()
     coordinationController.current = null
+    evaluationController.current?.controller.abort()
+    evaluationController.current = null
+    setAcceptanceState(null)
+    setAcceptanceNotice(null)
+    setAcceptanceBlocked(false)
+    setEvaluatingTaskId(null)
+    setEvaluationError(null)
     void coordinationStore.clear()
+    void acceptanceStore.clear()
     void sessionStore.clear().then((outcome) => {
       if (!outcome.ok) setStorageNotice(outcome.message)
       else {
@@ -475,7 +613,15 @@ export function TaskAnalysisPanel({
     setAnalysisDetailsOpen(true)
     coordinationController.current?.dispose()
     coordinationController.current = null
+    evaluationController.current?.controller.abort()
+    evaluationController.current = null
+    setAcceptanceState(null)
+    setAcceptanceNotice(null)
+    setAcceptanceBlocked(false)
+    setEvaluatingTaskId(null)
+    setEvaluationError(null)
     void coordinationStore.clear()
+    void acceptanceStore.clear()
     void sessionStore.clear().then((outcome) => {
       setStorageNotice(outcome.ok ? null : outcome.message)
       if (outcome.ok) setStorageBlocked(false)
@@ -541,7 +687,11 @@ export function TaskAnalysisPanel({
       </header>
 
       {onClose && (
-        <button type="button" className="task-analysis-close" onClick={onClose} aria-label="关闭任务分析">×</button>
+        <button type="button" className="task-analysis-close" onClick={() => {
+          evaluationController.current?.controller.abort()
+          evaluationController.current = null
+          onClose()
+        }} aria-label="关闭任务分析">×</button>
       )}
 
 
@@ -564,6 +714,13 @@ export function TaskAnalysisPanel({
               setStorageBlocked(false)
             }
           })}>清除本地记录</button>
+        </div>
+      )}
+
+      {acceptanceNotice && (
+        <div className="task-storage-notice" role={acceptanceBlocked ? 'alert' : 'status'}>
+          <span>{acceptanceNotice}</span>
+          {acceptanceBlocked && <button type="button" onClick={() => void clearAcceptanceState()}>清除评价记录</button>}
         </div>
       )}
 
@@ -665,7 +822,11 @@ export function TaskAnalysisPanel({
         </div>
 
         <div className="task-analysis-actions">
-          <button type="button" onClick={handleAnalyze} disabled={isAnalyzing || sessionLocked}>
+          <button
+            type="button"
+            onClick={handleAnalyze}
+            disabled={isAnalyzing || sessionLocked || acceptanceBlocked}
+          >
             {isAnalyzing ? '分析并拆解中…' : '开始分析'}
           </button>
           <button
@@ -807,6 +968,12 @@ export function TaskAnalysisPanel({
           onSessionChange={handleSessionChange}
           coordinationSnapshot={coordinationSnapshot}
           coordinationAdapters={coordinationAdapters}
+          acceptanceState={acceptanceState}
+          evaluationAdapterAvailable={Boolean(evaluationAdapter) && !acceptanceBlocked}
+          evaluatingTaskId={evaluatingTaskId}
+          evaluationError={evaluationError}
+          onRequestEvaluation={handleRequestEvaluation}
+          onCancelEvaluation={handleCancelEvaluation}
           onCoordinationStart={() => coordinationController.current?.start() ?? Promise.resolve()}
           onCoordinationPause={() => coordinationController.current?.pause()}
           onCoordinationResume={() => coordinationController.current?.resume() ?? Promise.resolve()}
