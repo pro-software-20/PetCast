@@ -1366,3 +1366,26 @@ pnpm test:desktop
 pnpm test:task-ui
 git diff --check
 ```
+
+## 30. B 模块 P3.3B1：评价展示与人工决策落地
+
+- 在任务进入 `review` 后增加“D 评价建议”区域，展示评价结论、逐项验证、规则版本、比较依据、脱敏证据摘要与 B 侧建议动作。
+- 默认发行版不注入 D 评价适配器，页面明确显示“D 评价适配器尚未接入”，但原有人工逐项验收始终可用。
+- 新增 `requestTaskEvaluation()` 评价工作流：只读取当前最新统一协调派发，生成稳定 `evaluation:<dispatchId>:<attempt>` 标识，严格校验后先持久化，再向页面发布报告与建议。
+- 重复请求同一派发的评价时复用已保存记录，不会再次调用 D；页面关闭、会话切换或任务离开 `review` 时会取消待完成评价，迟到结果不得覆盖当前会话。
+- 评价只是建议：完成、退回修改、补充信息或标记失败都必须由用户点击确认；默认 `manual` 策略不会自动改变任务状态。
+- 人工任务和旧 Codex 专用链路若没有匹配的协调派发记录，不会伪造 D 评价上下文，继续使用现有人工验收。
+- 导出零网络 `InMemoryTaskEvaluationAdapter` 供页面和流程验收；P3.3B2 再由 D 组交付真实评价适配器并通过 P3.3A 合规套件。
+
+验证命令：
+
+```powershell
+pnpm test:evaluation-conformance
+pnpm test:adapter-conformance
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
