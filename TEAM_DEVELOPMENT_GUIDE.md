@@ -1389,3 +1389,28 @@ pnpm test:desktop
 pnpm test:task-ui
 git diff --check
 ```
+
+## 31. B 模块 P3.4A：零网络任务协调全链路验收
+
+- 新增 `pnpm test:coordination-e2e`，组合现有 `TaskCoordinationController`、内存协调/会话/评价存储、`InMemoryExecutionAdapter` 和 `InMemoryTaskEvaluationAdapter`，验证 B 模块完整闭环。
+- 两个不同 Provider 的根任务可在全局并发 2 下并行；同一 Provider 仍遵守并发 1；依赖汇总任务只有在所有直接依赖由用户确认完成后才会解锁。
+- 执行完成只进入 `review`。D 的 `accepted`、`revise` 和 `unknown` 只形成 B 侧建议，用户确认前不会自动完成、返工或重跑任务。
+- 重建控制器后默认暂停，已有执行只查询不重复派发；已保存评价直接复用；协调状态已保存但会话保存失败时可以安全恢复。
+- 直接依赖交接只包含摘要、关键决策、验证和安全相对文件元信息，不包含完整 AI 输出、凭据、绝对路径、额度或供应商正文。
+- 测试显式阻止网络请求，不调用 DeepSeek、OpenAI、真实 Codex 或其他模型，不产生费用；内存适配器不会注册到正式发行版。
+- A、D 真实适配器仍未交付，P3.4B 将在各自通过合规套件后复用同一验收链路进行真实跨组联调。
+- 完整验收矩阵和真实联调入口见 `docs/B_P34A_ZERO_NETWORK_ACCEPTANCE.md`。
+
+验证命令：
+
+```powershell
+pnpm test:coordination-e2e
+pnpm test:evaluation-conformance
+pnpm test:adapter-conformance
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
