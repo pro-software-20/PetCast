@@ -71,6 +71,7 @@ import {
 import { describeChatGptAuth, type ChatGptAuthState } from '../codex/chatGptAuth'
 
 export interface TaskAnalysisPanelProps {
+  deliveryOwner?: string
   analyzer?: TaskAnalyzer
   initialPrompt?: string
   initialFiles?: TaskAnalysisFile[]
@@ -132,6 +133,7 @@ const toFileMetadata = (file: File): TaskAnalysisFile => ({
 })
 
 export function TaskAnalysisPanel({
+  deliveryOwner,
   analyzer,
   initialPrompt = '',
   initialFiles = [],
@@ -391,7 +393,7 @@ export function TaskAnalysisPanel({
     if (persistImmediately) void persistSession(session)
   }
 
-  const handleRequestEvaluation = async (taskId: string) => {
+  const handleRequestEvaluation = async (taskId: string, evidence?: import('../types/taskCoordination').EvaluationEvidenceRef[]) => {
     if (!taskSession || acceptanceBlocked || evaluationController.current) return
     const controller = new AbortController()
     const sessionId = taskSession.id
@@ -402,6 +404,7 @@ export function TaskAnalysisPanel({
       session: taskSession,
       taskId,
       adapter: evaluationAdapter,
+      evidence,
       coordinationStore,
       acceptanceStore,
       policy: acceptancePolicy,
@@ -963,6 +966,7 @@ export function TaskAnalysisPanel({
         <TaskPlanCards
           key={taskSession.id}
           session={taskSession}
+          deliveryOwner={deliveryOwner}
           providers={providers}
           codexEnvironment={codexEnvironment}
           onSessionChange={handleSessionChange}

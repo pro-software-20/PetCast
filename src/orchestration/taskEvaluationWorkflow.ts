@@ -4,6 +4,7 @@ import type {
   TaskAcceptanceRecord,
   TaskAcceptanceStateV1,
   TaskEvaluationAdapter,
+  EvaluationEvidenceRef,
 } from '../types/taskCoordination'
 import type { TaskSessionV1 } from '../types/taskOrchestration'
 import type { TaskAcceptanceStore } from './TaskAcceptanceStore'
@@ -37,6 +38,7 @@ export type TaskEvaluationWorkflowOutcome =
 export interface RequestTaskEvaluationInput {
   session: TaskSessionV1
   taskId: string
+  evidence?: EvaluationEvidenceRef[]
   adapter?: TaskEvaluationAdapter
   coordinationStore: TaskCoordinationStore
   acceptanceStore: TaskAcceptanceStore
@@ -131,6 +133,7 @@ export async function requestTaskEvaluation(
     coordinationState: coordination.state,
     taskId: input.taskId,
     evaluationId,
+    evidence: input.evidence,
   })
   if (!built.ok) return fail(built.code, built.message)
 

@@ -343,3 +343,25 @@ test('acceptance stores save, restore and preserve corrupt data', async () => {
   assert.equal(corrupt.code, 'CORRUPT_DATA')
   assert.equal(data.get(TASK_ACCEPTANCE_STORAGE_KEY), '{broken')
 })
+
+test('D evaluates failed and corrected attempts through the B decision bridge', async () => {
+  const { TaskEvidenceAdapter } = await loadTs('../src/reports/taskEvidenceAdapter.ts')
+  const evaluator = new TaskEvidenceAdapter()
+  let prior = null
+  for (const [attempt, status, verdict] of [[1,'failed','revise'],[2,'passed','accepted']]) {
+    const f = createReviewFixture(attempt)
+    const check = f.session.runs[0].result.verification[0]
+    check.status = status
+    check.details = 'Checked against the requested deliverable.'
+    const built = createTaskEvaluationRequest({...f,taskId:'task-1',evaluationId:'d-review-'+attempt,
+      evidence:[{type:'user-review',reference:'check:0',summary:'Reviewed task result.'}]})
+    assert.ok(built.ok, built.message)
+    const report = await evaluator.evaluate(built.request,new AbortController().signal)
+    assert.equal(report.verdict,verdict)
+    const next = reconcileTaskEvaluation({...f,acceptanceState:prior,report,policy:{mode:'manual',trustedMethods:[],maxAttempts:3}})
+    assert.ok(next.ok,next.message)
+    assert.equal(next.decision.action,'manual-review')
+    prior = next.state
+  }
+  assert.equal(prior.records.length,2)
+})

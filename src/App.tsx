@@ -8,6 +8,7 @@ import { UsageBoard } from './components/UsageBoard'
 import { FishingGame } from './components/FishingGame'
 import { HomeScene } from './components/HomeScene'
 import { MailboxPanel } from './components/MailboxPanel'
+import { TaskEvidenceAdapter } from './reports/taskEvidenceAdapter'
 import { TaskAnalysisPanel } from './components/TaskAnalysisPanel'
 import { AQUARIUM_CAPACITY, createEmptyCodex, recordCatch, recordDisposition, replaceAquariumFish, toKeptFish } from './game/collection'
 import { generateAutoFishingRound } from './game/autoFishing'
@@ -24,6 +25,7 @@ import { UsageSettings, usageStatus } from './components/UsageSettings'
 import { UsageHistoryPanel } from './components/UsageHistoryPanel'
 import { useUsageHistory } from './history/useUsageHistory'
 
+const taskEvidenceAdapter = new TaskEvidenceAdapter()
 export default function App() {
   const desktopApi = window.petcast
   const isBrowserFallback = !desktopApi
@@ -510,7 +512,7 @@ export default function App() {
           {mailboxOpen && <MailboxPanel items={mailItems} usage={fresh ? usage : null} onClose={() => setMailboxOpen(false)} />}
           {taskAnalysisOpen && page === 'tasks' && (
             <section className="quota-page task-analysis-page" aria-label="任务分析页面"><div className="room-art" /><div className="room-nameplate">{appearance.petName || '布罗艾'}的小屋</div>
-            <TaskAnalysisPanel
+            <TaskAnalysisPanel evaluationAdapter={taskEvidenceAdapter} deliveryOwner={historyScope ? historyScope.source+':'+historyScope.scopeId : 'local'}
               onClose={closeTaskAnalysis}
               codexExecutionScope={connection.source === 'real' && fresh && usage?.scopeId
                 ? { scopeId: usage.scopeId, fresh: true }
