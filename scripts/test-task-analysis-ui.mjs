@@ -378,7 +378,8 @@ if (!process.versions.electron) {
       const section=card.querySelector('.task-evaluation-review');
       const button=[...section.querySelectorAll('button')].find(candidate=>candidate.textContent.trim()==='请求评价');
       return Boolean(
-        section.textContent.includes('D 评价适配器尚未接入')
+        section.textContent.includes('当前结果没有匹配的统一协调派发记录')
+        && section.textContent.includes('人工任务和旧 Codex 流程仍使用人工验收')
         && button?.disabled
       );
     })()`), true)
