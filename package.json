@@ -18,6 +18,7 @@
     "test:contracts": "node --test --test-concurrency=1 tests/*.test.mjs",
     "test:adapter-conformance": "node --test --test-concurrency=1 tests/execution-adapter-conformance.test.mjs",
     "test:evaluation-conformance": "node --test --test-concurrency=1 tests/task-evaluation-conformance.test.mjs",
+    "test:coordination-e2e": "node --test --test-concurrency=1 tests/task-coordination-e2e.test.mjs",
     "check:codex": "npm run build:electron && node scripts/check-codex-usage.mjs",
     "test:desktop": "npm run build && node scripts/smoke-desktop.mjs",
     "test:task-ui": "npm run build && node scripts/test-task-analysis-ui.mjs",
