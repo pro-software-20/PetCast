@@ -1,3 +1,5 @@
+import { TaskEvidencePanel } from './TaskEvidencePanel'
+import { DeliveryVersions } from './DeliveryVersions'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceSnapshot } from '../../electron/workspaceProtocol'
 import type { PreparedCodexTaskExecution, TaskExecutionArtifactView } from '../../electron/taskExecutionProtocol'
@@ -51,6 +53,7 @@ import {
 } from '../codex/codexEnvironment'
 
 export interface TaskPlanCardsProps {
+  deliveryOwner?: string
   session: TaskSessionV1
   providers: ProviderProfile[]
   onSessionChange: (session: TaskSessionV1, persistImmediately?: boolean) => void
@@ -67,7 +70,7 @@ export interface TaskPlanCardsProps {
   evaluationAdapterAvailable?: boolean
   evaluatingTaskId?: string | null
   evaluationError?: { taskId: string; message: string } | null
-  onRequestEvaluation?: (taskId: string) => Promise<void> | void
+  onRequestEvaluation?: (taskId: string, evidence?: import('../types/taskCoordination').EvaluationEvidenceRef[]) => Promise<void> | void
   onCancelEvaluation?: (taskId: string) => void
 }
 
@@ -236,6 +239,7 @@ const EvaluationRecordDetails = ({ record }: { record: TaskAcceptanceRecord }) =
 )
 
 export function TaskPlanCards({
+  deliveryOwner,
   session,
   providers,
   onSessionChange,
@@ -1448,11 +1452,9 @@ export function TaskPlanCards({
                     {run.status === 'review' && !currentEvaluationRecord && (
                       evaluationBusy
                         ? <button type="button" onClick={() => onCancelEvaluation?.(task.id)}>取消评价</button>
-                        : <button
-                          type="button"
-                          disabled={Boolean(evaluationUnavailableReason) || !onRequestEvaluation}
-                          onClick={() => void onRequestEvaluation?.(task.id)}
-                        >请求评价</button>
+                        : <TaskEvidencePanel key={coordinationRecord?.dispatchId??task.id} checks={task.acceptanceChecks}
+                            changedFiles={run.result?.changedFiles??[]} disabled={Boolean(evaluationUnavailableReason)||!onRequestEvaluation}
+                            onRequest={evidence=>void onRequestEvaluation?.(task.id,evidence)}/>
                     )}
                   </header>
 
@@ -1527,6 +1529,7 @@ export function TaskPlanCards({
                   <button type="button" onClick={() => applyAction({ type: 'cancel', taskId: task.id })}>取消</button>
                 </>}
                 {run.status === 'review' && run.automaticExecution?.state !== 'review' && <>
+                  
                   {pendingAcceptanceCount > 0 && (
                     <p className="task-acceptance-hint" role="status">还有 {pendingAcceptanceCount} 项验收未通过，请逐项确认。</p>
                   )}
@@ -1553,6 +1556,7 @@ export function TaskPlanCards({
 
       <section className="task-plan-footer">
         <h3>最终验收</h3>
+        {session.runs.filter(run=>run.status==='done' && run.result).map(run=><DeliveryVersions key={(deliveryOwner??'local')+session.id+run.taskId} owner={deliveryOwner} id={session.id+'.'+run.taskId} title={session.plan.tasks.find(t=>t.id===run.taskId)?.title??run.taskId} initial={run.result!.outputText||run.result!.summary}/>)}
         {!allTasksDone && <p>完成并验收全部任务后，可进行最终验收并生成报告。</p>}
         {session.finalVerification.map((item, index) => (
           <label className="task-final-check" key={item.label}>

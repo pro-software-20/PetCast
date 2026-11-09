@@ -83,10 +83,13 @@ const validateVerification = (
       add(issues, 'INVALID_SHAPE', itemPath, '验证项必须是对象。')
       return
     }
-    exactKeys(entry, ['label', 'status', 'note'], itemPath, issues)
+    exactKeys(entry, ['label', 'status', 'note', 'details'], itemPath, issues)
     if (entry.label !== labels[index]) add(issues, 'TASK_MISMATCH', `${itemPath}.label`, '验证项标签不匹配。')
     if (typeof entry.status !== 'string' || !verificationStatuses.has(entry.status)) {
       add(issues, 'INVALID_STATE', `${itemPath}.status`, '验证状态无效。')
+    }
+    if (entry.details !== undefined && !validText(entry.details, 2_000, true)) {
+      add(issues, 'INVALID_SHAPE', itemPath, '验证说明无效。')
     }
     if (entry.note !== undefined && !validText(entry.note, 2_000, true)) {
       add(issues, 'INVALID_SHAPE', `${itemPath}.note`, '验证备注无效。')
