@@ -132,7 +132,7 @@ export function validateTaskCoordinationState(
       }
       exactKeys(raw, [
         'taskId', 'providerId', 'attempt', 'dispatchId', 'phase', 'reference',
-        'latestSnapshot', 'error', 'createdAt', 'updatedAt',
+        'latestSnapshot', 'error', 'resolution', 'createdAt', 'updatedAt',
       ], path, issues)
       if (!validId(raw.taskId)) issue(issues, 'INVALID_ID', `${path}.taskId`, '任务 ID 无效。')
       if (allowedTaskIds && typeof raw.taskId === 'string' && !allowedTaskIds.has(raw.taskId)) {
@@ -178,6 +178,32 @@ export function validateTaskCoordinationState(
         }
       }
       if (raw.error !== undefined) validateError(raw.error, `${path}.error`, issues)
+      if (raw.resolution !== undefined) {
+        const resolution = raw.resolution
+        if (!isRecord(resolution)) {
+          issue(issues, 'INVALID_SHAPE', `${path}.resolution`, '人工处理记录必须是对象。')
+        } else {
+          exactKeys(resolution, ['action', 'dispatchId', 'confirmedAt', 'riskAcknowledged'], `${path}.resolution`, issues)
+          if (resolution.action !== 'manual-takeover' && resolution.action !== 'new-attempt') {
+            issue(issues, 'INVALID_STATE', `${path}.resolution.action`, '人工处理方式无效。')
+          }
+          if (resolution.dispatchId !== raw.dispatchId) {
+            issue(issues, 'INVALID_STATE', `${path}.resolution.dispatchId`, '人工处理必须关联当前派发。')
+          }
+          if (!validDate(resolution.confirmedAt)) {
+            issue(issues, 'INVALID_DATE', `${path}.resolution.confirmedAt`, '确认时间必须是 ISO 时间。')
+          }
+          if (typeof resolution.riskAcknowledged !== 'boolean'
+            || (resolution.action === 'new-attempt'
+              && (raw.reference === undefined || ['unknown', 'needs-input'].includes(String(raw.phase)))
+              && !resolution.riskAcknowledged)) {
+            issue(issues, 'INVALID_STATE', `${path}.resolution.riskAcknowledged`, '状态未确定时必须明确接受重复调用和计费风险。')
+          }
+          if (!['unknown', 'failed', 'cancelled', 'needs-input'].includes(String(raw.phase))) {
+            issue(issues, 'INVALID_STATE', `${path}.resolution`, '当前协调阶段不能记录人工接管或新尝试。')
+          }
+        }
+      }
       if (raw.phase === 'dispatching' && (raw.reference !== undefined || raw.latestSnapshot !== undefined || raw.error !== undefined)) {
         issue(issues, 'INVALID_STATE', path, '派发准备阶段不能伪造执行引用、快照或错误。')
       }

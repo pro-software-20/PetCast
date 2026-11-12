@@ -22,6 +22,7 @@ import {
   type TaskSessionAction,
 } from '../orchestration/taskSession'
 import type { ExecutionAdapterRegistry } from '../orchestration/taskCoordinator'
+import type { TaskRecoveryAction } from '../orchestration/taskCoordinationRecovery'
 import {
   createIdleTaskCoordinationSnapshot,
   type TaskCoordinationControllerSnapshot,
@@ -64,7 +65,9 @@ export interface TaskPlanCardsProps {
   onCoordinationPause?: () => void
   onCoordinationResume?: () => Promise<void>
   onCoordinationRunNow?: () => Promise<void>
+  onCoordinationInspect?: () => Promise<void>
   onCoordinationCancelTask?: (taskId: string) => Promise<void>
+  onCoordinationResolveTask?: (taskId: string, dispatchId: string, action: TaskRecoveryAction, riskAcknowledged: boolean) => Promise<void>
   onCoordinationClear?: () => Promise<void>
   acceptanceState?: TaskAcceptanceStateV1 | null
   evaluationAdapterAvailable?: boolean
@@ -250,7 +253,9 @@ export function TaskPlanCards({
   onCoordinationPause,
   onCoordinationResume,
   onCoordinationRunNow,
+  onCoordinationInspect,
   onCoordinationCancelTask,
+  onCoordinationResolveTask,
   onCoordinationClear,
   acceptanceState,
   evaluationAdapterAvailable = false,
@@ -260,6 +265,8 @@ export function TaskPlanCards({
   onCancelEvaluation,
 }: TaskPlanCardsProps) {
   const [copyStatuses, setCopyStatuses] = useState<Record<string, CopyStatus>>({})
+  const [recoveryConfirmation, setRecoveryConfirmation] = useState<string | null>(null)
+  const [recoveryBusy, setRecoveryBusy] = useState(false)
   const [actionErrorState, setActionErrorState] = useState<{ message: string; taskId?: string } | null>(null)
   const actionError = actionErrorState?.message ?? null
   const actionErrorTaskId = actionErrorState?.taskId
@@ -872,6 +879,14 @@ export function TaskPlanCards({
           const coordinationRecord = [...coordinationSnapshot.records]
             .filter(record => record.taskId === task.id)
             .sort((left, right) => right.attempt - left.attempt)[0]
+          const unresolvedCoordination = Boolean(coordinationRecord && !coordinationRecord.resolution)
+          const coordinatedRun = unresolvedCoordination && task.executionMode !== 'manual'
+            && run.executionMode !== 'manual'
+          const recoverableCoordination = unresolvedCoordination
+            && ['unknown', 'failed', 'cancelled', 'needs-input'].includes(coordinationRecord!.phase)
+            && ['ready', 'needs-input', 'failed', 'cancelled'].includes(run.status)
+          const uncertainCoordination = recoverableCoordination
+            && (!coordinationRecord!.reference || ['unknown', 'needs-input'].includes(coordinationRecord!.phase))
           const taskEvaluationRecords = [...(acceptanceState?.records ?? [])]
             .filter(record => record.taskId === task.id)
             .sort((left, right) => right.attempt - left.attempt
@@ -915,7 +930,7 @@ export function TaskPlanCards({
             session.plan.tasks.find(candidate => candidate.id === dependencyId)?.title ?? dependencyId
           ))
           const earlierTasks = session.plan.tasks.slice(0, index)
-          const editable = run.status === 'running' || run.status === 'needs-input'
+          const editable = (run.status === 'running' || run.status === 'needs-input') && !coordinatedRun
           const reviewEditable = run.status === 'review' && run.automaticExecution?.state !== 'review'
           const verificationEditable = editable || reviewEditable
           const pendingAcceptanceCount = run.status === 'review'
@@ -954,7 +969,10 @@ export function TaskPlanCards({
           const taskArtifact = artifactViews[task.id]
           const expanded = expandedTaskId === task.id
           const taskPanelId = `task-plan-card-body-${task.id}`
-          const taskNextStep = nextStepText(run.status, dependencyNames, run.automaticExecution?.state, automaticCandidate)
+          const taskNextStep = recoverableCoordination
+            ? '下一步：先核对外部执行，再选择人工处理或确认新尝试。'
+            : coordinatedRun ? '下一步：等待执行状态；必要时单独取消。'
+              : nextStepText(run.status, dependencyNames, run.automaticExecution?.state, automaticCandidate)
 
           return (
             <li className={`task-plan-card is-${run.status}${expanded ? ' is-expanded' : ''}`} key={task.id}>
@@ -1057,9 +1075,43 @@ export function TaskPlanCards({
                     <code>派发 {coordinationRecord.dispatchId.slice(-8)}</code>
                     <time dateTime={coordinationRecord.updatedAt}>{new Date(coordinationRecord.updatedAt).toLocaleString()}</time>
                     {coordinationRecord.error && <strong>{coordinationRecord.error.message}</strong>}
+                    {coordinationRecord.latestSnapshot?.observedAt && (
+                      <span>最近核对：{new Date(coordinationRecord.latestSnapshot.observedAt).toLocaleString()}</span>
+                    )}
+                    {coordinationRecord.error?.retryAfterSeconds !== undefined && (
+                      <span>建议至少等待 {coordinationRecord.error.retryAfterSeconds} 秒；等待结束也不会自动重试。</span>
+                    )}
                     {coordinationRecord.reference && ['queued', 'running', 'needs-input', 'unknown'].includes(coordinationRecord.phase) && (
                       <button type="button" onClick={() => void onCoordinationCancelTask?.(task.id)}>取消执行</button>
                     )}
+                    {recoverableCoordination && <div className="task-coordination-recovery">
+                      <p>请先核对外部执行状态。新尝试不会自动发起，也不会自动切换 AI。</p>
+                      <button type="button" disabled={recoveryBusy} onClick={() => void onCoordinationInspect?.()}>核对外部执行</button>
+                      <button type="button" disabled={recoveryBusy} onClick={() => {
+                        setRecoveryBusy(true)
+                        void (onCoordinationResolveTask?.(task.id, coordinationRecord.dispatchId, 'manual-takeover', false) ?? Promise.resolve())
+                          .catch(() => setActionError('人工接管失败，请重新核对协调记录。', task.id))
+                          .finally(() => setRecoveryBusy(false))
+                      }}>转人工处理</button>
+                      {uncertainCoordination && <p role="alert">旧执行可能仍在继续。重新派发可能造成重复调用或计费；请先在外部核对，并单独确认风险。</p>}
+                      <button type="button" disabled={recoveryBusy} onClick={() => {
+                        if (uncertainCoordination && recoveryConfirmation !== coordinationRecord.dispatchId) {
+                          setRecoveryConfirmation(coordinationRecord.dispatchId)
+                          return
+                        }
+                        setRecoveryConfirmation(null)
+                        setRecoveryBusy(true)
+                        void (onCoordinationResolveTask?.(task.id, coordinationRecord.dispatchId, 'new-attempt', Boolean(uncertainCoordination)) ?? Promise.resolve())
+                          .catch(() => setActionError('新尝试决定未能保存，请重新核对协调记录。', task.id))
+                          .finally(() => setRecoveryBusy(false))
+                      }}>{uncertainCoordination && recoveryConfirmation === coordinationRecord.dispatchId
+                          ? '再次确认：已核对并接受重复调用或计费风险'
+                          : '核对后发起新尝试'}</button>
+                      {uncertainCoordination && recoveryConfirmation === coordinationRecord.dispatchId && (
+                        <button type="button" onClick={() => setRecoveryConfirmation(null)}>取消确认</button>
+                      )}
+                      {coordinationSnapshot.error && <p role="alert">{coordinationSnapshot.error}</p>}
+                    </div>}
                   </div>
                 )}
               </section>
@@ -1516,14 +1568,14 @@ export function TaskPlanCards({
 
               {actionErrorTaskId === task.id && <p className="task-card-action-error" role="alert">{actionError}</p>}
               <div className="task-run-actions">
-                {['ready', 'waiting'].includes(run.status) && <button type="button" onClick={() => applyAction({ type: 'cancel', taskId: task.id })}>取消任务</button>}
-                {run.status === 'running' && run.automaticExecution?.state !== 'running' && <>
+                {['ready', 'waiting'].includes(run.status) && !unresolvedCoordination && <button type="button" onClick={() => applyAction({ type: 'cancel', taskId: task.id })}>取消任务</button>}
+                {run.status === 'running' && !coordinatedRun && run.automaticExecution?.state !== 'running' && <>
                   <button type="button" className="is-primary" onClick={() => applyAction({ type: 'submit-result', taskId: task.id })}>提交待验收</button>
                   <button type="button" onClick={() => applyAction({ type: 'needs-input', taskId: task.id, message: run.draft.reviewNote })}>需要补充信息</button>
                   <button type="button" onClick={() => applyAction({ type: 'fail', taskId: task.id, message: run.draft.reviewNote })}>标记失败</button>
                   <button type="button" onClick={() => applyAction({ type: 'cancel', taskId: task.id })}>取消</button>
                 </>}
-                {run.status === 'needs-input' && <>
+                {run.status === 'needs-input' && !unresolvedCoordination && <>
                   <button type="button" className="is-primary" onClick={() => applyAction({ type: 'resume', taskId: task.id })}>信息已补充，继续</button>
                   <button type="button" onClick={() => applyAction({ type: 'fail', taskId: task.id, message: run.draft.reviewNote })}>标记失败</button>
                   <button type="button" onClick={() => applyAction({ type: 'cancel', taskId: task.id })}>取消</button>
@@ -1542,7 +1594,7 @@ export function TaskPlanCards({
                   <button type="button" onClick={() => applyAction({ type: 'request-changes', taskId: task.id, message: run.draft.reviewNote })}>退回修改</button>
                   <button type="button" onClick={() => applyAction({ type: 'fail', taskId: task.id, message: run.draft.reviewNote })}>标记失败</button>
                 </>}
-                {['failed', 'cancelled'].includes(run.status) && <button type="button" className="is-primary" onClick={() => applyAction({ type: 'retry', taskId: task.id })}>重试任务</button>}
+                {['failed', 'cancelled'].includes(run.status) && !unresolvedCoordination && <button type="button" className="is-primary" onClick={() => applyAction({ type: 'retry', taskId: task.id })}>重试任务</button>}
               </div>
               </div>}
             </li>

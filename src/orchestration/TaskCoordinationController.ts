@@ -14,6 +14,7 @@ import {
   reconcileAndSaveTaskSessionWithCoordination,
   type TaskCoordinationNotice,
 } from './taskCoordinationSession'
+import { resolveTaskCoordination, type TaskRecoveryAction } from './taskCoordinationRecovery'
 
 export type TaskCoordinationControllerStatus =
   | 'idle'
@@ -39,7 +40,9 @@ export interface TaskCoordinationController {
   pause(): void
   resume(): Promise<void>
   runNow(): Promise<void>
+  inspectExisting(): Promise<void>
   cancelTask(taskId: string): Promise<void>
+  resolveTask(taskId: string, dispatchId: string, action: TaskRecoveryAction, riskAcknowledged: boolean): Promise<void>
   updateSession(session: TaskSessionV1): void
   clearState(): Promise<void>
   dispose(): void
@@ -169,7 +172,14 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
     await this.runCycle(this.snapshot.status === 'running' && this.confirmed)
   }
 
-  private async runCycle(allowDispatch: boolean) {
+  async inspectExisting() {
+    if (this.snapshot.status === 'disposed') return
+    this.pause()
+    if (this.cycle) await this.cycle
+    await this.runCycle(false, true)
+  }
+
+  private async runCycle(allowDispatch: boolean, inspectTerminal = false) {
     if (this.snapshot.status === 'disposed') return
     if (this.cycle) {
       this.rerunRequested = true
@@ -178,7 +188,7 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
     }
     this.clearTimer()
     const generation = this.generation
-    const operation = this.performCycle(allowDispatch, generation)
+    const operation = this.performCycle(allowDispatch, generation, inspectTerminal)
     this.cycle = operation
     try {
       await operation
@@ -191,7 +201,7 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
     }
   }
 
-  private async performCycle(allowDispatch: boolean, generation: number) {
+  private async performCycle(allowDispatch: boolean, generation: number, inspectTerminal: boolean) {
     const canDispatch = () => (
       allowDispatch
       && this.confirmed
@@ -205,6 +215,7 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
       policy: this.options.policy,
       now: this.options.now,
       canDispatch,
+      inspectTerminal,
     })
     if (generation !== this.generation || this.isDisposed()) return
     if (!result.ok) {
@@ -290,6 +301,54 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
     })
   }
 
+  async resolveTask(taskId: string, dispatchId: string, action: TaskRecoveryAction, riskAcknowledged: boolean) {
+    if (this.isDisposed()) return
+    this.pause()
+    if (this.cycle) await this.cycle
+    // Inspect durable references first. This pass cannot dispatch new work.
+    await this.inspectExisting()
+    if (this.isDisposed() || this.snapshot.error) return
+    const checkedRecord = this.snapshot.records.find(record => record.dispatchId === dispatchId)
+    if (checkedRecord?.phase === 'completed') {
+      this.publish({ notices: [{ taskId, dispatchId, level: 'info', code: 'MANUAL_REVIEW_REQUIRED',
+        message: '已查到旧执行的完成结果，任务转入待验收；未创建新尝试。' }] })
+      return
+    }
+    const outcome = await resolveTaskCoordination({
+      session: this.session,
+      taskId,
+      dispatchId,
+      action,
+      riskAcknowledged,
+      coordinationStore: this.options.coordinationStore,
+      sessionStore: this.options.sessionStore,
+      now: this.options.now,
+    })
+    if (!outcome.ok) {
+      this.publish({ status: 'paused', error: outcome.message })
+      return
+    }
+    if (outcome.changed) {
+      this.session = clone(outcome.session)
+      this.options.onSessionChange?.(clone(outcome.session))
+    }
+    this.publish({
+      status: 'paused',
+      records: clone(outcome.state.records),
+      activeTaskIds: activeTaskIds(outcome.state.records),
+      error: undefined,
+      notices: [{
+        taskId,
+        dispatchId,
+        level: 'info',
+        code: 'MANUAL_REVIEW_REQUIRED',
+        message: action === 'manual-takeover'
+          ? '已转为人工处理，可录入结果。'
+          : '已保存新尝试决定；请重新启动协调，系统不会自动重派。',
+      }],
+    })
+  }
+
   updateSession(session: TaskSessionV1) {
     if (this.snapshot.status === 'disposed') return
     const changedSession = session.id !== this.session.id || session.plan.id !== this.session.plan.id
@@ -319,6 +378,20 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
 
   async clearState() {
     this.pause()
+    if (this.cycle) await this.cycle
+    const existing = await this.options.coordinationStore.load({
+      sessionId: this.session.id,
+      planId: this.session.plan.id,
+      taskIds: this.session.plan.tasks.map(task => task.id),
+    })
+    if (existing.ok && existing.state?.records.length) {
+      this.publish({ status: 'paused', error: '协调记录包含执行证据，不能清除；请逐项核对或人工处理。' })
+      return
+    }
+    if (!existing.ok) {
+      this.publish({ status: 'paused', error: existing.message })
+      return
+    }
     const cleared = await this.options.coordinationStore.clear()
     if (!cleared.ok) {
       this.publish({ status: 'paused', error: cleared.message })

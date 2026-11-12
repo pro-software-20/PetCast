@@ -982,7 +982,9 @@ export function TaskAnalysisPanel({
           onCoordinationPause={() => coordinationController.current?.pause()}
           onCoordinationResume={() => coordinationController.current?.resume() ?? Promise.resolve()}
           onCoordinationRunNow={() => coordinationController.current?.runNow() ?? Promise.resolve()}
+          onCoordinationInspect={() => coordinationController.current?.inspectExisting() ?? Promise.resolve()}
           onCoordinationCancelTask={(taskId) => coordinationController.current?.cancelTask(taskId) ?? Promise.resolve()}
+          onCoordinationResolveTask={(taskId, dispatchId, action, riskAcknowledged) => coordinationController.current?.resolveTask(taskId, dispatchId, action, riskAcknowledged) ?? Promise.resolve()}
           onCoordinationClear={() => coordinationController.current?.clearState() ?? Promise.resolve()}
         />
       )}
