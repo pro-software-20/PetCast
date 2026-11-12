@@ -1414,3 +1414,26 @@ pnpm test:desktop
 pnpm test:task-ui
 git diff --check
 ```
+
+## 32. B 模块 P3.4B：真实 D 评价接入全链路验收
+
+- 保留 P3.4A 的双内存适配器基线，新增 `pnpm test:coordination-d-e2e`，以零网络 A 执行适配器和 D 组真实 `TaskEvidenceAdapter` 验收完整协调链路。
+- 两个并行根任务由用户确认后才解锁依赖汇总任务；执行完成只进入 `review`。D 逐项核查状态与证据，分别产生 `accepted`、`revise`、`unknown` 报告，B 只给出建议。
+- 重建控制器默认暂停且不重复派发；已保存的评价在重建 D 实例后仍被复用；旧派发报告不能覆盖当前任务。
+- D 请求只包含安全摘要、逐项验证与证据引用；直接依赖交接和最终报告均不包含完整 AI 输出。测试显式阻止网络调用，不产生模型费用。
+- D 已在主程序中注入任务页面；A 组真实通用 `ExecutionAdapter` 尚未交付，正式发行版不注册本次测试用的内存适配器。后续真实 A 联调入口见 `docs/B_P34B_D_INTEGRATION_ACCEPTANCE.md`。
+
+验证命令：
+
+```powershell
+pnpm test:coordination-d-e2e
+pnpm test:coordination-e2e
+pnpm test:evaluation-conformance
+pnpm test:adapter-conformance
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
