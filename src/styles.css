@@ -451,6 +451,11 @@ button { font: inherit; }
 .task-coordination-record strong { flex-basis: 100%; color: #965d52; }
 .task-coordination-record.is-failed, .task-coordination-record.is-unknown { color: #965d52; background: #fff0eb; }
 .task-coordination-record.is-needs-input { color: #806344; background: #fff2d7; }
+.task-coordination-recovery { display: flex; flex: 1 1 100%; flex-wrap: wrap; align-items: center; gap: 5px; padding: 6px; border: 1px solid rgba(150,93,82,.24); border-radius: 7px; background: rgba(255,255,255,.72); }
+.task-coordination-recovery p { flex: 1 1 100%; margin: 0; line-height: 1.5; }
+.task-coordination-recovery p[role="alert"] { color: #a54d39; font-weight: 800; }
+.task-coordination-recovery button { min-height: 28px; padding: 5px 7px; border: 1px solid rgba(150,93,82,.38); border-radius: 6px; color: #805345; background: #fff; font: inherit; font-weight: 800; cursor: pointer; }
+.task-coordination-recovery button:disabled { cursor: not-allowed; opacity: .5; }
 .task-plan-settings, .task-global-scope-details { margin-top: 8px; color: #557d83; font-size: 8px; }
 .task-plan-settings > summary, .task-global-scope-details > summary { min-height: 28px; padding: 6px 8px; border: 1px solid rgba(82,145,151,.24); border-radius: 7px; background: rgba(235,248,244,.72); cursor: pointer; font-weight: 800; line-height: 1.5; }
 .task-plan-settings > div, .task-global-scope-details > .workspace-scope-summary { margin-top: 6px; }

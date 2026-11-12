@@ -112,6 +112,14 @@ export const TASK_COORDINATION_PHASES = [
 ] as const
 export type TaskCoordinationPhase = (typeof TASK_COORDINATION_PHASES)[number]
 
+export interface TaskCoordinationResolution {
+  action: 'manual-takeover' | 'new-attempt'
+  dispatchId: string
+  confirmedAt: string
+  /** Required when the previous execution could still finish or incur charges. */
+  riskAcknowledged: boolean
+}
+
 /**
  * Durable B-side state for one adapter attempt. It deliberately lives outside
  * TaskSessionV1 so the existing task-session schema remains compatible.
@@ -125,6 +133,7 @@ export interface TaskCoordinationRecord {
   reference?: ExecutionReference
   latestSnapshot?: ExecutionSnapshot
   error?: ExecutionAdapterError
+  resolution?: TaskCoordinationResolution
   createdAt: string
   updatedAt: string
 }
