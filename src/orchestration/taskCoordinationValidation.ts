@@ -238,7 +238,7 @@ const validateArtifacts = (
 
 const TASK_KEYS = [
   'id', 'title', 'description', 'dependsOn', 'recommendedProviderId',
-  'providerRecommendation', 'executionMode', 'prompt', 'files',
+  'providerRecommendation', 'priority', 'executionMode', 'prompt', 'files',
   'expectedDeliverables', 'acceptanceChecks',
 ] as const
 

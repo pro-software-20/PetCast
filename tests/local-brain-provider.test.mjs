@@ -50,6 +50,7 @@ test('splits numbered tasks into independent roots by default', async () => {
   assert.equal(plan.tasks.length, 3)
   assert.deepEqual(plan.tasks.map(task => task.dependsOn), [[], [], []])
   assert.deepEqual(plan.tasks.map(task => task.recommendedProviderId), ['deepseek', 'codex', 'doubao'])
+  assert.deepEqual(plan.tasks.map(task => task.priority), ['medium', 'medium', 'medium'])
 })
 
 test('connects numbered tasks when the prompt contains an explicit dependency', async () => {

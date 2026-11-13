@@ -22,6 +22,7 @@ import {
   validateExecutionReceipt,
   validateExecutionSnapshot,
 } from './taskCoordinationValidation'
+import { orderTasksForDispatch } from './taskScheduling'
 import { getHandoffReadiness } from './taskHandoff'
 import { validateTaskSession } from './taskSessionValidation'
 
@@ -362,7 +363,7 @@ export async function runCoordinationCycle(
   const active = () => state.records.filter(record => ['queued', 'running'].includes(record.phase))
   const activeByProvider = (providerId: ProviderId) => active().filter(record => record.providerId === providerId).length
 
-  for (const task of session.plan.tasks) {
+  for (const task of orderTasksForDispatch(session)) {
     if (aborted(input.signal)) return schedulerError('CANCELLED', '任务协调周期已取消。')
     if (input.canDispatch && !input.canDispatch()) break
     if (active().length >= policyResult.value.globalConcurrency) break

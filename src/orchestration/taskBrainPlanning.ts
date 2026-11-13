@@ -4,6 +4,7 @@ import type {
   BrainProvider,
 } from './BrainProvider'
 import { validateTaskPlan } from './taskPlanValidation'
+import { withDefaultTaskPriorities } from './taskScheduling'
 import type {
   BrainPlanningErrorCode,
   TaskBrainId,
@@ -43,7 +44,7 @@ const stampAndValidate = (
   source: TaskPlanningBrainSource,
 ): BrainPlanningOutcome => {
   const value: TaskPlan = {
-    ...plan,
+    ...withDefaultTaskPriorities(plan),
     planningBrain: { ...source },
   }
   const validation = validateTaskPlan(value)

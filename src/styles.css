@@ -406,6 +406,7 @@ button { font: inherit; }
 .task-coordination-controls.is-paused > header > div span, .task-coordination-controls.is-confirming > header > div span { color: #775932; background: #f8dfae; }
 .task-coordination-controls.is-error > header > div span { background: #b76f65; }
 .task-coordination-confirm, .task-coordination-pause-note, .task-coordination-unavailable, .task-coordination-notice { margin: 0; padding: 7px 8px; border-radius: 7px; line-height: 1.45; }
+.task-coordination-queue { margin: 0; padding: 6px 8px; border-radius: 7px; color: #587a7f; background: rgba(221,241,237,.72); line-height: 1.45; }
 .task-coordination-confirm, .task-coordination-pause-note { color: #775932; background: #fff0cf; }
 .task-coordination-unavailable { color: #6d7473; background: rgba(227,235,233,.72); }
 .task-coordination-notice { color: #4e7779; background: rgba(220,240,234,.7); }
@@ -429,6 +430,10 @@ button { font: inherit; }
 .task-plan-card-glance { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 3px 8px; padding: 0 9px 8px; color: #718f91; font-size: 7px; line-height: 1.35; }
 .task-plan-card-glance span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-plan-card-glance strong { grid-column: 1 / -1; color: #4d777b; font-size: 8px; font-weight: 800; }
+.task-priority { font-weight: 800; }
+.task-priority.is-high { color: #a95d55; }
+.task-priority.is-medium { color: #517d86; }
+.task-priority.is-low { color: #7c8992; }
 .task-plan-card-body { padding: 9px; border-top: 1px dashed rgba(82,145,151,.24); }
 .task-plan-description { margin: 6px 0 8px; color: #67898c; font-size: 9px; line-height: 1.5; }
 .task-plan-assignment { display: grid; grid-template-columns: auto minmax(120px, 1fr) auto; align-items: center; gap: 7px; padding: 7px 8px; border-radius: 8px; background: rgba(226,245,239,.72); }
@@ -470,7 +475,7 @@ button { font: inherit; }
 .task-definition-editor { display: grid; gap: 7px; margin-top: 8px; padding: 9px; border: 1px solid rgba(82,145,151,.3); border-radius: 9px; background: rgba(239,249,246,.94); }
 .task-definition-editor h3 { margin: 0; color: #42757c; font-size: 9px; }
 .task-definition-editor > label { display: grid; gap: 3px; color: #507d82; font-size: 8px; font-weight: 800; }
-.task-definition-editor input, .task-definition-editor textarea { width: 100%; padding: 6px 7px; border: 1px solid rgba(82,145,151,.3); border-radius: 7px; color: #3f6b72; background: #fff; font: inherit; font-size: 8px; line-height: 1.45; }
+.task-definition-editor input, .task-definition-editor textarea, .task-definition-editor select { width: 100%; padding: 6px 7px; border: 1px solid rgba(82,145,151,.3); border-radius: 7px; color: #3f6b72; background: #fff; font: inherit; font-size: 8px; line-height: 1.45; }
 .task-definition-editor textarea { resize: vertical; }
 .task-workspace-scope-editor { display: grid; gap: 5px; }
 .task-workspace-scope-editor > strong { color: #4a7a80; font-size: 8px; }
