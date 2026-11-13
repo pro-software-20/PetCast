@@ -165,6 +165,7 @@ export function TaskAnalysisPanel({
   const [planError, setPlanError] = useState<string | null>(null)
   const [storageNotice, setStorageNotice] = useState<string | null>(null)
   const [storageBlocked, setStorageBlocked] = useState(false)
+  const [coordinationEvidenceBlocked, setCoordinationEvidenceBlocked] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle')
@@ -388,6 +389,37 @@ export function TaskAnalysisPanel({
     if (taskSession) coordinationController.current?.updateSession(taskSession)
   }, [taskSession])
 
+  useEffect(() => {
+    let active = true
+    setCoordinationEvidenceBlocked(true)
+    void coordinationStore.load({}).then((loaded) => {
+      if (!active) return
+      const finished = Boolean((taskSession ?? completedSession)?.completedAt)
+      setCoordinationEvidenceBlocked(!loaded.ok || Boolean(!finished && loaded.state?.records.some(record => !record.resolution)))
+    }).catch(() => { if (active) setCoordinationEvidenceBlocked(true) })
+    return () => { active = false }
+  }, [coordinationStore, taskSession?.id, completedSession?.id, taskSession?.completedAt, coordinationSnapshot.records])
+
+  const clearInactiveCoordination = async () => {
+    let loaded
+    try { loaded = await coordinationStore.load({}) }
+    catch { setStorageNotice('无法核对协调记录，已保留任务与执行证据。'); return false }
+    if (!loaded.ok) {
+      setStorageNotice(`${loaded.message} 请先核对协调记录，当前任务未清空。`)
+      return false
+    }
+    const finished = Boolean((taskSession ?? completedSession)?.completedAt)
+    if (!finished && loaded.state?.records.some(record => !record.resolution)) {
+      setStorageNotice('存在尚未处理的协调执行证据。请先核对外部执行并处理任务，当前任务未清空。')
+      setCoordinationEvidenceBlocked(true)
+      return false
+    }
+    const cleared = await coordinationStore.clear()
+    if (!cleared.ok) { setStorageNotice(cleared.message); return false }
+    setCoordinationEvidenceBlocked(false)
+    return true
+  }
+
   const handleSessionChange = (session: TaskSessionV1, persistImmediately = false) => {
     setTaskSession(session)
     if (persistImmediately) void persistSession(session)
@@ -462,7 +494,6 @@ export function TaskAnalysisPanel({
     setAcceptanceState(null)
     setEvaluatingTaskId(null)
     setEvaluationError(null)
-    void coordinationStore.clear()
     if (!acceptanceBlocked) {
       setAcceptanceNotice(null)
       void acceptanceStore.clear()
@@ -477,15 +508,18 @@ export function TaskAnalysisPanel({
   }
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const selectedFiles = Array.from(event.currentTarget.files ?? []).map(toFileMetadata)
+    const input = event.currentTarget
+    const selectedFiles = Array.from(input.files ?? []).map(toFileMetadata)
     const selection = mergeTaskAnalysisFiles(files, selectedFiles)
+    input.value = ''
+    if (coordinationEvidenceBlocked) return
     if (selection.addedCount > 0) invalidateAnalysis()
     setFiles(selection.files)
     setFileNotice(selection.notice)
-    event.currentTarget.value = ''
   }
 
   const removeFile = (fileToRemove: TaskAnalysisFile) => {
+    if (coordinationEvidenceBlocked) return
     invalidateAnalysis()
     setFiles((current) => current.filter((file) => fileKey(file) !== fileKey(fileToRemove)))
     setFileNotice(null)
@@ -496,6 +530,7 @@ export function TaskAnalysisPanel({
       setAcceptanceNotice('请先明确清除损坏的评价记录，再开始新的分析。')
       return
     }
+    if (!await clearInactiveCoordination()) return
 
     const requestId = analysisRequestId.current + 1
     analysisRequestId.current = requestId
@@ -517,7 +552,6 @@ export function TaskAnalysisPanel({
     setAcceptanceBlocked(false)
     setEvaluatingTaskId(null)
     setEvaluationError(null)
-    void coordinationStore.clear()
     void acceptanceStore.clear()
     void sessionStore.clear().then((outcome) => {
       if (!outcome.ok) setStorageNotice(outcome.message)
@@ -593,9 +627,13 @@ export function TaskAnalysisPanel({
     setCopyStatus(await copyText(result.optimizedPrompt) ? 'success' : 'error')
   }
 
-  const handleClear = () => {
+  const handleClear = async () => {
     if (!clearArmed) {
       setClearArmed(true)
+      return
+    }
+    if (!await clearInactiveCoordination()) {
+      setClearArmed(false)
       return
     }
 
@@ -623,7 +661,6 @@ export function TaskAnalysisPanel({
     setAcceptanceBlocked(false)
     setEvaluatingTaskId(null)
     setEvaluationError(null)
-    void coordinationStore.clear()
     void acceptanceStore.clear()
     void sessionStore.clear().then((outcome) => {
       setStorageNotice(outcome.ok ? null : outcome.message)
@@ -642,7 +679,7 @@ export function TaskAnalysisPanel({
     || isAnalyzing
 
   const sessionStarted = Boolean(taskSession?.runs.some(run => run.attempt > 0 || !['waiting', 'ready'].includes(run.status)))
-  const sessionLocked = sessionStarted || Boolean(completedSession) || storageBlocked
+  const sessionLocked = sessionStarted || Boolean(completedSession) || storageBlocked || coordinationEvidenceBlocked
   const completedTaskCount = taskSession?.runs.filter(run => run.status === 'done').length ?? 0
   const planningBrain = taskSession?.plan.planningBrain
   const requestedBrainName = planningBrain
@@ -711,7 +748,11 @@ export function TaskAnalysisPanel({
       {storageNotice && (
         <div className="task-storage-notice" role="alert">
           <span>{storageNotice}</span>
-          <button type="button" onClick={() => void sessionStore.clear().then((outcome) => {
+          <button type="button" onClick={() => void clearInactiveCoordination().then((allowed) => {
+            if (!allowed) return null
+            return sessionStore.clear()
+          }).then((outcome) => {
+            if (!outcome) return
             if (outcome.ok) {
               setStorageNotice(null)
               setStorageBlocked(false)
@@ -763,6 +804,7 @@ export function TaskAnalysisPanel({
           value={prompt}
           disabled={sessionLocked}
           onChange={(event) => {
+            if (coordinationEvidenceBlocked) return
             invalidateAnalysis()
             setPrompt(event.target.value)
           }}
