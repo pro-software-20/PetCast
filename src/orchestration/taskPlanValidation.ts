@@ -4,6 +4,7 @@ import {
   EXECUTION_MODES,
   PROVIDER_CAPABILITIES,
   RECOMMENDATION_CONFIDENCES,
+  TASK_PRIORITIES,
   TASK_BRAIN_IDS,
   TASK_WORK_CATEGORIES,
   type ProviderId,
@@ -53,6 +54,7 @@ const brainFallbackCodes = new Set<string>([
 const executionModes = new Set<string>(EXECUTION_MODES)
 const providerCapabilities = new Set<string>(PROVIDER_CAPABILITIES)
 const recommendationConfidences = new Set<string>(RECOMMENDATION_CONFIDENCES)
+const taskPriorities = new Set<string>(TASK_PRIORITIES)
 const taskWorkCategories = new Set<string>(TASK_WORK_CATEGORIES)
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -225,6 +227,10 @@ const validateTask = (
   }
   if (value.providerRecommendation !== undefined) {
     validateProviderRecommendation(value.providerRecommendation, `${path}.providerRecommendation`, issues)
+  }
+  if (value.priority !== undefined
+    && (typeof value.priority !== 'string' || !taskPriorities.has(value.priority))) {
+    pushIssue(issues, 'INVALID_SHAPE', `${path}.priority`, '任务优先级必须是 high、medium 或 low。')
   }
   if (typeof value.executionMode !== 'string' || !executionModes.has(value.executionMode)) {
     pushIssue(issues, 'INVALID_SHAPE', `${path}.executionMode`, '执行模式必须是 manual、api 或 local-agent。')

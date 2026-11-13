@@ -9,7 +9,7 @@ import {
 } from '../orchestration/taskPathScope'
 import { recommendTaskProvider } from '../orchestration/taskRecommendation'
 import type { EditableTaskDefinition } from '../orchestration/taskSession'
-import type { ProviderProfile, TaskNode, WorkspacePathScope } from '../types/taskOrchestration'
+import type { ProviderProfile, TaskNode, TaskPriority, WorkspacePathScope } from '../types/taskOrchestration'
 import { WorkspaceScopePicker } from './WorkspaceScopePicker'
 import { WorkspaceScopeSummary } from './WorkspaceScopeSummary'
 
@@ -42,6 +42,7 @@ export function TaskDefinitionEditor({
   const [prompt, setPrompt] = useState(task.prompt)
   const [deliverables, setDeliverables] = useState(textList(task.expectedDeliverables))
   const [checks, setChecks] = useState(textList(task.acceptanceChecks))
+  const [priority, setPriority] = useState<TaskPriority>(task.priority ?? 'medium')
   const [files, setFiles] = useState(() => structuredClone(task.files))
   const [scopeOpen, setScopeOpen] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
@@ -55,6 +56,7 @@ export function TaskDefinitionEditor({
     setPrompt(task.prompt)
     setDeliverables(textList(task.expectedDeliverables))
     setChecks(textList(task.acceptanceChecks))
+    setPriority(task.priority ?? 'medium')
     setFiles(structuredClone(task.files))
     setScopeOpen(false)
     setErrors([])
@@ -109,6 +111,7 @@ export function TaskDefinitionEditor({
       files: nextFiles,
       expectedDeliverables: nextDeliverables,
       acceptanceChecks: nextChecks,
+      priority,
       recommendedProviderId: recommendation.recommendedProviderId,
       providerRecommendation: recommendation.recommendation,
     })
@@ -130,6 +133,13 @@ export function TaskDefinitionEditor({
       <label>任务标题<input value={title} maxLength={12_000} onChange={event => setTitle(event.target.value)} /></label>
       <label>任务描述<textarea value={description} rows={3} maxLength={12_000} onChange={event => setDescription(event.target.value)} /></label>
       <label>核心 Prompt<textarea value={prompt} rows={6} maxLength={12_000} onChange={event => setPrompt(event.target.value)} /></label>
+      <label>任务优先级
+        <select value={priority} onChange={event => setPriority(event.target.value as TaskPriority)}>
+          <option value="high">高：优先处理</option>
+          <option value="medium">中：默认</option>
+          <option value="low">低：可以稍后处理</option>
+        </select>
+      </label>
       <label>交付物（每行一项）<textarea value={deliverables} rows={3} onChange={event => setDeliverables(event.target.value)} /></label>
       <label>验收标准（每行一项）<textarea value={checks} rows={3} onChange={event => setChecks(event.target.value)} /></label>
 

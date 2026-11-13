@@ -7,6 +7,7 @@ import { buildManualTaskPrompt } from '../orchestration/manualTaskPrompt'
 import { LOCAL_PROVIDER_PROFILE } from '../orchestration/providerProfiles'
 import { generateTaskSessionReport } from '../orchestration/taskReport'
 import { getTaskWorkspacePathScope, workspacePathScopesEqual } from '../orchestration/taskPathScope'
+import { analyzeTaskScheduling, priorityLabel } from '../orchestration/taskScheduling'
 import {
   getDependencyHandoffArtifacts,
   getEffectiveTaskWorkspaceScope,
@@ -320,6 +321,11 @@ export function TaskPlanCards({
   const connectedCoordinationProviders = providers.filter(provider => Boolean(coordinationAdapters?.get(provider.id)))
   const automaticTaskCount = session.plan.tasks.filter(task => task.executionMode !== 'manual').length
   const coordinationAvailable = connectedCoordinationProviders.length > 0 && automaticTaskCount > 0
+  const scheduling = useMemo(() => analyzeTaskScheduling(session), [session])
+  const schedulingByTaskId = useMemo(
+    () => new Map(scheduling.insights.map(insight => [insight.taskId, insight])),
+    [scheduling],
+  )
 
   useEffect(() => () => {
     const requestId = workspaceRequest.current
@@ -747,6 +753,9 @@ export function TaskPlanCards({
               : '暂无 A 组执行适配器'}；自动任务：{automaticTaskCount}；活动任务：{coordinationSnapshot.activeTaskIds.length}
           </small>
         </header>
+        <p className="task-coordination-queue" role="status">
+          队列说明：当前可执行 {scheduling.runnableTaskIds.length} 个；关键路径任务 {scheduling.criticalPathTaskIds.length} 个；等待依赖 {scheduling.waitingTaskIds.length} 个。
+        </p>
         {coordinationSnapshot.status === 'confirming' && (
           <div className="task-coordination-confirm" role="alert">
             <strong>确认启动自动协调</strong>
@@ -929,6 +938,7 @@ export function TaskPlanCards({
           const dependencyNames = task.dependsOn.map(dependencyId => (
             session.plan.tasks.find(candidate => candidate.id === dependencyId)?.title ?? dependencyId
           ))
+          const schedulingInsight = schedulingByTaskId.get(task.id)
           const earlierTasks = session.plan.tasks.slice(0, index)
           const editable = (run.status === 'running' || run.status === 'needs-input') && !coordinatedRun
           const reviewEditable = run.status === 'review' && run.automaticExecution?.state !== 'review'
@@ -991,6 +1001,15 @@ export function TaskPlanCards({
               <div className="task-plan-card-glance">
                 <span>AI：{selectedProviderName}{manuallyOverridden ? '（人工改选）' : ''}</span>
                 <span>依赖：{dependencyNames.length ? dependencyNames.join('、') : '无，可并行'}</span>
+                {schedulingInsight && <span className={`task-priority is-${schedulingInsight.priority}`}>
+                  {priorityLabel(schedulingInsight.priority)}{schedulingInsight.isCriticalPath ? ' · 关键路径任务' : ''}
+                </span>}
+                {schedulingInsight?.status === 'ready' && schedulingInsight.suggestedOrder && (
+                  <span>当前建议第 {schedulingInsight.suggestedOrder} 个处理{ schedulingInsight.parallelReadyCount > 0 ? `；可与 ${schedulingInsight.parallelReadyCount} 个任务并行` : ''}</span>
+                )}
+                {schedulingInsight?.status === 'waiting' && schedulingInsight.blockedByTaskIds.length > 0 && (
+                  <span>等待前置任务：{schedulingInsight.blockedByTaskIds.join('、')}</span>
+                )}
                 <strong>{taskNextStep}</strong>
               </div>
 
@@ -1227,7 +1246,7 @@ export function TaskPlanCards({
                     providers={providers}
                     workspace={workspace}
                     defaultScope={defaultScope}
-                    disabled={!planEditable}
+                    disabled={!planEditable || Boolean(coordinationRecord)}
                     onSave={definition => applyAction({
                       type: 'update-task-definition',
                       taskId: task.id,

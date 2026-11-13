@@ -35,7 +35,7 @@ export interface CreateTaskSessionInput {
 
 export type EditableTaskDefinition = Pick<
   TaskNode,
-  'title' | 'description' | 'prompt' | 'expectedDeliverables' | 'acceptanceChecks'
+  'title' | 'description' | 'prompt' | 'expectedDeliverables' | 'acceptanceChecks' | 'priority'
 > & {
   files: TaskFileScope
   recommendedProviderId: ProviderId
@@ -379,6 +379,7 @@ export function updateTaskSession(
           expectedDeliverables: [...action.task.expectedDeliverables],
           acceptanceChecks: [...action.task.acceptanceChecks],
           recommendedProviderId: action.task.recommendedProviderId,
+          priority: action.task.priority ?? 'medium',
           providerRecommendation: action.task.providerRecommendation
             ? clone(action.task.providerRecommendation)
             : undefined,

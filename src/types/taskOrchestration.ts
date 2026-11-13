@@ -65,6 +65,10 @@ export type TaskWorkCategory = (typeof TASK_WORK_CATEGORIES)[number]
 export const RECOMMENDATION_CONFIDENCES = ['high', 'medium', 'low'] as const
 export type RecommendationConfidence = (typeof RECOMMENDATION_CONFIDENCES)[number]
 
+/** User-controlled scheduling preference. Missing values in older plans mean medium. */
+export const TASK_PRIORITIES = ['high', 'medium', 'low'] as const
+export type TaskPriority = (typeof TASK_PRIORITIES)[number]
+
 export interface TaskProviderRecommendation {
   category: TaskWorkCategory
   requiredCapabilities: ProviderCapability[]
@@ -128,6 +132,8 @@ export interface TaskNode {
   recommendedProviderId: ProviderId
   /** Optional so task sessions created before P2.2 remain restorable. */
   providerRecommendation?: TaskProviderRecommendation
+  /** Optional for plans created before B-P3.6A; omitted values are treated as medium. */
+  priority?: TaskPriority
   executionMode: ExecutionMode
   prompt: string
   files: TaskFileScope

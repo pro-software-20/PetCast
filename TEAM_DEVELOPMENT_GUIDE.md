@@ -1452,3 +1452,26 @@ git diff --check
 - 页面验收实际点击外部状态核对、人工接管、二次确认新尝试及重启后的恢复入口；检查派发次数、尝试次数、持久化决定和待验收状态。网络请求被测试拦截，不调用真实 AI。
 - 修复新建任务、重新分析和清空输入对未处理协调执行证据的清理风险；活动记录或损坏记录保留，并给出可见提示。
 - 验收矩阵与复现步骤见 `docs/B_P351_DESKTOP_RECOVERY_ACCEPTANCE.md`。A 组真实通用适配器仍待交付，真实外部执行验收尚未包含在本轮中。
+
+## 35. B 模块 P3.6A：任务优先级、关键路径与可解释调度
+
+- `TaskNode` 增加可选 `priority`（`high` / `medium` / `low`）。本地新建方案默认写入 `medium`；历史方案缺失该字段时按 `medium` 读取，保持会话兼容。
+- 新增纯函数 `analyzeTaskScheduling()`：实时计算可执行任务、阻塞前置任务、最长依赖链上的关键路径任务、可并行数量和推荐处理顺序，不把派生分数写入会话。
+- 统一协调器的自动派发顺序固定为：用户优先级 → 关键路径分数 → 原任务顺序；现有依赖、全局并发 2、同 Provider 并发 1、暂停和人工确认边界不变。
+- 任务卡显示优先级、关键路径标识、并行提示、依赖阻塞原因及当前建议处理顺序；自动协调区域显示可执行、关键路径和等待依赖的队列摘要。
+- 任务开始或已有协调记录后，任务设置（包括优先级）保持锁定；开始前修改优先级会在下一个协调周期立即生效。
+- P3.6A 仍使用零网络适配器测试，不注册模拟适配器到正式发行版，也不依赖 A 组真实适配器。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm test:coordination-e2e
+pnpm test:coordination-d-e2e
+pnpm test:task-recovery-ui
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
