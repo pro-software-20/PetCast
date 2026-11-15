@@ -23,7 +23,7 @@ export function ResourceOverview({query,demo,revision,latest}:{latest?:import('.
       await appendResourceSamples(query,doc.samples);setNotice('已导入 '+doc.samples.length+' 条采样')
     }catch(e){setNotice(e instanceof Error?e.message:'导入失败')}
   }
-  return <details className="history-chart"><summary>平台资源 · 期内最近采样</summary>
+  return <details className="history-chart"><summary>各平台最近余额抓取</summary>
     {result.error||(!result.rows?.length?'暂无平台采样':result.rows.map(r=><p key={JSON.stringify([r.provider,r.account,r.kind,r.unit])}>{r.provider} · {r.account} · {r.kind==='balance'?'余额':'剩余额度'} {r.value} {r.unit} · {new Date(r.at).toLocaleString('zh-CN',{timeZone:query.timeZone})}</p>))}
     {!demo&&<label>导入资源采样 <input type="file" accept=".json" onChange={e=>{const f=e.target.files?.[0];if(f)void load(f);e.target.value=''}}/></label>}
     {!demo&&<details><summary>采样导入格式</summary><pre style={{whiteSpace:'pre-wrap'}}>{JSON.stringify({version:1,samples:[{source:query.source,scopeId:query.scopeId,provider:'平台名称',account:'账号别名',kind:'balance',unit:'CNY',value:12.6,at:query.startAt}]},null,2)}</pre></details>}

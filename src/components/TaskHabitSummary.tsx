@@ -1,16 +1,25 @@
 import { useMemo } from 'react'
 import type { TaskRecord } from '../history/TaskLedger'
 import { taskHabits, taskTiming } from '../reports/taskHabits'
+import { taskInsights } from '../reports/taskInsights'
 
 const duration = (ms:number|null)=>ms===null?'未记录':ms<60000?Math.round(ms/1000)+' 秒':(ms/60000).toFixed(1)+' 分钟'
 export function TaskHabitSummary({tasks}:{tasks:TaskRecord[]}) {
   const stats=useMemo(()=>taskHabits(tasks),[tasks])
+  const insights=useMemo(()=>taskInsights(tasks),[tasks])
   if(!tasks.length)return <p>本期暂无任务反馈</p>
   return <section className="history-chart"><h3>使用习惯与任务反馈</h3>
     <p>使用模型　{stats.models.slice(0,3).map(([s,n])=>s+'（'+n+' 次）').join('、')||'暂无记录'}</p>
     <p>任务类型　{stats.categories.slice(0,3).map(([s,n])=>s+'（'+n+' 项）').join('、')}</p>
+    <p>多 AI 参与　{stats.multiAiTasks} 项任务</p>
+    <details><summary>规划与执行用量</summary>{stats.stages.filter(s=>s.calls>0).map(s=><p key={s.stage}>
+      {s.stage==='planning'?'主控规划':s.stage==='execution'?'任务执行':'未分类'} · {s.calls} 次调用 · {s.measured?s.tokens.toLocaleString()+' Token':'用量未记录'}（{s.measured} 次有计量）
+    </p>)}</details>
     <p>重试 {stats.retryCalls} 次{stats.measuredRetries>0 && '，其中 '+stats.measuredRetries+' 次共上报 '+stats.retryTokens.toLocaleString()+' Token'}</p>
-    {stats.retryCalls>0 && <p>建议优先复查下面有重试的任务，查看哪些步骤重复发送了输入。</p>}
+    {insights.length>0 && <section aria-label="本期任务建议"><h4>本期任务建议</h4>{insights.map(item=><details key={item.id}>
+      <summary>{item.title} · {item.evidence}</summary><p>{item.action}</p>
+      <p>相关任务：{item.taskIds.map(id=>tasks.find(t=>t.id===id)?.label??id).slice(0,5).join('、')}{item.taskIds.length>5?'等 '+item.taskIds.length+' 项':''}</p>
+    </details>)}</section>}
     <details><summary>各平台的调用与用量</summary>{stats.providers.map(p=><p key={p.provider}>{p.provider} · {p.calls} 次调用 · {p.measured ? p.tokens.toLocaleString()+' Token' : '用量未知'}（{p.measured} 次有记录）</p>)}</details>
     <details open><summary>任务明细（{tasks.length} 项）</summary>{tasks.slice().sort((a,b)=>b.endedAt.localeCompare(a.endedAt)).slice(0,20).map(t=>{
       const time=taskTiming(t)
