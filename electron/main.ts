@@ -20,8 +20,9 @@ app.setAppUserModelId('io.github.pro-software-20.petcast')
 // Keep the existing data directory when the packaged product name becomes PetCast.
 app.setPath('userData', path.join(app.getPath('appData'), 'petcast-stage1'))
 const COMPACT = { width: 300, height: 340 }
-// 760 × 510 game scene + 218 px mock sidecar + 14 px gap + 16 px app padding.
-const EXPANDED = { width: 1008, height: 526 }
+// Expanded content fills the user-resizable window.
+const EXPANDED = { width: 900, height: 650 }
+let expandedSize = { ...EXPANDED }
 
 let mainWindow: BrowserWindow | null = null
 let compactBounds: Electron.Rectangle | null = null
@@ -69,7 +70,7 @@ const createWindow = () => {
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
-    alwaysOnTop: true,
+    alwaysOnTop: false,
     resizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -83,7 +84,7 @@ const createWindow = () => {
     },
   })
 
-  mainWindow.setAlwaysOnTop(true, 'floating')
+  mainWindow.setAlwaysOnTop(false)
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   mainWindow.once('ready-to-show', () => {
     if (!isSmokeTest) mainWindow?.show()
@@ -252,17 +253,23 @@ if (ownsInstance) app.whenReady().then(async () => {
   ipcMain.handle('window:toggle-expanded', async (_event, expanded: boolean) => {
     if (!mainWindow) return
     if (expanded) {
+      mainWindow.setResizable(true)
       compactBounds = mainWindow.getBounds()
       const display = screen.getDisplayMatching(compactBounds)
       const area = display.workArea
-      const width = Math.min(EXPANDED.width, area.width - 24)
-      const height = Math.min(EXPANDED.height, area.height - 24)
+      const width = Math.min(expandedSize.width, area.width - 24)
+      const height = Math.min(expandedSize.height, area.height - 24)
       const centerX = compactBounds.x + compactBounds.width / 2
       const centerY = compactBounds.y + compactBounds.height / 2
       const x = Math.max(area.x + 12, Math.min(Math.round(centerX - width / 2), area.x + area.width - width - 12))
       const y = Math.max(area.y + 12, Math.min(Math.round(centerY - height / 2), area.y + area.height - height - 12))
       await animateBounds({ x, y, width, height })
+      mainWindow?.setMinimumSize(Math.min(640, width), Math.min(440, height))
     } else if (compactBounds) {
+      const bounds = mainWindow.getBounds()
+      expandedSize = { width: bounds.width, height: bounds.height }
+      mainWindow.setMinimumSize(COMPACT.width, COMPACT.height)
+      mainWindow.setResizable(false)
       await animateBounds(compactBounds)
       compactBounds = null
     }
