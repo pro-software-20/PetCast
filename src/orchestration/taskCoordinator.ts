@@ -14,6 +14,7 @@ import type {
 import type {
   ProviderId,
   TaskNode,
+  TaskPriority,
   TaskSessionV1,
 } from '../types/taskOrchestration'
 import type { TaskCoordinationStore } from './TaskCoordinationStore'
@@ -22,7 +23,7 @@ import {
   validateExecutionReceipt,
   validateExecutionSnapshot,
 } from './taskCoordinationValidation'
-import { orderTasksForDispatch } from './taskScheduling'
+import { analyzeTaskScheduling, orderTasksForDispatch } from './taskScheduling'
 import { getHandoffReadiness } from './taskHandoff'
 import { validateTaskSession } from './taskSessionValidation'
 
@@ -83,6 +84,41 @@ export interface RunTaskCoordinationCycleInput {
   inspectTerminal?: boolean
 }
 
+/** A read-only explanation of the exact candidate set that may be dispatched. */
+export interface TaskCoordinationDispatchPreviewEntry {
+  taskId: string
+  title: string
+  providerId: ProviderId
+  executionMode: 'api' | 'local-agent'
+  priority: TaskPriority
+  isCriticalPath: boolean
+  suggestedOrder: number
+  reasons: string[]
+}
+
+export interface TaskCoordinationDispatchPreviewExclusion {
+  taskId: string
+  title: string
+  reason: string
+}
+
+export interface TaskCoordinationProviderCapacity {
+  providerId: ProviderId
+  activeCount: number
+  availableSlots: number
+  capacity: number
+}
+
+export interface TaskCoordinationDispatchPreview {
+  dispatchable: TaskCoordinationDispatchPreviewEntry[]
+  excluded: TaskCoordinationDispatchPreviewExclusion[]
+  globalConcurrency: number
+  providerConcurrency: number
+  providerCapacity: TaskCoordinationProviderCapacity[]
+  activeCount: number
+  availableGlobalSlots: number
+}
+
 export interface CancelCoordinatedTaskInput {
   session: TaskSessionV1
   taskId: string
@@ -131,7 +167,7 @@ export function createStableDispatchId(
   return `dispatch-${hash32(source, 0x811c9dc5)}${hash32(source, 0x9e3779b1)}`
 }
 
-const resolvePolicy = (
+export const resolveTaskCoordinationPolicy = (
   value: Partial<TaskCoordinationPolicy> | undefined,
 ): TaskCoordinatorOutcome<TaskCoordinationPolicy> => {
   const policy = { ...DEFAULT_TASK_COORDINATION_POLICY, ...value }
@@ -221,6 +257,152 @@ const directDependencyHandoffs = (
   return handoffs
 }
 
+const activeRecords = (records: TaskCoordinationRecord[]) => records.filter(record => (
+  ['queued', 'running'].includes(record.phase)
+))
+
+/**
+ * Computes the same eligibility, ordering, and capacity decisions used by a
+ * coordination cycle before it crosses an adapter boundary. It is deliberately
+ * side-effect free so the confirmation UI can never promise a different queue.
+ */
+export const previewTaskCoordinationDispatch = (
+  session: TaskSessionV1,
+  records: TaskCoordinationRecord[],
+  adapters: ExecutionAdapterRegistry,
+  policyInput?: Partial<TaskCoordinationPolicy>,
+): TaskCoordinatorOutcome<TaskCoordinationDispatchPreview> => {
+  const sessionResult = validateSession(session)
+  if (!sessionResult.ok) return sessionResult
+  const policyResult = resolveTaskCoordinationPolicy(policyInput)
+  if (!policyResult.ok) return policyResult
+
+  const policy = policyResult.value
+  const scheduling = analyzeTaskScheduling(sessionResult.value)
+  const insightByTaskId = new Map(scheduling.insights.map(insight => [insight.taskId, insight]))
+  const active = activeRecords(records)
+  const providerActiveCounts = new Map<ProviderId, number>()
+  for (const record of active) {
+    providerActiveCounts.set(record.providerId, (providerActiveCounts.get(record.providerId) ?? 0) + 1)
+  }
+  let remainingGlobalSlots = Math.max(0, policy.globalConcurrency - active.length)
+  const dispatchable: TaskCoordinationDispatchPreviewEntry[] = []
+  const excluded: TaskCoordinationDispatchPreviewExclusion[] = []
+
+  for (const task of orderTasksForDispatch(sessionResult.value)) {
+    const run = sessionResult.value.runs.find(candidate => candidate.taskId === task.id)
+    if (!run) continue
+    const insight = insightByTaskId.get(task.id)
+    const providerId = run.assignedProviderId
+    const exclude = (reason: string) => excluded.push({ taskId: task.id, title: task.title, reason })
+
+    if (task.executionMode === 'manual') {
+      exclude('任务当前选择人工执行，不会由自动协调器派发。')
+      continue
+    }
+    if (!['api', 'local-agent'].includes(task.executionMode)) {
+      exclude('任务执行方式不受统一协调器支持。')
+      continue
+    }
+    if (run.status !== 'ready') {
+      exclude(run.status === 'waiting'
+        ? '正在等待前置任务完成。'
+        : '任务当前不是可派发状态。')
+      continue
+    }
+    const attempt = run.attempt + 1
+    if (records.some(record => record.taskId === task.id && record.attempt === attempt)) {
+      exclude('当前尝试已有协调记录，必须先查询或人工处理。')
+      continue
+    }
+    if (!directDependencyHandoffs(sessionResult.value, task)) {
+      exclude('直接前置任务尚未完成或缺少可用交接信息。')
+      continue
+    }
+    const handoffMode = task.executionMode === 'local-agent' ? 'local-agent' : 'manual'
+    const handoff = getHandoffReadiness(sessionResult.value, task.id, handoffMode, providerId)
+    if (!handoff.ready) {
+      exclude(task.executionMode === 'local-agent'
+        ? `仍有 ${handoff.missing.length} 个交接文件未获得读取授权。`
+        : `仍有 ${handoff.missing.length} 个交接文件未确认提供给执行适配器。`)
+      continue
+    }
+    if (!adapters.get(providerId)) {
+      exclude('当前执行 AI 尚未接入可用的 A 组执行适配器。')
+      continue
+    }
+    if (remainingGlobalSlots < 1) {
+      exclude('全局并发容量已满，等待现有任务结束。')
+      continue
+    }
+    if ((providerActiveCounts.get(providerId) ?? 0) >= policy.providerConcurrency) {
+      exclude('该执行 AI 的并发容量已满。')
+      continue
+    }
+
+    dispatchable.push({
+      taskId: task.id,
+      title: task.title,
+      providerId,
+      executionMode: task.executionMode,
+      priority: insight?.priority ?? 'medium',
+      isCriticalPath: insight?.isCriticalPath ?? false,
+      suggestedOrder: dispatchable.length + 1,
+      reasons: [
+        ...(insight?.reasons ?? []),
+        `原任务顺序：${sessionResult.value.plan.tasks.findIndex(candidate => candidate.id === task.id) + 1}`,
+      ],
+    })
+    remainingGlobalSlots -= 1
+    providerActiveCounts.set(providerId, (providerActiveCounts.get(providerId) ?? 0) + 1)
+  }
+
+  // Waiting tasks are intentionally not part of orderTasksForDispatch, but are
+  // still useful in the confirmation dialog because they explain why a user
+  // cannot expect every automatic task to start together.
+  for (const task of sessionResult.value.plan.tasks) {
+    const run = sessionResult.value.runs.find(candidate => candidate.taskId === task.id)
+    if (!run || run.status !== 'waiting') continue
+    if (excluded.some(item => item.taskId === task.id)) continue
+    const insight = insightByTaskId.get(task.id)
+    excluded.push({
+      taskId: task.id,
+      title: task.title,
+      reason: insight?.blockedByTaskIds.length
+        ? `等待前置任务：${insight.blockedByTaskIds.join('、')}。`
+        : '任务尚未就绪。',
+    })
+  }
+
+  return {
+    ok: true,
+    value: {
+      dispatchable,
+      excluded,
+      globalConcurrency: policy.globalConcurrency,
+      providerConcurrency: policy.providerConcurrency,
+      providerCapacity: [...new Set([
+        ...sessionResult.value.plan.tasks
+          .filter(task => task.executionMode === 'api' || task.executionMode === 'local-agent')
+          .map(task => sessionResult.value.runs.find(run => run.taskId === task.id)?.assignedProviderId ?? task.recommendedProviderId),
+        ...providerActiveCounts.keys(),
+      ])]
+        .sort((left, right) => left.localeCompare(right))
+        .map(providerId => {
+          const activeCount = active.filter(record => record.providerId === providerId).length
+          return {
+            providerId,
+            activeCount,
+            availableSlots: Math.max(0, policy.providerConcurrency - activeCount),
+            capacity: policy.providerConcurrency,
+          }
+        }),
+      activeCount: active.length,
+      availableGlobalSlots: Math.max(0, policy.globalConcurrency - active.length),
+    },
+  }
+}
+
 const referenceFromReceipt = (receipt: ExecutionReceipt): ExecutionReference => ({
   dispatchId: receipt.dispatchId,
   adapterExecutionId: receipt.adapterExecutionId,
@@ -290,7 +472,7 @@ export async function runCoordinationCycle(
 ): Promise<TaskCoordinatorOutcome<TaskCoordinationCycleResult>> {
   const sessionResult = validateSession(input.session)
   if (!sessionResult.ok) return sessionResult
-  const policyResult = resolvePolicy(input.policy)
+  const policyResult = resolveTaskCoordinationPolicy(input.policy)
   if (!policyResult.ok) return policyResult
   if (aborted(input.signal)) return schedulerError('CANCELLED', '任务协调周期已取消。')
 
@@ -360,19 +542,23 @@ export async function runCoordinationCycle(
   const reconciled = await saveState(input.store, state, cycleTime)
   if (!reconciled.ok) return reconciled
 
-  const active = () => state.records.filter(record => ['queued', 'running'].includes(record.phase))
-  const activeByProvider = (providerId: ProviderId) => active().filter(record => record.providerId === providerId).length
+  const previewResult = previewTaskCoordinationDispatch(
+    session,
+    state.records,
+    input.adapters,
+    input.policy,
+  )
+  if (!previewResult.ok) return previewResult
+  const taskById = new Map(session.plan.tasks.map(task => [task.id, task]))
 
-  for (const task of orderTasksForDispatch(session)) {
+  for (const candidate of previewResult.value.dispatchable) {
     if (aborted(input.signal)) return schedulerError('CANCELLED', '任务协调周期已取消。')
     if (input.canDispatch && !input.canDispatch()) break
-    if (active().length >= policyResult.value.globalConcurrency) break
-    const run = session.runs.find(candidate => candidate.taskId === task.id)
-    if (!run || run.status !== 'ready' || !['api', 'local-agent'].includes(task.executionMode)) continue
-    const providerId = run.assignedProviderId
-    if (activeByProvider(providerId) >= policyResult.value.providerConcurrency) continue
+    const task = taskById.get(candidate.taskId)
+    const run = session.runs.find(runCandidate => runCandidate.taskId === candidate.taskId)
+    if (!task || !run) continue
+    const providerId = candidate.providerId
     const attempt = run.attempt + 1
-    if (state.records.some(record => record.taskId === task.id && record.attempt === attempt)) continue
     const dispatchId = createStableDispatchId(session.id, session.plan.id, task.id, attempt, providerId)
     const record: TaskCoordinationRecord = {
       taskId: task.id,

@@ -321,6 +321,7 @@ export function TaskPlanCards({
   const connectedCoordinationProviders = providers.filter(provider => Boolean(coordinationAdapters?.get(provider.id)))
   const automaticTaskCount = session.plan.tasks.filter(task => task.executionMode !== 'manual').length
   const coordinationAvailable = connectedCoordinationProviders.length > 0 && automaticTaskCount > 0
+  const dispatchPreview = coordinationSnapshot.dispatchPreview
   const scheduling = useMemo(() => analyzeTaskScheduling(session), [session])
   const schedulingByTaskId = useMemo(
     () => new Map(scheduling.insights.map(insight => [insight.taskId, insight])),
@@ -758,8 +759,41 @@ export function TaskPlanCards({
         </p>
         {coordinationSnapshot.status === 'confirming' && (
           <div className="task-coordination-confirm" role="alert">
-            <strong>确认启动自动协调</strong>
+            <strong>{coordinationSnapshot.confirmationAction === 'resume' ? '确认恢复自动协调' : '确认启动自动协调'}</strong>
             <p>将派发 {automaticTaskCount} 个已配置自动执行的任务；全局并发 2、同一 Provider 并发 1。外部调用可能产生费用，应用重启后需要重新确认。</p>
+            {dispatchPreview && (
+              <>
+                <p>
+                  本次最多派发 {dispatchPreview.dispatchable.length} 个任务；全局并发 {dispatchPreview.globalConcurrency}，
+                  当前占用 {dispatchPreview.activeCount}，可用 {dispatchPreview.availableGlobalSlots}；
+                  同一执行 AI 并发 {dispatchPreview.providerConcurrency}。
+                </p>
+                <p>
+                  各执行 AI 容量：{dispatchPreview.providerCapacity.length
+                    ? dispatchPreview.providerCapacity.map(capacity => `${capacity.providerId} ${capacity.activeCount}/${capacity.capacity}（可用 ${capacity.availableSlots}）`).join('；')
+                    : '当前没有自动执行任务'}。
+                </p>
+                {dispatchPreview.dispatchable.length > 0 ? (
+                  <ol className="task-coordination-preview-list" aria-label="本次可派发队列">
+                    {dispatchPreview.dispatchable.map(entry => (
+                      <li key={entry.taskId}>
+                        <strong>#{entry.suggestedOrder} {entry.title}</strong>
+                        <span>{entry.providerId} · {executionModeLabels[entry.executionMode]}</span>
+                        <small>{entry.reasons.join(' · ')}</small>
+                      </li>
+                    ))}
+                  </ol>
+                ) : <p>当前没有可立即派发的任务；确认后仅查询已有执行，不会创建新的外部调用。</p>}
+                {dispatchPreview.excluded.length > 0 && (
+                  <details className="task-coordination-excluded">
+                    <summary>暂不派发的任务（{dispatchPreview.excluded.length}）</summary>
+                    <ul>
+                      {dispatchPreview.excluded.map(item => <li key={item.taskId}><strong>{item.title}</strong>：{item.reason}</li>)}
+                    </ul>
+                  </details>
+                )}
+              </>
+            )}
           </div>
         )}
         {coordinationSnapshot.status === 'paused' && (
@@ -781,7 +815,9 @@ export function TaskPlanCards({
         <div className="task-coordination-actions">
           {coordinationSnapshot.status === 'confirming' ? (
             <>
-              <button type="button" className="is-primary" onClick={() => void onCoordinationStart?.()}>确认并启动</button>
+              <button type="button" className="is-primary" onClick={() => void onCoordinationStart?.()}>
+                {coordinationSnapshot.confirmationAction === 'resume' ? '确认并恢复' : '确认并启动'}
+              </button>
               <button type="button" onClick={onCoordinationPause}>取消</button>
             </>
           ) : coordinationSnapshot.status === 'running' ? (
