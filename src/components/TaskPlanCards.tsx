@@ -6,6 +6,8 @@ import type { PreparedCodexTaskExecution, TaskExecutionArtifactView } from '../.
 import { buildManualTaskPrompt } from '../orchestration/manualTaskPrompt'
 import { LOCAL_PROVIDER_PROFILE } from '../orchestration/providerProfiles'
 import { generateTaskSessionReport } from '../orchestration/taskReport'
+import { generateTaskCoordinationAuditExport } from '../orchestration/taskCoordinationAuditReport'
+import type { TaskCoordinationAuditEventDraft } from '../orchestration/taskCoordinationAudit'
 import { getTaskWorkspacePathScope, workspacePathScopesEqual } from '../orchestration/taskPathScope'
 import { analyzeTaskScheduling, priorityLabel } from '../orchestration/taskScheduling'
 import {
@@ -34,6 +36,7 @@ import type {
   EvaluationVerdict,
   TaskAcceptanceRecord,
   TaskAcceptanceStateV1,
+  TaskCoordinationAuditStateV1,
 } from '../types/taskCoordination'
 import type {
   AutomaticTaskExecutionState,
@@ -70,6 +73,7 @@ export interface TaskPlanCardsProps {
   onCoordinationCancelTask?: (taskId: string) => Promise<void>
   onCoordinationResolveTask?: (taskId: string, dispatchId: string, action: TaskRecoveryAction, riskAcknowledged: boolean) => Promise<void>
   onCoordinationClear?: () => Promise<void>
+  onAuditEvent?: (event: TaskCoordinationAuditEventDraft) => Promise<void> | void
   acceptanceState?: TaskAcceptanceStateV1 | null
   evaluationAdapterAvailable?: boolean
   evaluatingTaskId?: string | null
@@ -242,6 +246,51 @@ const EvaluationRecordDetails = ({ record }: { record: TaskAcceptanceRecord }) =
   </div>
 )
 
+const downloadAuditJson = (fileName: string, json: string) => {
+  const url = URL.createObjectURL(new Blob([json], { type: 'application/json;charset=utf-8' }))
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
+const CoordinationAuditTimeline = ({
+  state,
+  warning,
+}: {
+  state?: TaskCoordinationAuditStateV1
+  warning?: string
+}) => {
+  const [copyState, setCopyState] = useState<CopyStatus>('idle')
+  if (!state && !warning) return null
+  const exported = state ? generateTaskCoordinationAuditExport(state) : null
+  const events = state?.events ?? []
+  return (
+    <section className="task-coordination-audit" aria-label="协调审计时间线">
+      <header><strong>协调审计</strong><span role="status">{events.length} 条安全事件</span></header>
+      {warning && <p className="task-coordination-notice is-warning" role="status">{warning}</p>}
+      {exported && <div className="task-coordination-audit-actions">
+        <button type="button" onClick={() => { void copyText(exported.markdown).then(ok => setCopyState(ok ? 'success' : 'error')) }}>复制审计记录</button>
+        <button type="button" onClick={() => downloadAuditJson(exported.fileName, exported.json)}>下载 JSON</button>
+        {copyState !== 'idle' && <small role="status">{copyState === 'success' ? '已复制脱敏审计记录。' : '复制失败，请手动重试。'}</small>}
+      </div>}
+      <details>
+        <summary>查看完整时间线</summary>
+        <ol>{[...events].reverse().map(event => (
+          <li key={event.id} className={`is-${event.level}`}>
+            <time>{event.occurredAt}</time><strong>{event.type}</strong><span>{event.summary}</span>
+            {(event.taskId || event.dispatchId) && <small>{event.taskId ?? '会话'}{event.dispatchId ? ` · ${event.dispatchId.slice(-10)}` : ''}</small>}
+          </li>
+        ))}{!events.length && <li>当前会话尚未产生协调事件。</li>}</ol>
+      </details>
+      <small>仅保存当前会话的脱敏协调记录；不包含 Prompt、完整 AI 输出、凭据、绝对路径或额度信息。</small>
+    </section>
+  )
+}
+
 export function TaskPlanCards({
   deliveryOwner,
   session,
@@ -258,6 +307,7 @@ export function TaskPlanCards({
   onCoordinationCancelTask,
   onCoordinationResolveTask,
   onCoordinationClear,
+  onAuditEvent,
   acceptanceState,
   evaluationAdapterAvailable = false,
   evaluatingTaskId,
@@ -361,6 +411,22 @@ export function TaskPlanCards({
     sessionRef.current = outcome.session
     onSessionChange(outcome.session, persistImmediately)
     if ('taskId' in action) {
+      const task = outcome.session.plan.tasks.find(item => item.id === action.taskId)
+      const run = outcome.session.runs.find(item => item.taskId === action.taskId)
+      const decisionActions: Record<string, string> = {
+        accept: '用户确认任务完成。',
+        'request-changes': '用户确认退回任务修改。',
+        'review-needs-input': '用户确认任务需要补充信息。',
+        fail: '用户确认将任务标记为失败。',
+        cancel: '用户确认取消任务。',
+      }
+      if (decisionActions[action.type]) {
+        void onAuditEvent?.({
+          type: 'user-decision', level: action.type === 'fail' ? 'warning' : 'info',
+          summary: decisionActions[action.type], taskId: action.taskId,
+          providerId: run?.assignedProviderId ?? task?.recommendedProviderId,
+        })
+      }
       if (action.type === 'accept') {
         const newlyReady = outcome.session.runs.find(run => (
           run.status === 'ready'
@@ -841,6 +907,11 @@ export function TaskPlanCards({
           )}
         </div>
       </section>
+
+      <CoordinationAuditTimeline
+        state={coordinationSnapshot.auditState}
+        warning={coordinationSnapshot.auditWarning}
+      />
 
       <details className="task-workspace-details">
         <summary>项目文件与权限<span>{session.plan.workspace?.displayName ?? '可选，尚未选择'}</span></summary>

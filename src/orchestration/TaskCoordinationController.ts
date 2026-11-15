@@ -1,9 +1,16 @@
 import type {
   TaskCoordinationPolicy,
   TaskCoordinationRecord,
+  TaskCoordinationAuditStateV1,
 } from '../types/taskCoordination'
 import type { TaskSessionV1 } from '../types/taskOrchestration'
 import type { TaskCoordinationStore } from './TaskCoordinationStore'
+import type { TaskCoordinationAuditStore } from './TaskCoordinationAuditStore'
+import {
+  appendTaskCoordinationAuditEvent,
+  type TaskCoordinationAuditContext,
+  type TaskCoordinationAuditEventDraft,
+} from './taskCoordinationAudit'
 import type { TaskSessionStore } from './TaskSessionStore'
 import {
   cancelCoordinatedTask,
@@ -37,6 +44,8 @@ export interface TaskCoordinationControllerSnapshot {
   notices: TaskCoordinationNotice[]
   dispatchPreview?: TaskCoordinationDispatchPreview
   confirmationAction?: 'start' | 'resume'
+  auditState?: TaskCoordinationAuditStateV1
+  auditWarning?: string
 }
 
 export interface TaskCoordinationController {
@@ -49,6 +58,8 @@ export interface TaskCoordinationController {
   resolveTask(taskId: string, dispatchId: string, action: TaskRecoveryAction, riskAcknowledged: boolean): Promise<void>
   updateSession(session: TaskSessionV1): void
   clearState(): Promise<void>
+  refreshAudit(): Promise<void>
+  recordAudit(event: TaskCoordinationAuditEventDraft): Promise<void>
   dispose(): void
   subscribe(listener: (state: TaskCoordinationControllerSnapshot) => void): () => void
 }
@@ -58,6 +69,7 @@ export interface CreateTaskCoordinationControllerOptions {
   coordinationStore: TaskCoordinationStore
   sessionStore: TaskSessionStore
   adapters: ExecutionAdapterRegistry
+  auditStore?: TaskCoordinationAuditStore
   policy?: Partial<TaskCoordinationPolicy>
   onSessionChange?: (session: TaskSessionV1) => void
   now?: () => Date
@@ -84,6 +96,41 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
   private rerunRequested = false
   private confirmed = false
   private generation = 0
+
+  private auditContext(): TaskCoordinationAuditContext {
+    return { sessionId: this.session.id, planId: this.session.plan.id, taskIds: this.session.plan.tasks.map(task => task.id) }
+  }
+
+  async refreshAudit() {
+    if (!this.options.auditStore || this.isDisposed()) return
+    const outcome = await this.options.auditStore.load(this.auditContext())
+    if (!outcome.ok) {
+      this.publish({ auditWarning: outcome.message })
+      return
+    }
+    this.publish({ auditState: outcome.state ?? undefined, auditWarning: undefined })
+  }
+
+  async recordAudit(event: TaskCoordinationAuditEventDraft) {
+    if (!this.options.auditStore || this.isDisposed()) return
+    const context = this.auditContext()
+    const loaded = await this.options.auditStore.load(context)
+    if (!loaded.ok) {
+      this.publish({ auditWarning: loaded.message })
+      return
+    }
+    const appended = appendTaskCoordinationAuditEvent(loaded.state, context, event, this.options.now?.() ?? new Date())
+    if (!appended.ok) {
+      this.publish({ auditWarning: appended.message })
+      return
+    }
+    const saved = await this.options.auditStore.save(appended.state)
+    if (!saved.ok) {
+      this.publish({ auditWarning: saved.message })
+      return
+    }
+    this.publish({ auditState: appended.state, auditWarning: undefined })
+  }
 
   constructor(private readonly options: CreateTaskCoordinationControllerOptions) {
     this.session = clone(options.session)
@@ -155,6 +202,10 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
       activeTaskIds: activeTaskIds(loaded.state?.records ?? this.snapshot.records),
       nextPollAt: undefined,
     })
+    await this.recordAudit({
+      type: 'confirmation-requested', level: 'info',
+      summary: action === 'start' ? '用户正在确认启动自动协调。' : '用户正在确认恢复自动协调。',
+    })
     return true
   }
 
@@ -178,8 +229,14 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
       await this.requestConfirmation('start')
       return
     }
+    const confirmationAction = this.snapshot.confirmationAction
     this.confirmed = true
     this.publish({ status: 'running', error: undefined, confirmationAction: undefined })
+    await this.recordAudit({
+      type: confirmationAction === 'resume' ? 'coordination-resumed' : 'coordination-started',
+      level: 'info',
+      summary: confirmationAction === 'resume' ? '用户已确认恢复自动协调。' : '用户已确认启动自动协调。',
+    })
     await this.runCycle(true)
   }
 
@@ -188,6 +245,7 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
     this.clearTimer()
     this.confirmed = false
     this.publish({ status: 'paused', nextPollAt: undefined, confirmationAction: undefined })
+    void this.recordAudit({ type: 'coordination-paused', level: 'info', summary: '自动协调已暂停；不会继续派发新任务。' })
   }
 
   async resume() {
@@ -207,6 +265,7 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
   async inspectExisting() {
     if (this.snapshot.status === 'disposed') return
     this.pause()
+    await this.recordAudit({ type: 'inspection-requested', level: 'info', summary: '用户请求核对已有外部执行。' })
     if (this.cycle) await this.cycle
     await this.runCycle(false, true)
   }
@@ -240,6 +299,17 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
       && this.snapshot.status === 'running'
       && generation === this.generation
     )
+    if (canDispatch()) {
+      const preview = previewTaskCoordinationDispatch(this.session, this.snapshot.records, this.options.adapters, this.options.policy)
+      if (preview.ok) {
+        for (const entry of preview.value.dispatchable) {
+          await this.recordAudit({
+            type: 'dispatch-intended', level: 'info', summary: '协调器准备按已确认队列派发任务。',
+            taskId: entry.taskId, providerId: entry.providerId,
+          })
+        }
+      }
+    }
     const result = await runCoordinationCycle({
       session: this.session,
       store: this.options.coordinationStore,
@@ -258,6 +328,20 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
         nextPollAt: undefined,
       })
       return
+    }
+
+    for (const effect of result.value.effects) {
+      const type = effect.type === 'dispatch-accepted' ? 'dispatch-accepted'
+        : effect.type === 'execution-running' || effect.type === 'execution-completed'
+          || effect.type === 'execution-failed' || effect.type === 'execution-needs-input'
+          || effect.type === 'execution-cancelled' || effect.type === 'execution-unknown'
+          ? 'execution-snapshot' : 'notice'
+      await this.recordAudit({
+        type,
+        level: effect.type === 'execution-failed' || effect.type === 'execution-unknown' ? 'warning' : 'info',
+        summary: effect.type === 'dispatch-accepted' ? '执行适配器已接收派发。' : `执行状态更新为 ${effect.type.replace('execution-', '')}。`,
+        taskId: effect.taskId, providerId: effect.providerId, dispatchId: effect.dispatchId, attempt: effect.attempt,
+      })
     }
 
     const reconciled = await reconcileAndSaveTaskSessionWithCoordination({
@@ -300,6 +384,7 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
 
   async cancelTask(taskId: string) {
     if (this.snapshot.status === 'disposed') return
+    await this.recordAudit({ type: 'execution-cancel-requested', level: 'info', summary: '用户请求取消外部执行。', taskId })
     const result = await cancelCoordinatedTask({
       session: this.session,
       taskId,
@@ -330,6 +415,11 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
       activeTaskIds: activeTaskIds(result.value.state.records),
       notices: clone(reconciled.notices),
       error: undefined,
+    })
+    const record = result.value.state.records.find(item => item.taskId === taskId)
+    if (record) await this.recordAudit({
+      type: 'execution-cancelled', level: 'info', summary: '外部执行已请求取消并完成状态核对。',
+      taskId, providerId: record.providerId, dispatchId: record.dispatchId, attempt: record.attempt,
     })
   }
 
@@ -364,6 +454,11 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
       this.session = clone(outcome.session)
       this.options.onSessionChange?.(clone(outcome.session))
     }
+    await this.recordAudit({
+      type: 'recovery-decision', level: action === 'new-attempt' ? 'warning' : 'info',
+      summary: action === 'manual-takeover' ? '用户确认转为人工处理。' : '用户确认旧执行不会继续，并允许创建新的尝试。',
+      taskId, dispatchId,
+    })
     this.publish({
       status: 'paused',
       records: clone(outcome.state.records),
@@ -400,6 +495,8 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
         lastCycleAt: undefined,
         error: undefined,
         confirmationAction: undefined,
+        auditState: undefined,
+        auditWarning: undefined,
       })
       return
     }

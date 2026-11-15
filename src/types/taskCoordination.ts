@@ -304,3 +304,50 @@ export interface TaskAcceptanceStateV1 {
   records: TaskAcceptanceRecord[]
 }
 
+/**
+ * Sanitised, B-owned history of coordination decisions.  It is deliberately
+ * separate from task sessions: audit entries must never become task input or
+ * contain provider output, credentials, or local absolute paths.
+ */
+export const TASK_COORDINATION_AUDIT_EVENT_TYPES = [
+  'confirmation-requested',
+  'coordination-started',
+  'coordination-paused',
+  'coordination-resumed',
+  'inspection-requested',
+  'dispatch-intended',
+  'dispatch-accepted',
+  'execution-snapshot',
+  'execution-cancel-requested',
+  'execution-cancelled',
+  'recovery-decision',
+  'evaluation-requested',
+  'evaluation-received',
+  'acceptance-decision',
+  'user-decision',
+  'notice',
+] as const
+
+export type TaskCoordinationAuditEventType = (typeof TASK_COORDINATION_AUDIT_EVENT_TYPES)[number]
+export type TaskCoordinationAuditLevel = 'info' | 'warning' | 'error'
+
+export interface TaskCoordinationAuditEvent {
+  id: string
+  type: TaskCoordinationAuditEventType
+  level: TaskCoordinationAuditLevel
+  occurredAt: string
+  summary: string
+  taskId?: string
+  providerId?: ProviderId
+  dispatchId?: string
+  attempt?: number
+}
+
+export interface TaskCoordinationAuditStateV1 {
+  schemaVersion: 1
+  sessionId: string
+  planId: string
+  updatedAt: string
+  events: TaskCoordinationAuditEvent[]
+}
+
