@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { loadTs } from './load-ts.mjs'
+import { closeLoopback, listenLoopback } from './http-test-server.mjs'
 
 const protocol = await loadTs('../electron/taskPlanningProtocol.ts')
 const { requestTaskPlan } = await loadTs('../electron/taskPlanningClient.ts')
@@ -163,12 +164,6 @@ test('Electron planning client permits HTTPS and loopback HTTP only', async () =
   assert.equal(called, 1)
 })
 
-const listen = server => new Promise((resolve, reject) => {
-  server.once('error', reject)
-  server.listen(0, '127.0.0.1', () => resolve(server.address().port))
-})
-const close = server => new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
-
 test('AI service exposes the planning route with shared rate limiting', async () => {
   let received
   const server = createPromptOptimizationServer({
@@ -179,7 +174,7 @@ test('AI service exposes the planning route with shared rate limiting', async ()
       return { ok: true, plan: validPlan, provider: 'deepseek' }
     },
   })
-  const port = await listen(server)
+  const port = await listenLoopback(server)
   try {
     const response = await fetch(`http://127.0.0.1:${port}/v1/task/plan`, {
       method: 'POST',
@@ -190,7 +185,7 @@ test('AI service exposes the planning route with shared rate limiting', async ()
     assert.deepEqual(received, request)
     assert.deepEqual(await response.json(), { ok: true, plan: validPlan, provider: 'deepseek' })
   } finally {
-    await close(server)
+    await closeLoopback(server)
   }
 })
 

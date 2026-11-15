@@ -7,8 +7,10 @@ import type { TaskCoordinationStore } from './TaskCoordinationStore'
 import type { TaskSessionStore } from './TaskSessionStore'
 import {
   cancelCoordinatedTask,
+  previewTaskCoordinationDispatch,
   runCoordinationCycle,
   type ExecutionAdapterRegistry,
+  type TaskCoordinationDispatchPreview,
 } from './taskCoordinator'
 import {
   reconcileAndSaveTaskSessionWithCoordination,
@@ -33,6 +35,8 @@ export interface TaskCoordinationControllerSnapshot {
   lastCycleAt?: string
   error?: string
   notices: TaskCoordinationNotice[]
+  dispatchPreview?: TaskCoordinationDispatchPreview
+  confirmationAction?: 'start' | 'resume'
 }
 
 export interface TaskCoordinationController {
@@ -99,7 +103,17 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
 
   private publish(patch: Partial<TaskCoordinationControllerSnapshot>) {
     if (this.snapshot.status === 'disposed') return
-    this.snapshot = { ...this.snapshot, ...patch }
+    const next = { ...this.snapshot, ...patch }
+    const preview = previewTaskCoordinationDispatch(
+      this.session,
+      next.records,
+      this.options.adapters,
+      this.options.policy,
+    )
+    this.snapshot = {
+      ...next,
+      ...(preview.ok ? { dispatchPreview: preview.value } : { dispatchPreview: undefined }),
+    }
     const value = clone(this.snapshot)
     this.listeners.forEach(listener => listener(value))
   }
@@ -122,6 +136,28 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
     ))
   }
 
+  private async requestConfirmation(action: 'start' | 'resume') {
+    const loaded = await this.options.coordinationStore.load({
+      sessionId: this.session.id,
+      planId: this.session.plan.id,
+      taskIds: this.session.plan.tasks.map(task => task.id),
+    })
+    if (!loaded.ok) {
+      this.publish({ status: 'paused', error: loaded.message, confirmationAction: undefined })
+      return false
+    }
+    this.confirmed = false
+    this.publish({
+      status: 'confirming',
+      error: undefined,
+      confirmationAction: action,
+      records: clone(loaded.state?.records ?? this.snapshot.records),
+      activeTaskIds: activeTaskIds(loaded.state?.records ?? this.snapshot.records),
+      nextPollAt: undefined,
+    })
+    return true
+  }
+
   private schedule(nextPollAt?: string) {
     this.clearTimer()
     if (this.snapshot.status !== 'running' || !nextPollAt) return
@@ -138,33 +174,29 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
       })
       return
     }
-    if (!this.confirmed) {
-      if (this.snapshot.status !== 'confirming') {
-        this.publish({ status: 'confirming', error: undefined })
-        return
-      }
-      this.confirmed = true
+    if (this.snapshot.status !== 'confirming') {
+      await this.requestConfirmation('start')
+      return
     }
-    this.publish({ status: 'running', error: undefined })
+    this.confirmed = true
+    this.publish({ status: 'running', error: undefined, confirmationAction: undefined })
     await this.runCycle(true)
   }
 
   pause() {
     if (this.snapshot.status === 'disposed') return
     this.clearTimer()
-    this.publish({ status: 'paused', nextPollAt: undefined })
+    this.confirmed = false
+    this.publish({ status: 'paused', nextPollAt: undefined, confirmationAction: undefined })
   }
 
   async resume() {
     if (this.snapshot.status === 'disposed') return
-    if (!this.confirmed) {
-      this.publish({ status: 'confirming', error: undefined })
+    if (this.snapshot.status !== 'confirming') {
+      await this.requestConfirmation('resume')
       return
     }
-    this.publish({ status: 'running', error: undefined })
-    // The scheduler always inspects persisted references before considering a
-    // new dispatch, so resume is inspect-first by construction.
-    await this.runCycle(true)
+    await this.start()
   }
 
   async runNow() {
@@ -367,6 +399,7 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
         nextPollAt: undefined,
         lastCycleAt: undefined,
         error: undefined,
+        confirmationAction: undefined,
       })
       return
     }
@@ -406,6 +439,7 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
       nextPollAt: undefined,
       lastCycleAt: undefined,
       error: undefined,
+      confirmationAction: undefined,
     })
   }
 
