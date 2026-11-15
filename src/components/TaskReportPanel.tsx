@@ -34,7 +34,7 @@ export function TaskReportPanel({query,revision,viewKey,demo=false,currentQuota=
     }catch(e){setMessage(e instanceof Error?e.message:'导入失败，未修改记录')}
   }
   return <section className="history-chart task-report"><h3>任务概览 <small>{demo?'独立模拟示意':'执行器上报 / 手动导入'}</small></h3>
-    
+
     {current?.error&&<p role="alert">{current.error}</p>}
     {!current&&<p>正在读取任务记录…</p>}
     {report && <section className="token-summary" aria-label="Token 用量构成">
