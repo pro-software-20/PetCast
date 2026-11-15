@@ -10,6 +10,7 @@ const {
   createStableDispatchId,
 } = await loadTs('../src/orchestration/taskCoordinator.ts')
 const { MemoryTaskCoordinationStore } = await loadTs('../src/orchestration/TaskCoordinationStore.ts')
+const { MemoryTaskCoordinationAuditStore } = await loadTs('../src/orchestration/TaskCoordinationAuditStore.ts')
 const { createTaskSession } = await loadTs('../src/orchestration/taskSession.ts')
 
 const NOW = '2026-11-06T08:00:00.000Z'
@@ -238,4 +239,32 @@ test('empty adapter registry never creates a simulated execution', async () => {
   assert.match(observed.latest().error, /人工执行/)
   controller.dispose()
   observed.unsubscribe()
+})
+
+test('records a sanitised audit trail without making coordination depend on audit storage', async () => {
+  const adapter = createAdapter()
+  const auditStore = new MemoryTaskCoordinationAuditStore()
+  const controller = createTaskCoordinationController({
+    session: createSession(),
+    coordinationStore: new MemoryTaskCoordinationStore(),
+    sessionStore: createSessionStore(),
+    adapters: new MapExecutionAdapterRegistry([['deepseek', adapter.adapter]]),
+    auditStore,
+    policy: { pollIntervalMs: 60_000 },
+    now: () => new Date(NOW),
+  })
+
+  await controller.start()
+  await controller.start()
+  controller.pause()
+  await new Promise(resolve => setTimeout(resolve, 0))
+
+  const events = auditStore.peek()?.events ?? []
+  assert.ok(events.some(event => event.type === 'confirmation-requested'))
+  assert.ok(events.some(event => event.type === 'coordination-started'))
+  assert.ok(events.some(event => event.type === 'dispatch-intended'))
+  assert.ok(events.some(event => event.type === 'dispatch-accepted'))
+  assert.ok(events.some(event => event.type === 'coordination-paused'))
+  assert.equal(JSON.stringify(events).includes('Authorization'), false)
+  controller.dispose()
 })

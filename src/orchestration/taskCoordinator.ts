@@ -542,6 +542,39 @@ export async function runCoordinationCycle(
   const reconciled = await saveState(input.store, state, cycleTime)
   if (!reconciled.ok) return reconciled
 
+  // A task blocked only by a missing dependency handoff needs an explicit,
+  // persistent "needs input" record. The queue preview correctly excludes it
+  // from dispatchable work, but hiding the record would leave the user with no
+  // recovery action and would make a later cycle look like it never ran.
+  for (const task of orderTasksForDispatch(session)) {
+    const run = session.runs.find(candidate => candidate.taskId === task.id)
+    if (!run || run.status !== 'ready' || !['api', 'local-agent'].includes(task.executionMode)) continue
+    const providerId = run.assignedProviderId
+    const attempt = run.attempt + 1
+    if (state.records.some(record => record.taskId === task.id && record.attempt === attempt)) continue
+    if (!directDependencyHandoffs(session, task)) continue
+    const handoffMode = task.executionMode === 'local-agent' ? 'local-agent' : 'manual'
+    const handoff = getHandoffReadiness(session, task.id, handoffMode, providerId)
+    if (handoff.ready || !input.adapters.get(providerId)) continue
+
+    const record: TaskCoordinationRecord = {
+      taskId: task.id,
+      providerId,
+      attempt,
+      dispatchId: createStableDispatchId(session.id, session.plan.id, task.id, attempt, providerId),
+      phase: 'dispatching',
+      createdAt: cycleTime,
+      updatedAt: cycleTime,
+    }
+    state.records.push(record)
+    const message = task.executionMode === 'local-agent'
+      ? `仍有 ${handoff.missing.length} 个交接文件未获得读取授权。`
+      : `仍有 ${handoff.missing.length} 个交接文件未确认提供给当前 API 执行适配器。`
+    setRecordFailure(record, safeAdapterError('NEEDS_INPUT', message), cycleTime, effects)
+    const saved = await saveState(input.store, state, cycleTime)
+    if (!saved.ok) return saved
+  }
+
   const previewResult = previewTaskCoordinationDispatch(
     session,
     state.records,
