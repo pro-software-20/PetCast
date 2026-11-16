@@ -10,6 +10,7 @@ test('appearance migration validates ids and does not accept arbitrary colors or
  assert.equal(legacy.petId,'cat');assert.equal(legacy.sceneId,'room');assert.equal(legacy.petName,'布罗艾');assert.equal(legacy.shellColor,prefs.ORIGINAL_SHELL_COLOR)
  const invalid=prefs.normalizeAppearance({version:1,petId:'missing',sceneId:'missing',shellColor:'url(javascript:bad)',petName:'\u0000'+ '兔'.repeat(25)})
  assert.equal(invalid.petId,'shark');assert.equal(invalid.sceneId,'river');assert.equal(invalid.shellColor,prefs.ORIGINAL_SHELL_COLOR);assert.equal(Array.from(invalid.petName).length,16)
+ assert.equal(prefs.normalizeAppearance({...prefs.DEFAULT_APPEARANCE,petId:'custom'}).petId,'custom')
  assert.deepEqual(prefs.normalizeAppearance({version:55}),prefs.DEFAULT_APPEARANCE)
 })
 test('appearance preferences use a separate key and save only checked visual settings',()=>{
@@ -27,6 +28,7 @@ test('shell palette preserves alpha, screen and non-shell colors and never mutat
 test('palette conversions round trip chosen colors and all pets have valid idle fallback frames',()=>{
  for(const hex of ['#000000','#FFFFFF','#A6BCC9','#B7C4A4','#F8BDD3','#FF0000'])assert.equal(color.hsvToHex(color.hexToHsv(hex)),hex)
  assert.equal(registry.PETS.length,5)
+ assert.equal(registry.CUSTOM_PET_ID,'custom');assert.equal(registry.isPetId('custom'),true)
  for(const pet of registry.PETS){assert(pet.frameWidth>0&&pet.frameHeight>0);assert(pet.animations.idle.frames.length>0);for(const [x,y] of pet.animations.idle.frames){assert(x>=0&&x<pet.columns&&y>=0&&y<pet.rows)}}
  assert.equal(registry.getPet('unknown').id,'shark')
 })

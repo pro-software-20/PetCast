@@ -44,9 +44,15 @@ interface Window {
     beginDrag: () => void
     moveDrag: () => void
     endDrag: () => void
+    beginResize: (corner: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right') => void
+    resizeWindow: () => void
+    endResize: () => void
     toggleExpanded: (expanded: boolean) => Promise<void>
     loadGameSave: () => Promise<unknown | null>
     saveGame: (value: unknown) => Promise<void>
+    readCustomPet: () => Promise<import('../electron/customPetProtocol').CustomPetResult>
+    saveCustomPet: (bytes: Uint8Array) => Promise<import('../electron/customPetProtocol').CustomPetResult>
+    deleteCustomPet: () => Promise<import('../electron/customPetProtocol').CustomPetResult>
     close: () => void
   }
 }

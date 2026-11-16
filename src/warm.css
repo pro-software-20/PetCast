@@ -41,7 +41,7 @@
 .warm-window-actions>span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:8px; color:#876b4b; padding:4px 7px; background:#fff8e8b8; border:1px solid #ddc3a38c; border-radius:4px; }
 .petcast-warm.expanded .close { width:23px; height:23px; flex:none; font-size:16px; }
 .petcast-warm .expand-button { z-index:96; right:14px; bottom:13px; min-width:51px; height:29px; border:1px solid #be9266; box-shadow:inset 0 1px #fff8e0,0 2px #b78b5a66; color:#785130; background:linear-gradient(#fff0c9,#e9c896); border-radius:6px; }
-.petcast-warm .usage-sidecar { width:218px; height:510px; padding:11px; overflow-y:auto; border:1px solid #c5a47d; border-radius:10px; color:#806142; background:linear-gradient(#fff8e9,#f6e9ce); box-shadow:0 6px 20px #785c2f19; scrollbar-color:#c4ac86 #fbf1dc; }
+.petcast-warm .usage-sidecar { width:218px; height:100%; padding:11px; overflow-y:auto; border:1px solid #c5a47d; border-radius:10px; color:#806142; background:linear-gradient(#fff8e9,#f6e9ce); box-shadow:0 6px 20px #785c2f19; scrollbar-color:#c4ac86 #fbf1dc; }
 .petcast-warm .usage-sidecar button { font-size:10px; }
 .petcast-warm .usage-sidecar .history-open,.petcast-warm .auto-fishing-toggle { color:#785234; background:#efdbb5; border-color:#c6a174; box-shadow:inset 0 1px #fff5da; }
 .petcast-warm .usage-settings { color:#7a5a3d; border-color:#dcc3a0; background:#fff9ed; }
@@ -56,7 +56,8 @@
 /* Panoramic artwork is never stretched into a different aspect ratio. */
 .cartoon-river { image-rendering:auto; background:#d4e7cf; }
 .river-art { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; pointer-events:none; user-select:none; }
-.cartoon-water { position:absolute; z-index:2; top:var(--water-top); left:0; right:0; bottom:0; overflow:hidden; background:linear-gradient(#a1e5ef10,#3caad219); transition:top 1s ease; pointer-events:none; }
+.cartoon-water-recede { position:absolute; z-index:1; top:75%; left:0; right:0; height:var(--water-recede); background:repeating-linear-gradient(90deg,transparent 0 54px,#dfb97b30 54px 82px),linear-gradient(#dfbc83,#e9cb91); opacity:.88; transition:height 1s ease; pointer-events:none; }
+.cartoon-water { position:absolute; z-index:2; top:var(--water-top); left:0; right:0; bottom:0; overflow:hidden; border-top:3px solid #d8fbffcf; background:repeating-linear-gradient(176deg,transparent 0 28px,#dcfbff45 29px 31px,transparent 32px 48px),linear-gradient(#66c9e94f,#168ac43d); box-shadow:0 -2px 0 #3aa4d37a; transition:top 1s ease; pointer-events:none; }
 .water-ribbon { position:absolute; left:-20%; width:145%; height:35px; opacity:.55; background:repeating-linear-gradient(176deg,transparent 0 13px,#e6ffff75 14px 16px,transparent 18px 25px); background-size:150px 30px; animation:cartoon-flow var(--flow-duration) linear infinite; transform:rotate(-2deg); }
 .ribbon-one { top:13%; }.ribbon-two { top:42%; opacity:.4; animation-delay:-3s; }.ribbon-three { top:73%; opacity:.4; animation-delay:-5s; }
 @keyframes cartoon-flow { from{background-position:0 0}to{background-position:300px 0} }
@@ -124,14 +125,20 @@
 .appearance-paper h1 { margin:0; font-size:16px; line-height:24px; font-weight:600; letter-spacing:1px; color:#735238; }
 .appearance-paper>header button { height:21px; width:22px; padding:0; font-size:18px; line-height:18px; border:1px solid #dcc39f; }
 .appearance-paper h2 { margin:0 0 8px; font-size:12px; line-height:18px; font-weight:600; letter-spacing:1px; color:#80603e; }
-.pet-choice-row { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:6px; }
+.pet-choice-row { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:6px; }
 .pet-choice-row button { position:relative; height:83px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; padding:4px 3px 6px; border:1px solid #ddc4a0; border-radius:6px; background:linear-gradient(#fffdf5,#f7ecd4); box-shadow:inset 0 1px #fffdf8,0 2px #cdb18a21; }
 .pet-choice-row button>span { flex:1; min-height:0; width:100%; display:flex; justify-content:center; align-items:center; padding:4px 1px; }
 .pet-choice-row img { max-width:62px; max-height:52px; width:auto; height:auto; }
 .pet-choice-row strong { font-size:10px; line-height:13px; font-weight:500; letter-spacing:.5px; color:#866344; }
 .pet-choice-row button.selected { border:2px solid #94aa8d; padding:3px 2px 5px; background:linear-gradient(#f6f8e9,#edf1df); }.pet-choice-row button.selected strong { color:#5b7550; font-weight:600; }
+.custom-pet-placeholder { display:grid; place-items:center; width:37px; height:37px; border:1px dashed #baa27e; border-radius:50%; color:#9a7c58; font-size:24px; font-style:normal; background:#fffaf0; }
+.custom-pet-tools { min-height:25px; margin-top:5px; display:flex; align-items:center; gap:5px; }
+.custom-pet-tools input { display:none; }
+.petcast-warm.expanded .custom-pet-tools button { flex:none; height:23px; padding:0 8px; border:1px solid #cdb18a; border-radius:4px; color:#73583e; background:#fff8e8; font-size:9px; }
+.custom-pet-tools button:disabled { opacity:.55; cursor:wait; }
+.custom-pet-tools small { min-width:0; color:#9e8564; font-size:8px; line-height:11px; }
 .selection-check { position:absolute; top:3px; right:3px; width:12px; height:12px; display:grid; place-items:center; font-size:9px; color:#fffef1; background:#98af90; border-radius:3px; font-style:normal; }
-.shell-choice { margin-top:13px; }.shell-choice h2 small { font-size:9px; font-weight:400; letter-spacing:0; margin-left:6px; color:#a38b69; }
+.shell-choice { margin-top:7px; }.shell-choice h2 small { font-size:9px; font-weight:400; letter-spacing:0; margin-left:6px; color:#a38b69; }
 .shell-settings-card { display:grid; grid-template-columns:78px minmax(0,1fr); gap:9px; height:106px; padding:8px; border:1px solid #dfc8a3; border-radius:6px; background:#fff9eb; }
 .shell-settings-preview { display:flex; flex-direction:column; align-items:center; justify-content:center; border-right:1px solid #e6d6ba; padding-right:8px; }
 .shell-settings-preview>div { position:relative; height:81px; width:71.2px; }
@@ -195,7 +202,7 @@
 .appearance-paper>header { height:32px; }
 .appearance-paper h2 { margin-bottom:6px; }
 .pet-choice-row button { height:78px; }
-.shell-choice { margin-top:11px; }
+.shell-choice { margin-top:7px; }
 .shell-settings-card { height:100px; padding-top:5px; padding-bottom:5px; }
 .appearance-footer { margin-top:10px; padding-top:9px; }
 .appearance-save-status { bottom:3px; line-height:10px; }

@@ -6,4 +6,42 @@
 .petcast-warm .roaming-pet { will-change:left; }
 .petcast-warm .roaming-pet.pet-on-sand { top:50.5%; }
 .petcast-warm .roaming-pet.pet-in-water { top:77.5%; height:76px; }
-@media(prefers-reduced-motion:reduce) { .petcast-warm .roaming-pet { will-change:auto; } }
+.petcast-warm .custom-pet-frame { image-rendering:auto; filter:drop-shadow(0 3px 3px #4b493b32); transform-origin:50% 85%; }
+.petcast-warm .custom-pet-animated { animation:custom-pet-breathe 3.2s ease-in-out infinite; }
+.petcast-warm .device-pet-viewport .custom-pet-animated { animation:custom-pet-breathe 3.2s ease-in-out infinite; }
+.petcast-warm .configured-pet[data-pet-id="custom"][data-pet-action="idle"] .custom-pet-frame { animation:custom-pet-breathe 3.2s ease-in-out infinite; }
+.petcast-warm .configured-pet[data-pet-id="custom"][data-pet-action="walk"] .custom-pet-frame,
+.petcast-warm .configured-pet[data-pet-id="custom"][data-pet-action="hop"] .custom-pet-frame,
+.petcast-warm .configured-pet[data-pet-id="custom"][data-pet-action="swim"] .custom-pet-frame { animation:custom-pet-walk .72s ease-in-out infinite; }
+.petcast-warm .configured-pet[data-pet-id="custom"][data-pet-action="wave"] .custom-pet-frame { animation:custom-pet-wave .72s ease-in-out 2; }
+.petcast-warm .configured-pet[data-pet-id="custom"][data-pet-action="celebrate"] .custom-pet-frame,
+.petcast-warm .configured-pet[data-pet-id="custom"][data-pet-action="eat"] .custom-pet-frame { animation:custom-pet-celebrate .55s ease-in-out 3; }
+.petcast-warm .configured-pet[data-pet-id="custom"][data-pet-action="anxious"] .custom-pet-frame { animation:custom-pet-anxious .24s ease-in-out infinite alternate; }
+.petcast-warm .configured-pet[data-pet-id="custom"][data-pet-action="tired"] .custom-pet-frame,
+.petcast-warm .configured-pet[data-pet-id="custom"][data-pet-action="sleep"] .custom-pet-frame { animation:custom-pet-tired 4.2s ease-in-out infinite; filter:saturate(.72) drop-shadow(0 3px 3px #4b493b32); }
+.petcast-warm .configured-pet[data-pet-id="custom"][data-pet-action^="drag-"] .custom-pet-frame { animation:custom-pet-drag .45s ease-in-out infinite alternate; }
+@keyframes custom-pet-breathe { 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-3%) scale(1.025,.985)} }
+@keyframes custom-pet-walk { 0%,100%{transform:translateY(0) rotate(-1.5deg)} 50%{transform:translateY(-7%) rotate(1.5deg)} }
+@keyframes custom-pet-wave { 0%,100%{transform:rotate(0)} 35%{transform:rotate(-7deg) translateY(-3%)} 70%{transform:rotate(6deg)} }
+@keyframes custom-pet-celebrate { 0%,100%{transform:translateY(0) scale(1)} 45%{transform:translateY(-13%) scale(1.04,.97)} 70%{transform:translateY(-4%) rotate(3deg)} }
+@keyframes custom-pet-anxious { from{transform:translateX(-2%) rotate(-1deg)} to{transform:translateX(2%) rotate(1deg)} }
+@keyframes custom-pet-tired { 0%,100%{transform:translateY(1%) scale(1,.96)} 50%{transform:translateY(3%) scale(1.02,.92)} }
+@keyframes custom-pet-drag { from{transform:rotate(-3deg) scale(.98)} to{transform:rotate(3deg) scale(1.02)} }
+.petcast-warm .pet-heart-burst { position:absolute; z-index:52; width:1px; height:1px; pointer-events:none; }
+.petcast-warm .pet-heart-particle { position:absolute; left:0; top:0; width:5px; height:5px; color:#e64f7f; background:currentColor; opacity:0;
+  box-shadow:-5px -10px 0 currentColor,5px -10px 0 currentColor,-10px -5px 0 currentColor,-5px -5px 0 currentColor,0 -5px 0 currentColor,5px -5px 0 currentColor,10px -5px 0 currentColor,-5px 0 0 currentColor,5px 0 0 currentColor,0 5px 0 currentColor;
+  animation:pet-heart-burst 920ms steps(7,end) var(--heart-delay,0ms) both; }
+.petcast-warm .pet-heart-particle:nth-child(1) { --heart-x:0px; --heart-y:-104px; --heart-scale:1.12; }
+.petcast-warm .pet-heart-particle:nth-child(2) { --heart-x:72px; --heart-y:-74px; --heart-delay:34ms; --heart-scale:.9; }
+.petcast-warm .pet-heart-particle:nth-child(3) { --heart-x:103px; --heart-y:-12px; --heart-delay:68ms; }
+.petcast-warm .pet-heart-particle:nth-child(4) { --heart-x:68px; --heart-y:52px; --heart-scale:.82; }
+.petcast-warm .pet-heart-particle:nth-child(5) { --heart-x:20px; --heart-y:76px; --heart-delay:34ms; --heart-scale:.9; }
+.petcast-warm .pet-heart-particle:nth-child(6) { --heart-x:-20px; --heart-y:76px; --heart-delay:68ms; --heart-scale:.82; }
+.petcast-warm .pet-heart-particle:nth-child(7) { --heart-x:-68px; --heart-y:52px; --heart-scale:.9; }
+.petcast-warm .pet-heart-particle:nth-child(8) { --heart-x:-103px; --heart-y:-12px; --heart-delay:34ms; }
+.petcast-warm .pet-heart-particle:nth-child(9) { --heart-x:-72px; --heart-y:-74px; --heart-delay:68ms; --heart-scale:1.12; }
+@keyframes pet-heart-burst { 0%{opacity:0;transform:translate(-3px,-3px) scale(.45)}14%{opacity:1;transform:translate(-3px,-3px) scale(1)}72%{opacity:1}100%{opacity:0;transform:translate(calc(var(--heart-x) - 3px),calc(var(--heart-y) - 3px)) scale(var(--heart-scale,1))} }
+@media(prefers-reduced-motion:reduce) {
+  .petcast-warm .roaming-pet { will-change:auto; }
+  .petcast-warm .custom-pet-frame,.petcast-warm .custom-pet-animated,.petcast-warm .pet-heart-particle { animation:none!important; }
+}

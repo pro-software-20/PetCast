@@ -15,7 +15,7 @@ child.stderr.on('data', () => {})
 child.on('error', () => { clearTimeout(timer); console.error('Electron could not start'); process.exitCode = 1 })
 child.on('exit', code => {
   clearTimeout(timer)
-  const markers = ['PETCAST_RENDERER_READY', 'PETCAST_PRELOAD_READY']
+  const markers = ['PETCAST_RENDERER_READY', 'PETCAST_PRELOAD_READY', 'PETCAST_CUSTOM_PET_IPC_READY']
   if (live) markers.push('PETCAST_CODEX_IPC_READY')
   const passed = code === 0 && markers.every(marker => output.includes(marker))
   console.log(passed ? `Desktop smoke passed${live ? ' (real Codex IPC)' : ''}` : 'Desktop smoke failed')

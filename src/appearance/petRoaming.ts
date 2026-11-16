@@ -1,10 +1,16 @@
 export type PetFacing = 'left' | 'right'
 export const MIN_PET_TURN_MS = 18_000
+export function getPetFacingScale(petId: string, facing: PetFacing): 1 | -1 {
+  // Built-in sprite sheets face right. A custom upload is kept in its original,
+  // left-facing orientation, so its mirror rule must be the inverse.
+  const sourceFacing: PetFacing = petId === 'custom' ? 'left' : 'right'
+  return facing === sourceFacing ? 1 : -1
+}
 export type PetHabitat = { kind: 'sand' | 'water'; minX: number; maxX: number; spawnX: number }
 export function getPetHabitat(petId: string): PetHabitat {
-  return ['cat', 'dog', 'chicken', 'rabbit'].includes(petId)
-    ? { kind: 'sand', minX: 27, maxX: 50, spawnX: 35.5 }
-    : { kind: 'water', minX: 29, maxX: 70, spawnX: 40 }
+  return petId === 'shark'
+    ? { kind: 'water', minX: 29, maxX: 70, spawnX: 40 }
+    : { kind: 'sand', minX: 27, maxX: 50, spawnX: 35.5 }
 }
 export interface PetRoamingState {
   habitat: PetHabitat
