@@ -22,6 +22,7 @@ import {
   validateExecutionReceipt,
   validateExecutionSnapshot,
 } from './taskCoordinationValidation'
+import { orderTasksForDispatch } from './taskScheduling'
 import { getHandoffReadiness } from './taskHandoff'
 import { validateTaskSession } from './taskSessionValidation'
 
@@ -78,6 +79,8 @@ export interface RunTaskCoordinationCycleInput {
   signal?: AbortSignal
   now?: () => Date
   canDispatch?: () => boolean
+  /** Explicit recovery check may re-query a terminal failure before a human decides. */
+  inspectTerminal?: boolean
 }
 
 export interface CancelCoordinatedTaskInput {
@@ -310,7 +313,7 @@ export async function runCoordinationCycle(
 
   // A persisted intent without a receipt is an uncertain paid call. Never replay it.
   for (const record of state.records) {
-    if (record.phase === 'dispatching' && !record.reference) {
+    if (!record.resolution && record.phase === 'dispatching' && !record.reference) {
       setRecordFailure(
         record,
         safeAdapterError('FAILED', '应用在收到执行收据前中断，需要人工核对，禁止自动重派。'),
@@ -322,8 +325,9 @@ export async function runCoordinationCycle(
 
   for (const record of state.records) {
     if (aborted(input.signal)) return schedulerError('CANCELLED', '任务协调周期已取消。')
-    const shouldInspect = record.reference && (
+    const shouldInspect = !record.resolution && record.reference && (
       ['queued', 'running', 'needs-input', 'unknown'].includes(record.phase)
+      || (input.inspectTerminal && ['failed', 'cancelled'].includes(record.phase))
       || (record.phase === 'completed' && !record.latestSnapshot)
     )
     if (!shouldInspect || !record.reference) continue
@@ -359,7 +363,7 @@ export async function runCoordinationCycle(
   const active = () => state.records.filter(record => ['queued', 'running'].includes(record.phase))
   const activeByProvider = (providerId: ProviderId) => active().filter(record => record.providerId === providerId).length
 
-  for (const task of session.plan.tasks) {
+  for (const task of orderTasksForDispatch(session)) {
     if (aborted(input.signal)) return schedulerError('CANCELLED', '任务协调周期已取消。')
     if (input.canDispatch && !input.canDispatch()) break
     if (active().length >= policyResult.value.globalConcurrency) break
@@ -477,7 +481,7 @@ export async function runCoordinationCycle(
     if (!resultSaved.ok) return resultSaved
   }
 
-  const requiresPolling = state.records.some(record => record.reference && (
+  const requiresPolling = state.records.some(record => !record.resolution && record.reference && (
     ['queued', 'running', 'needs-input', 'unknown'].includes(record.phase)
     || (record.phase === 'completed' && !record.latestSnapshot)
   ))

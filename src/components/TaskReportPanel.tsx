@@ -1,3 +1,5 @@
+import { TaskHabitSummary } from './TaskHabitSummary'
+import { DeliveryVersions } from './DeliveryVersions'
 import { ExecutionRecoveryPanel } from './ExecutionRecoveryPanel'
 import { applyTaskEvaluations, type TaskEvaluation } from '../../electron/taskEvaluations'
 import { TaskLedgerDetails } from './TaskLedgerDetails'
@@ -10,7 +12,7 @@ import { TaskAdvicePanel } from './TaskAdvicePanel'
 import { taskAdvice, type CurrentQuota } from '../reports/taskAdvisor'
 import { callEvidence, taskMetrics } from '../reports/taskMetrics'
 const num=(n:number)=>n.toLocaleString('zh-CN',{maximumFractionDigits:6})
-export function TaskReportPanel({query,revision,demo=false,currentQuota=null}:{query:ReportQuery;revision:number;demo?:boolean;currentQuota?:CurrentQuota|null}){
+export function TaskReportPanel({query,revision,demo=false,currentQuota=null,compact=false}:{compact?:boolean;query:ReportQuery;revision:number;demo?:boolean;currentQuota?:CurrentQuota|null}){
   const ledger=useMemo(()=>createTaskLedger(window.petcast),[]),[reload,setReload]=useState(0)
   const key=JSON.stringify(query)+':'+revision+':'+reload
   const [state,setState]=useState<{key:string;tasks?:TaskRecord[];events?:TaskEvaluation[];error?:string}>(),[message,setMessage]=useState(''),[confirm,setConfirm]=useState(false)
@@ -19,7 +21,7 @@ export function TaskReportPanel({query,revision,demo=false,currentQuota=null}:{q
     void pending.then(([tasks,events])=>{if(active)setState({key,tasks,events})}).catch(()=>{if(active)setState({key,error:'任务记录读取失败，原数据已保留。'})})
     return()=>{active=false}
   },[key,ledger,demo])
-  const current=state
+  const current=state?.key === key ? state : undefined
   const report=useMemo(()=>current?.tasks?taskMetrics(current.tasks,query):null,[current,query])
   const suggestions=useMemo(()=>current?.tasks?taskAdvice(applyTaskEvaluations(current.tasks,current.events??[]),query):[],[current,query])
   async function importFile(file:File){
@@ -34,6 +36,20 @@ export function TaskReportPanel({query,revision,demo=false,currentQuota=null}:{q
     <p>按任务结束时间归入区间。耗时是开始到结束的经过时间，包含等待和重试；平均、最高、最低只统计成功任务。失败和取消的调用仍计入已知消耗。</p>
     {current?.error&&<p role="alert">{current.error}</p>}
     {!current&&<p>正在读取任务记录…</p>}
+    {report && <section className="token-summary" aria-label="Token 用量构成">
+      <h4>Token 用量构成</h4>
+      {report.reportedCalls > 0 ? <>
+        <strong>共 {num(report.reportedTokens)} Token</strong>
+        <p>输入 {num(report.inputTokens)} · 输出 {num(report.outputTokens)}</p>
+        {report.reportedTokens > 0 && <div className="token-summary-bar" aria-hidden="true">
+          <span style={{width: (100 * report.inputTokens / report.reportedTokens) + '%'}} />
+        </div>}
+        <small>{report.reportedCalls} / {report.calls} 次调用已上报用量</small>
+      </> : <p>{report.calls ? '本期调用尚无 Token 记录' : '本期暂无调用记录'}</p>}
+    </section>}
+    {report&&<TaskHabitSummary tasks={report.tasks}/>}
+    {demo&&<DeliveryVersions id="isolated-demo" title="示例活动通知" initial="校园读书会将在周五下午三点举行，请携带一本想分享的书。"/>}
+    {!compact&&<>
     {!demo&&<ExecutionRecoveryPanel ledger={ledger} scope={query} revision={key}/>}
     <TaskAdvicePanel tasks={report?.tasks??[]} advice={suggestions} scope={query} quota={currentQuota} demo={demo}/>
     {report&&<>
@@ -47,13 +63,13 @@ export function TaskReportPanel({query,revision,demo=false,currentQuota=null}:{q
         {report.quotas.map(q=><tr key={q.label}><td>{q.label} 额度百分点</td><td>{num(q.stats.average)}</td><td title={q.stats.min.id}>{num(q.stats.min.value)}</td><td title={q.stats.max.id}>{num(q.stats.max.value)}</td><td>{q.stats.count}/{report.completed}</td></tr>)}
       </tbody></table>
       {!report.quotas.length&&<p>单任务额度尚不可用：仅接受执行器确认无其他并发消耗、且无刷新干扰的独占观测，不把账号额度下降直接分摊给任务。</p>}
-      <p>已上报 Token 合计 {num(report.reportedTokens)}（覆盖 {report.reportedCalls}/{report.calls} 次调用；缺失不记作零）。缓存输入是输入的子集，不重复相加。</p>
       <p>已知成本：{report.costs.length?report.costs.map(c=>`${c.label} ${num(c.amount)}（${c.calls} 次调用）`).join('；'):'暂无成本记录'}。币种、上报金额和估算金额分别统计；订阅额度不折算金额。</p>
       <details><summary>高 Token 任务与可追溯线索（已知消耗前 5）</summary>{report.expensive.map(t=><div key={t.id}><b>{t.label} · {t.id}</b><ul>{callEvidence(t).map(s=><li key={s}>{s}</li>)}</ul></div>)}{!report.expensive.length&&<p>暂无可追溯的 Token 记录。</p>}</details>
       <TaskLedgerDetails tasks={report.tasks} events={current?.events??[]} ledger={ledger} demo={demo}/>
 
     </>}
     {!demo&&<div className="history-actions"><label className="history-file">导入任务记录 JSON<input type="file" accept=".json,application/json" aria-label="导入任务记录" onChange={e=>{const file=e.target.files?.[0];if(file)void importFile(file);e.target.value=''}}/></label><button onClick={()=>setConfirm(true)}>清除当前账号任务记录</button>{confirm&&<div className="history-confirm"><span>确认删除当前来源和账号的任务、评价及执行恢复日志？请先停止运行中的任务；删除后无法用日志核对待确认调用。额度历史不会删除。</span><button onClick={()=>void ledger.clearTaskRecords(query).then(()=>{setReload(v=>v+1);setConfirm(false)}).catch(()=>setMessage('清除未完全完成，请重新检查任务与执行恢复日志后重试。'))}>确认清除任务</button><button onClick={()=>setConfirm(false)}>取消</button></div>}</div>}
+    </>}
     {message&&<p role="alert">{message}</p>}
   </section>
 }

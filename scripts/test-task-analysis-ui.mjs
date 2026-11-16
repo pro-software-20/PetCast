@@ -373,6 +373,16 @@ if (!process.versions.electron) {
     }
     await clickInCard(index, '提交待验收')
     await wait(`document.querySelectorAll('.task-plan-card')[${index}].classList.contains('is-review')`, `task ${index + 1} review`)
+    assert.equal(await js(`(()=>{
+      const card=document.querySelectorAll('.task-plan-card')[${index}];
+      const section=card.querySelector('.task-evaluation-review');
+      const button=[...section.querySelectorAll('button')].find(candidate=>candidate.textContent.trim()==='请求评价');
+      return Boolean(
+        section.textContent.includes('当前结果没有匹配的统一协调派发记录')
+        && section.textContent.includes('人工任务和旧 Codex 流程仍使用人工验收')
+        && button?.disabled
+      );
+    })()`), true)
     if (index === 0) {
       assert.equal(await js(`(()=>{
         const card=document.querySelectorAll('.task-plan-card')[0];

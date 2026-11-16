@@ -1320,3 +1320,158 @@ pnpm test:desktop
 pnpm test:task-ui
 git diff --check
 ```
+
+## 28. B 模块 P3.2A：执行适配器合规测试与跨组接入规范
+
+- 新增可复用的 `runExecutionAdapterConformance()`，统一检查 A 组执行适配器的派发、查询、取消、恢复、状态映射和安全错误。
+- 合规套件覆盖正常完成、等待输入、失败、限流和取消；每个场景使用独立适配器，并使用有限轮询和超时。
+- 强制验证 `dispatchId` 幂等：相同请求必须返回同一执行引用，相同 ID 对应不同请求必须返回 `INVALID_INPUT`。
+- 恢复只允许 `inspect()`，未知引用返回 `EXECUTION_NOT_FOUND`；取消和重复取消必须保持幂等。
+- 报告只包含固定检查 ID、通过状态和安全摘要，不包含凭据、绝对路径、完整供应商响应或完整任务输出。
+- 新增 `createInMemoryExecutionAdapterConformanceFixture()` 作为零网络标准样例；默认命令不会连接真实 AI 或产生费用。
+- A/B/C/D 的接入职责、数据边界和恢复原则见 `docs/B_P32A_ADAPTER_CONFORMANCE.md`。
+
+验证命令：
+
+```powershell
+pnpm test:adapter-conformance
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
+
+## 29. B 模块 P3.3A：D 评价适配器合规测试与验收决策桥接
+
+- 新增 `TaskEvaluationRequest` 与 `TaskEvaluationAdapter`，只向 D 提供任务目标、交付物、验收标准、执行摘要、逐项验证、安全相对路径和非敏感证据引用。
+- 新增 `runTaskEvaluationAdapterConformance()`，使用零网络 fixture 检查 accepted、revise、unknown、取消、非法响应、关联一致性、幂等和输入不可变。
+- 新增独立 `TaskAcceptanceStateV1` 与 `petcast.task-acceptance.v1` 存储，不修改 `TaskSessionV1`、`TaskCoordinationStateV1` 或公共 schema。
+- `reconcileTaskEvaluation()` 只接收处于 `review` 的当前任务及最新派发、最新尝试报告；旧 Provider、迟到派发、跨任务报告和冲突评价 ID 均被拒绝。
+- 默认 `manual` 策略始终生成 `manual-review`。受信策略也只有在评价方法受信、结论为 accepted 且全部验收项通过时才能生成 complete 建议。
+- P3.3A 仅生成并保存 B 侧验收建议，不自动完成任务、不自动返工、不自动重试，也不产生网络请求或模型费用。
+- D 组历史评价账本继续用于报告与统计，不能替代带有最新 `dispatchId`、逐项验证和证据关联的实时评价报告。
+- 完整 D 组接入要求、数据边界和恢复规则见 `docs/B_P33A_EVALUATION_CONFORMANCE.md`。
+
+验证命令：
+
+```powershell
+pnpm test:evaluation-conformance
+pnpm test:adapter-conformance
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
+
+## 30. B 模块 P3.3B1：评价展示与人工决策落地
+
+- 在任务进入 `review` 后增加“D 评价建议”区域，展示评价结论、逐项验证、规则版本、比较依据、脱敏证据摘要与 B 侧建议动作。
+- 默认发行版不注入 D 评价适配器，页面明确显示“D 评价适配器尚未接入”，但原有人工逐项验收始终可用。
+- 新增 `requestTaskEvaluation()` 评价工作流：只读取当前最新统一协调派发，生成稳定 `evaluation:<dispatchId>:<attempt>` 标识，严格校验后先持久化，再向页面发布报告与建议。
+- 重复请求同一派发的评价时复用已保存记录，不会再次调用 D；页面关闭、会话切换或任务离开 `review` 时会取消待完成评价，迟到结果不得覆盖当前会话。
+- 评价只是建议：完成、退回修改、补充信息或标记失败都必须由用户点击确认；默认 `manual` 策略不会自动改变任务状态。
+- 人工任务和旧 Codex 专用链路若没有匹配的协调派发记录，不会伪造 D 评价上下文，继续使用现有人工验收。
+- 导出零网络 `InMemoryTaskEvaluationAdapter` 供页面和流程验收；P3.3B2 再由 D 组交付真实评价适配器并通过 P3.3A 合规套件。
+
+验证命令：
+
+```powershell
+pnpm test:evaluation-conformance
+pnpm test:adapter-conformance
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
+
+## 31. B 模块 P3.4A：零网络任务协调全链路验收
+
+- 新增 `pnpm test:coordination-e2e`，组合现有 `TaskCoordinationController`、内存协调/会话/评价存储、`InMemoryExecutionAdapter` 和 `InMemoryTaskEvaluationAdapter`，验证 B 模块完整闭环。
+- 两个不同 Provider 的根任务可在全局并发 2 下并行；同一 Provider 仍遵守并发 1；依赖汇总任务只有在所有直接依赖由用户确认完成后才会解锁。
+- 执行完成只进入 `review`。D 的 `accepted`、`revise` 和 `unknown` 只形成 B 侧建议，用户确认前不会自动完成、返工或重跑任务。
+- 重建控制器后默认暂停，已有执行只查询不重复派发；已保存评价直接复用；协调状态已保存但会话保存失败时可以安全恢复。
+- 直接依赖交接只包含摘要、关键决策、验证和安全相对文件元信息，不包含完整 AI 输出、凭据、绝对路径、额度或供应商正文。
+- 测试显式阻止网络请求，不调用 DeepSeek、OpenAI、真实 Codex 或其他模型，不产生费用；内存适配器不会注册到正式发行版。
+- A、D 真实适配器仍未交付，P3.4B 将在各自通过合规套件后复用同一验收链路进行真实跨组联调。
+- 完整验收矩阵和真实联调入口见 `docs/B_P34A_ZERO_NETWORK_ACCEPTANCE.md`。
+
+验证命令：
+
+```powershell
+pnpm test:coordination-e2e
+pnpm test:evaluation-conformance
+pnpm test:adapter-conformance
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
+
+## 32. B 模块 P3.4B：真实 D 评价接入全链路验收
+
+- 保留 P3.4A 的双内存适配器基线，新增 `pnpm test:coordination-d-e2e`，以零网络 A 执行适配器和 D 组真实 `TaskEvidenceAdapter` 验收完整协调链路。
+- 两个并行根任务由用户确认后才解锁依赖汇总任务；执行完成只进入 `review`。D 逐项核查状态与证据，分别产生 `accepted`、`revise`、`unknown` 报告，B 只给出建议。
+- 重建控制器默认暂停且不重复派发；已保存的评价在重建 D 实例后仍被复用；旧派发报告不能覆盖当前任务。
+- D 请求只包含安全摘要、逐项验证与证据引用；直接依赖交接和最终报告均不包含完整 AI 输出。测试显式阻止网络调用，不产生模型费用。
+- D 已在主程序中注入任务页面；A 组真实通用 `ExecutionAdapter` 尚未交付，正式发行版不注册本次测试用的内存适配器。后续真实 A 联调入口见 `docs/B_P34B_D_INTEGRATION_ACCEPTANCE.md`。
+
+## 33. B 模块 P3.5：异常恢复与安全重试
+
+- 协调记录保留每次派发证据，增加可选的人工处理决定；旧会话及协调状态版本保持不变。
+- 无收据中断、状态未知或需要输入时，先核对有引用的外部执行。显式核对也会重新查询已报告失败或取消的执行；若随后发现有效完成结果，则进入待验收。用户可转人工；要创建新尝试，须单独确认可能重复调用或计费的风险。失败、取消和限流不会自动重试或切换 Provider。
+- 新尝试沿用稳定派发 ID 规则并递增尝试次数。先持久化人工决定，再保存任务会话；任一步失败都会停止新派发。重启默认暂停，必须重新启动协调。
+- 协调器任务的通用继续和重试入口关闭；人工接管后才能录入人工结果。含执行证据的协调记录不能通过清除操作删除。独立分支继续按依赖关系推进。
+- 自动测试使用内存执行适配器；正式 A 组通用执行适配器仍待交付。人工确认只记录风险接受，不保证外部调用没有发生或不会计费。
+
+验证命令：
+
+```powershell
+pnpm test:coordination-d-e2e
+pnpm test:coordination-e2e
+pnpm test:evaluation-conformance
+pnpm test:adapter-conformance
+pnpm test:contracts
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```
+
+## 34. B 模块 P3.5.1：桌面端异常恢复验收
+
+- 新增 `pnpm test:task-recovery-ui`：验收构建中的独立页面向 `TaskAnalysisPanel` 注入模拟 A 适配器，使用隐藏 Electron 窗口和临时用户数据。正式应用仍使用空的通用适配器注册表。
+- 页面验收实际点击外部状态核对、人工接管、二次确认新尝试及重启后的恢复入口；检查派发次数、尝试次数、持久化决定和待验收状态。网络请求被测试拦截，不调用真实 AI。
+- 修复新建任务、重新分析和清空输入对未处理协调执行证据的清理风险；活动记录或损坏记录保留，并给出可见提示。
+- 验收矩阵与复现步骤见 `docs/B_P351_DESKTOP_RECOVERY_ACCEPTANCE.md`。A 组真实通用适配器仍待交付，真实外部执行验收尚未包含在本轮中。
+
+## 35. B 模块 P3.6A：任务优先级、关键路径与可解释调度
+
+- `TaskNode` 增加可选 `priority`（`high` / `medium` / `low`）。本地新建方案默认写入 `medium`；历史方案缺失该字段时按 `medium` 读取，保持会话兼容。
+- 新增纯函数 `analyzeTaskScheduling()`：实时计算可执行任务、阻塞前置任务、最长依赖链上的关键路径任务、可并行数量和推荐处理顺序，不把派生分数写入会话。
+- 统一协调器的自动派发顺序固定为：用户优先级 → 关键路径分数 → 原任务顺序；现有依赖、全局并发 2、同 Provider 并发 1、暂停和人工确认边界不变。
+- 任务卡显示优先级、关键路径标识、并行提示、依赖阻塞原因及当前建议处理顺序；自动协调区域显示可执行、关键路径和等待依赖的队列摘要。
+- 任务开始或已有协调记录后，任务设置（包括优先级）保持锁定；开始前修改优先级会在下一个协调周期立即生效。
+- P3.6A 仍使用零网络适配器测试，不注册模拟适配器到正式发行版，也不依赖 A 组真实适配器。
+
+验证命令：
+
+```powershell
+pnpm test:contracts
+pnpm test:coordination-e2e
+pnpm test:coordination-d-e2e
+pnpm test:task-recovery-ui
+pnpm typecheck
+pnpm build
+pnpm test:desktop
+pnpm test:task-ui
+git diff --check
+```

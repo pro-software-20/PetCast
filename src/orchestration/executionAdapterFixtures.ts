@@ -14,6 +14,10 @@ import {
   validateExecutionReference,
   validateExecutionSnapshot,
 } from './taskCoordinationValidation'
+import type {
+  AdapterConformanceScenario,
+  ExecutionAdapterConformanceFixture,
+} from './adapterConformance'
 
 export type InMemoryExecutionHandler = (
   request: ExecutionDispatchRequest,
@@ -206,6 +210,89 @@ export class InMemoryExecutionAdapter implements ExecutionAdapter {
     }
   }
 }
+
+const createConformanceRequest = (): ExecutionDispatchRequest => ({
+  dispatchId: 'conformance-dispatch-1',
+  sessionId: 'conformance-session-1',
+  planId: 'conformance-plan-1',
+  taskId: 'conformance-task-1',
+  attempt: 1,
+  providerId: 'deepseek',
+  task: {
+    id: 'conformance-task-1',
+    title: 'Validate execution adapter',
+    description: 'Run a deterministic zero-network adapter scenario.',
+    dependsOn: [],
+    recommendedProviderId: 'deepseek',
+    executionMode: 'api',
+    prompt: 'Return a structured fixture result without external calls.',
+    files: {
+      inputs: [],
+      readPaths: [],
+      allowedWritePaths: [],
+      forbiddenPaths: [],
+      outputPaths: [],
+    },
+    expectedDeliverables: ['Structured fixture result'],
+    acceptanceChecks: ['Adapter conformance check passes'],
+  },
+  directDependencies: [],
+})
+
+const conformanceError = (
+  code: ExecutionAdapterError['code'],
+  message: string,
+  retryable = false,
+  retryAfterSeconds?: number,
+): ExecutionAdapterOutcome<TaskExecutionResult> => ({
+  ok: false,
+  error: {
+    code,
+    message,
+    retryable,
+    ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+  },
+})
+
+const createConformanceHandler = (
+  scenario: AdapterConformanceScenario,
+): InMemoryExecutionHandler => async (request, signal) => {
+  if (scenario === 'cancel') {
+    await new Promise<void>(resolve => {
+      if (signal.aborted) resolve()
+      else signal.addEventListener('abort', () => resolve(), { once: true })
+    })
+    return conformanceError('CANCELLED', 'Execution was cancelled by the caller.')
+  }
+  if (scenario === 'needs-input') {
+    return conformanceError('NEEDS_INPUT', 'Additional user input is required.')
+  }
+  if (scenario === 'failed') {
+    return conformanceError('FAILED', 'The fixture execution failed safely.', true)
+  }
+  if (scenario === 'rate-limited') {
+    return conformanceError('RATE_LIMITED', 'The fixture provider is temporarily rate limited.', true, 30)
+  }
+  return {
+    ok: true,
+    value: {
+      taskId: request.taskId,
+      providerId: request.providerId,
+      summary: 'The zero-network adapter conformance scenario completed.',
+      outputText: 'Fixture output only.',
+      changedFiles: [],
+      verification: request.task.acceptanceChecks.map(label => ({ label, status: 'passed' })),
+    },
+  }
+}
+
+/** Standard zero-network fixture used by B and reusable by A during integration. */
+export const createInMemoryExecutionAdapterConformanceFixture = (): ExecutionAdapterConformanceFixture => ({
+  providerId: 'deepseek',
+  executionMode: 'api',
+  createAdapter: scenario => new InMemoryExecutionAdapter(createConformanceHandler(scenario)),
+  createRequest: createConformanceRequest,
+})
 
 export const createEvaluationReportFixture = (
   overrides: Partial<EvaluationReport> = {},

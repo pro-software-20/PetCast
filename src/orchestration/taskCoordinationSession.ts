@@ -153,6 +153,16 @@ const validateEffects = (
       && record.dispatchId === effect.dispatchId
     ))
     if (!matching) return failure('STATE_MISMATCH', '协调效果与持久化协调记录不匹配。')
+    if (matching.resolution || latestByTask.get(matching.taskId)?.dispatchId !== matching.dispatchId) {
+      notices.push({
+        taskId: matching.taskId,
+        dispatchId: matching.dispatchId,
+        level: 'warning',
+        code: 'STALE_EFFECT',
+        message: '已忽略旧尝试产生的迟到协调效果。',
+      })
+      continue
+    }
     if (effect.reference !== undefined) {
       const checked = validateExecutionReference(effect.reference, {
         taskId: matching.taskId,
@@ -177,15 +187,6 @@ const validateEffects = (
       if (!expectedError || !same(effect.error, expectedError)) {
         return failure('STATE_MISMATCH', '协调效果包含不匹配的安全错误。')
       }
-    }
-    if (latestByTask.get(matching.taskId)?.dispatchId !== matching.dispatchId) {
-      notices.push({
-        taskId: matching.taskId,
-        dispatchId: matching.dispatchId,
-        level: 'warning',
-        code: 'STALE_EFFECT',
-        message: '已忽略旧尝试产生的迟到协调效果。',
-      })
     }
   }
   return null
@@ -242,6 +243,28 @@ export function reconcileTaskSessionWithCoordination(
     let run = session.runs.find(candidate => candidate.taskId === task.id)
     if (!run) return failure('STATE_MISMATCH', '协调记录引用了不存在的任务运行记录。')
 
+    if (record.resolution) {
+      if (record.attempt < run.attempt) continue
+      if (record.providerId !== run.assignedProviderId || record.attempt > run.attempt + 1) {
+        return failure('STATE_MISMATCH', '人工处理记录与当前任务不匹配。')
+      }
+      const resolved = record.resolution.action === 'manual-takeover'
+        ? run.attempt === record.attempt && run.executionMode === 'manual'
+        : run.attempt === record.attempt && run.status === 'ready' && run.executionMode === task.executionMode
+      if (!resolved) {
+        const applied = update(session, {
+          type: 'coordination-resolve',
+          taskId: task.id,
+          providerId: record.providerId,
+          attempt: record.attempt,
+          action: record.resolution.action,
+        }, record.resolution.confirmedAt)
+        if (isFailure(applied)) return applied
+        session = applied
+      }
+      continue
+    }
+
     if (record.attempt < run.attempt || (record.attempt === run.attempt && run.status === 'ready')) {
       notices.push({
         taskId: task.id,
@@ -252,6 +275,10 @@ export function reconcileTaskSessionWithCoordination(
       })
       continue
     }
+    // A reviewed coordinated result can be returned to the human workflow.
+    // The old completed snapshot must never overwrite that new draft.
+    if (record.attempt === run.attempt && run.executionMode === 'manual'
+      && ['running', 'needs-input'].includes(run.status)) continue
     if (record.attempt > run.attempt + 1) {
       return failure('STATE_MISMATCH', '协调尝试次数跳跃，拒绝推进任务会话。')
     }
@@ -271,6 +298,20 @@ export function reconcileTaskSessionWithCoordination(
 
     const terminal = ['review', 'done', 'failed', 'cancelled'].includes(run.status)
     if (terminal) {
+      if (['failed', 'cancelled'].includes(run.status) && record.phase === 'completed'
+        && record.attempt === run.attempt && run.executionMode !== 'manual') {
+        const result = record.latestSnapshot?.result
+        if (!result || !validateResultForTask(result, task.id, record.providerId, task.acceptanceChecks)) {
+          return failure('INVALID_RESULT', '协调执行结果与任务验收标准不一致。')
+        }
+        const completed = update(session, {
+          type: 'coordination-complete', taskId: task.id, providerId: record.providerId,
+          attempt: record.attempt, result: normalizedResult(result),
+        }, record.updatedAt)
+        if (isFailure(completed)) return completed
+        session = completed
+        continue
+      }
       if (record.phase === 'completed' && ['review', 'done'].includes(run.status) && run.result) {
         const result = record.latestSnapshot?.result
         if (!result || !same(normalizedResult(result), run.result)) {

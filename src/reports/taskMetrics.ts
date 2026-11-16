@@ -21,10 +21,20 @@ export function taskMetrics(input:TaskRecord[],query:ReportQuery){
     const key=[...labels][0];taskCosts.set(key,[...(taskCosts.get(key)??[]),{id:t.id,value:t.calls.reduce((sum,c)=>sum+c.cost!.amount,0)}])
   }
   const costs=new Map<string,{amount:number;calls:number}>()
-  const calls=tasks.flatMap(t=>t.calls),reportedTokens=calls.filter(c=>c.usage!==null).reduce((s,c)=>s+c.usage!.inputTokens+c.usage!.outputTokens,0)
+  const calls = tasks.flatMap(task => task.calls)
+  let inputTokens = 0
+  let outputTokens = 0
+  let reportedCalls = 0
+  for (const {usage} of calls) {
+    if (!usage) continue
+    reportedCalls++
+    inputTokens += usage.inputTokens
+    outputTokens += usage.outputTokens
+  }
+  const reportedTokens = inputTokens + outputTokens
   for(const c of calls){if(!c.cost)continue;const key=c.cost.currency+' / '+(c.cost.basis==='provider-reported'?'服务商上报':'估算');const row=costs.get(key)??{amount:0,calls:0};row.amount+=c.cost.amount;row.calls++;costs.set(key,row)}
   const expensive=[...tasks].filter(t=>t.calls.some(c=>c.usage)).sort((a,b)=>b.calls.reduce((s,c)=>s+(c.usage?c.usage.inputTokens+c.usage.outputTokens:0),0)-a.calls.reduce((s,c)=>s+(c.usage?c.usage.inputTokens+c.usage.outputTokens:0),0)).slice(0,5)
-  return {taskCosts:[...taskCosts].map(([label,v])=>({label,stats:distribution(v)!})),tasks,completed:completed.length,failed:tasks.filter(t=>t.status==='failed').length,cancelled:tasks.filter(t=>t.status==='cancelled').length,duration,tokens,quotas:[...quotas].map(([label,v])=>({label,stats:distribution(v)!})),costs:[...costs].map(([label,value])=>({label,...value})),calls:calls.length,reportedCalls:calls.filter(c=>c.usage).length,reportedTokens,expensive}
+  return {taskCosts:[...taskCosts].map(([label,v])=>({label,stats:distribution(v)!})),tasks,completed:completed.length,failed:tasks.filter(t=>t.status==='failed').length,cancelled:tasks.filter(t=>t.status==='cancelled').length,duration,tokens,quotas:[...quotas].map(([label,v])=>({label,stats:distribution(v)!})),costs:[...costs].map(([label,value])=>({label,...value})),calls:calls.length,reportedCalls,inputTokens,outputTokens,reportedTokens,expensive}
 }
 export function callEvidence(task:TaskRecord){
   const calls=task.calls,usage=calls.filter(c=>c.usage),input=usage.reduce((s,c)=>s+c.usage!.inputTokens,0),output=usage.reduce((s,c)=>s+c.usage!.outputTokens,0)

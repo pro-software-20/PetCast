@@ -1,12 +1,14 @@
 import { iso, sameScope, validateHistoryQuery, validateHistoryScope, type HistoryScope } from './historySchema.js'
 export const MAX_TASK_CALLS = 1000
 export interface CallRecord {
+  stage?: 'planning'|'execution'
   id: string; taskId: string; provider: string; model: string
   startedAt: string; endedAt: string; status: 'succeeded'|'failed'; attempt: number
   usage: {inputTokens: number; outputTokens: number; cachedInputTokens: number|null; basis: 'provider-reported'}|null
   cost: {amount: number; currency: string; basis: 'provider-reported'|'price-estimate'; pricing?:{version:string;sourceUrl:string;effectiveAt:string}}|null
 }
 export interface TaskRecord extends HistoryScope {
+  humanWaitMs?: number
   id: string; label: string; category: string; startedAt: string; endedAt: string
   status: 'succeeded'|'failed'|'cancelled'; origin: 'executor'|'import'
   evaluation?: {comparisonKey: string; accepted: boolean; method: 'user'|'rubric'; rubricVersion: string}
@@ -32,13 +34,16 @@ export function validateTaskRecord(input: unknown): TaskRecord {
     let usage: CallRecord['usage']=null, cost: CallRecord['cost']=null
     if(c.usage!==null){const u=obj(c.usage);if(u.basis!=='provider-reported')throw Error('仅接受服务商上报 Token');const inputTokens=number(u.inputTokens,true),outputTokens=number(u.outputTokens,true),cachedInputTokens=u.cachedInputTokens===null?null:number(u.cachedInputTokens,true);if(cachedInputTokens!==null&&cachedInputTokens>inputTokens)throw Error('缓存 Token 不能超过输入');usage={inputTokens,outputTokens,cachedInputTokens,basis:'provider-reported'}}
     if(c.cost!==null){const p=obj(c.cost);if(p.basis!=='provider-reported'&&p.basis!=='price-estimate')throw Error('成本依据无效');const currency=text(p.currency,3);if(!/^[A-Z]{3}$/.test(currency))throw Error('币种无效');cost={amount:number(p.amount),currency,basis:p.basis};if(p.pricing!==undefined){const pricing=obj(p.pricing),sourceUrl=text(pricing.sourceUrl,1000);let url:URL;try{url=new URL(sourceUrl)}catch{throw Error('价格来源无效')}if(!['https:','http:'].includes(url.protocol)||url.username||url.password)throw Error('价格来源无效');cost.pricing={version:text(pricing.version),sourceUrl,effectiveAt:iso(pricing.effectiveAt)};if(cost.pricing.effectiveAt>start)throw Error('价格在调用时尚未生效')}}
-    return {id:callId,taskId,provider:text(c.provider),model:text(c.model),startedAt:start,endedAt:end,status:c.status,attempt,usage,cost} as CallRecord
+    if(c.stage!==undefined&&c.stage!=='planning'&&c.stage!=='execution')throw Error('调用阶段无效')
+    return {...(c.stage!==undefined?{stage:c.stage}:{}),id:callId,taskId,provider:text(c.provider),model:text(c.model),startedAt:start,endedAt:end,status:c.status,attempt,usage,cost} as CallRecord
   })
   let quota: TaskRecord['quota']=null
   if(v.quota!==null){const q=obj(v.quota);if(q.basis!=='exclusive-observation')throw Error('任务额度必须来自独占观测');quota={provider:text(q.provider),window:text(q.window),points:number(q.points),basis:q.basis}}
   let evaluation: TaskRecord['evaluation']
   if(v.evaluation!==undefined){const e=obj(v.evaluation);if(typeof e.accepted!=='boolean'||(e.method!=='user'&&e.method!=='rubric'))throw Error('任务评价无效');evaluation={comparisonKey:text(e.comparisonKey),accepted:e.accepted,method:e.method,rubricVersion:text(e.rubricVersion)}}
-  return {...(evaluation?{evaluation}:{}),...scope,id:taskId,label:text(v.label),category:text(v.category),startedAt,endedAt,status:v.status as TaskRecord['status'],origin:v.origin as TaskRecord['origin'],calls,quota}
+  const humanWaitMs=v.humanWaitMs===undefined?undefined:number(v.humanWaitMs,true)
+  if(humanWaitMs!==undefined&&humanWaitMs>Date.parse(endedAt)-Date.parse(startedAt))throw Error('人工等待时间超过任务用时')
+  return {...(humanWaitMs!==undefined?{humanWaitMs}:{}),...(evaluation?{evaluation}:{}),...scope,id:taskId,label:text(v.label),category:text(v.category),startedAt,endedAt,status:v.status as TaskRecord['status'],origin:v.origin as TaskRecord['origin'],calls,quota}
 }
 export function parseTaskDocument(raw: string): TaskRecord[] {
   const v=obj(JSON.parse(raw));if((v.version!==1&&v.version!==2)||!Array.isArray(v.tasks)||v.tasks.length>100_000)throw Error('任务文件格式无效')

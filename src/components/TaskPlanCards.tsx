@@ -1,3 +1,5 @@
+import { TaskEvidencePanel } from './TaskEvidencePanel'
+import { DeliveryVersions } from './DeliveryVersions'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceSnapshot } from '../../electron/workspaceProtocol'
 import type { PreparedCodexTaskExecution, TaskExecutionArtifactView } from '../../electron/taskExecutionProtocol'
@@ -5,6 +7,7 @@ import { buildManualTaskPrompt } from '../orchestration/manualTaskPrompt'
 import { LOCAL_PROVIDER_PROFILE } from '../orchestration/providerProfiles'
 import { generateTaskSessionReport } from '../orchestration/taskReport'
 import { getTaskWorkspacePathScope, workspacePathScopesEqual } from '../orchestration/taskPathScope'
+import { analyzeTaskScheduling, priorityLabel } from '../orchestration/taskScheduling'
 import {
   getDependencyHandoffArtifacts,
   getEffectiveTaskWorkspaceScope,
@@ -20,10 +23,18 @@ import {
   type TaskSessionAction,
 } from '../orchestration/taskSession'
 import type { ExecutionAdapterRegistry } from '../orchestration/taskCoordinator'
+import type { TaskRecoveryAction } from '../orchestration/taskCoordinationRecovery'
 import {
   createIdleTaskCoordinationSnapshot,
   type TaskCoordinationControllerSnapshot,
 } from '../orchestration/TaskCoordinationController'
+import type {
+  AcceptanceDecisionAction,
+  AcceptanceDecisionReason,
+  EvaluationVerdict,
+  TaskAcceptanceRecord,
+  TaskAcceptanceStateV1,
+} from '../types/taskCoordination'
 import type {
   AutomaticTaskExecutionState,
   ProviderId,
@@ -44,6 +55,7 @@ import {
 } from '../codex/codexEnvironment'
 
 export interface TaskPlanCardsProps {
+  deliveryOwner?: string
   session: TaskSessionV1
   providers: ProviderProfile[]
   onSessionChange: (session: TaskSessionV1, persistImmediately?: boolean) => void
@@ -54,8 +66,16 @@ export interface TaskPlanCardsProps {
   onCoordinationPause?: () => void
   onCoordinationResume?: () => Promise<void>
   onCoordinationRunNow?: () => Promise<void>
+  onCoordinationInspect?: () => Promise<void>
   onCoordinationCancelTask?: (taskId: string) => Promise<void>
+  onCoordinationResolveTask?: (taskId: string, dispatchId: string, action: TaskRecoveryAction, riskAcknowledged: boolean) => Promise<void>
   onCoordinationClear?: () => Promise<void>
+  acceptanceState?: TaskAcceptanceStateV1 | null
+  evaluationAdapterAvailable?: boolean
+  evaluatingTaskId?: string | null
+  evaluationError?: { taskId: string; message: string } | null
+  onRequestEvaluation?: (taskId: string, evidence?: import('../types/taskCoordination').EvaluationEvidenceRef[]) => Promise<void> | void
+  onCancelEvaluation?: (taskId: string) => void
 }
 
 type CopyStatus = 'idle' | 'success' | 'error'
@@ -111,6 +131,31 @@ const executionModeLabels = {
   'local-agent': '本地代理',
 } as const
 
+const evaluationVerdictLabels: Record<EvaluationVerdict, string> = {
+  accepted: '通过',
+  revise: '建议修改',
+  unknown: '无法判断',
+}
+
+const acceptanceActionLabels: Record<AcceptanceDecisionAction, string> = {
+  complete: '建议确认完成',
+  'request-changes': '建议退回修改',
+  retry: '建议退回并重试',
+  'needs-input': '建议补充信息',
+  'manual-review': '继续人工复核',
+  fail: '建议标记失败',
+}
+
+const acceptanceReasonLabels: Record<AcceptanceDecisionReason, string> = {
+  MANUAL_POLICY: '当前采用人工验收策略，评价仅供参考。',
+  UNTRUSTED_METHOD: '当前评价方法不在受信列表中。',
+  ACCEPTED_AND_VERIFIED: '评价结论为通过，且全部验收项已通过。',
+  ACCEPTED_WITH_INCOMPLETE_CHECKS: '评价建议通过，但仍有验收项未通过。',
+  REVISION_REQUESTED: '评价建议修改当前结果。',
+  MAX_ATTEMPTS_REACHED: '已达到最大尝试次数，需要人工复核。',
+  EVALUATION_UNKNOWN: '评价器无法给出确定结论。',
+}
+
 const formatFile = (file: TaskSessionV1['plan']['tasks'][number]['files']['inputs'][number]) => (
   file.kind === 'workspace'
     ? file.path
@@ -158,7 +203,47 @@ const downloadMarkdown = (markdown: string, fileName: string) => {
   URL.revokeObjectURL(url)
 }
 
+const EvaluationRecordDetails = ({ record }: { record: TaskAcceptanceRecord }) => (
+  <div className={`task-evaluation-report is-${record.report.verdict}`}>
+    <header>
+      <strong>评价结论：{evaluationVerdictLabels[record.report.verdict]}</strong>
+      <time dateTime={record.receivedAt}>{new Date(record.receivedAt).toLocaleString()}</time>
+    </header>
+    <dl>
+      <div><dt>评价方法</dt><dd>{record.report.method}</dd></div>
+      <div><dt>规则版本</dt><dd>{record.report.ruleVersion}</dd></div>
+      <div><dt>比较依据</dt><dd>{record.report.comparisonBasis}</dd></div>
+    </dl>
+    <ul className="task-evaluation-verification">
+      {record.report.verification.map(item => (
+        <li key={item.label}>
+          <strong>{item.label}</strong>
+          <span>{verificationLabels[item.status]}</span>
+          {item.details && <small>{item.details}</small>}
+        </li>
+      ))}
+    </ul>
+    {record.report.evidence.length > 0 && <details>
+      <summary>脱敏证据摘要（{record.report.evidence.length}）</summary>
+      <ul>{record.report.evidence.map(evidence => (
+        <li key={`${evidence.type}:${evidence.reference}`}>
+          <strong>{evidence.type}</strong>
+          <code>{evidence.reference}</code>
+          <span>{evidence.summary}</span>
+        </li>
+      ))}</ul>
+    </details>}
+    {record.report.note && <p>安全备注：{record.report.note}</p>}
+    {record.decision && <div className="task-evaluation-decision" role="status">
+      <strong>B 建议：{acceptanceActionLabels[record.decision.action]}</strong>
+      <span>{acceptanceReasonLabels[record.decision.reason]}</span>
+      <small>所有状态变化仍需用户确认。</small>
+    </div>}
+  </div>
+)
+
 export function TaskPlanCards({
+  deliveryOwner,
   session,
   providers,
   onSessionChange,
@@ -169,10 +254,20 @@ export function TaskPlanCards({
   onCoordinationPause,
   onCoordinationResume,
   onCoordinationRunNow,
+  onCoordinationInspect,
   onCoordinationCancelTask,
+  onCoordinationResolveTask,
   onCoordinationClear,
+  acceptanceState,
+  evaluationAdapterAvailable = false,
+  evaluatingTaskId,
+  evaluationError,
+  onRequestEvaluation,
+  onCancelEvaluation,
 }: TaskPlanCardsProps) {
   const [copyStatuses, setCopyStatuses] = useState<Record<string, CopyStatus>>({})
+  const [recoveryConfirmation, setRecoveryConfirmation] = useState<string | null>(null)
+  const [recoveryBusy, setRecoveryBusy] = useState(false)
   const [actionErrorState, setActionErrorState] = useState<{ message: string; taskId?: string } | null>(null)
   const actionError = actionErrorState?.message ?? null
   const actionErrorTaskId = actionErrorState?.taskId
@@ -226,6 +321,11 @@ export function TaskPlanCards({
   const connectedCoordinationProviders = providers.filter(provider => Boolean(coordinationAdapters?.get(provider.id)))
   const automaticTaskCount = session.plan.tasks.filter(task => task.executionMode !== 'manual').length
   const coordinationAvailable = connectedCoordinationProviders.length > 0 && automaticTaskCount > 0
+  const scheduling = useMemo(() => analyzeTaskScheduling(session), [session])
+  const schedulingByTaskId = useMemo(
+    () => new Map(scheduling.insights.map(insight => [insight.taskId, insight])),
+    [scheduling],
+  )
 
   useEffect(() => () => {
     const requestId = workspaceRequest.current
@@ -653,6 +753,9 @@ export function TaskPlanCards({
               : '暂无 A 组执行适配器'}；自动任务：{automaticTaskCount}；活动任务：{coordinationSnapshot.activeTaskIds.length}
           </small>
         </header>
+        <p className="task-coordination-queue" role="status">
+          队列说明：当前可执行 {scheduling.runnableTaskIds.length} 个；关键路径任务 {scheduling.criticalPathTaskIds.length} 个；等待依赖 {scheduling.waitingTaskIds.length} 个。
+        </p>
         {coordinationSnapshot.status === 'confirming' && (
           <div className="task-coordination-confirm" role="alert">
             <strong>确认启动自动协调</strong>
@@ -785,6 +888,27 @@ export function TaskPlanCards({
           const coordinationRecord = [...coordinationSnapshot.records]
             .filter(record => record.taskId === task.id)
             .sort((left, right) => right.attempt - left.attempt)[0]
+          const unresolvedCoordination = Boolean(coordinationRecord && !coordinationRecord.resolution)
+          const coordinatedRun = unresolvedCoordination && task.executionMode !== 'manual'
+            && run.executionMode !== 'manual'
+          const recoverableCoordination = unresolvedCoordination
+            && ['unknown', 'failed', 'cancelled', 'needs-input'].includes(coordinationRecord!.phase)
+            && ['ready', 'needs-input', 'failed', 'cancelled'].includes(run.status)
+          const uncertainCoordination = recoverableCoordination
+            && (!coordinationRecord!.reference || ['unknown', 'needs-input'].includes(coordinationRecord!.phase))
+          const taskEvaluationRecords = [...(acceptanceState?.records ?? [])]
+            .filter(record => record.taskId === task.id)
+            .sort((left, right) => right.attempt - left.attempt
+              || right.receivedAt.localeCompare(left.receivedAt))
+          const currentEvaluationRecord = run.status === 'review'
+            ? taskEvaluationRecords.find(record => (
+              record.attempt === run.attempt
+              && record.dispatchId === coordinationRecord?.dispatchId
+            ))
+            : undefined
+          const historicalEvaluationRecords = taskEvaluationRecords.filter(
+            record => record.evaluationId !== currentEvaluationRecord?.evaluationId,
+          )
           const executionModeEditable = canEditTaskExecutionMode(session, task.id) && !coordinationRecord
           const recommendedProviderName = selectableProviders.find(
             provider => provider.id === task.recommendedProviderId,
@@ -814,13 +938,27 @@ export function TaskPlanCards({
           const dependencyNames = task.dependsOn.map(dependencyId => (
             session.plan.tasks.find(candidate => candidate.id === dependencyId)?.title ?? dependencyId
           ))
+          const schedulingInsight = schedulingByTaskId.get(task.id)
           const earlierTasks = session.plan.tasks.slice(0, index)
-          const editable = run.status === 'running' || run.status === 'needs-input'
+          const editable = (run.status === 'running' || run.status === 'needs-input') && !coordinatedRun
           const reviewEditable = run.status === 'review' && run.automaticExecution?.state !== 'review'
           const verificationEditable = editable || reviewEditable
           const pendingAcceptanceCount = run.status === 'review'
             ? (run.result?.verification.filter(item => item.status !== 'passed').length ?? 0)
             : 0
+          const evaluationBusy = evaluatingTaskId === task.id
+          const evaluationEligible = Boolean(
+            run.status === 'review'
+            && coordinationRecord?.phase === 'completed'
+            && coordinationRecord.reference
+            && coordinationRecord.attempt === run.attempt
+            && coordinationRecord.providerId === run.assignedProviderId,
+          )
+          const evaluationUnavailableReason = !evaluationAdapterAvailable
+            ? 'D 评价适配器尚未接入；当前仍可继续人工验收。'
+            : !evaluationEligible
+              ? '当前结果没有匹配的统一协调派发记录，不能发送给 D 评价器；人工任务和旧 Codex 流程仍使用人工验收。'
+              : null
           const canCopy = !preparedExecution && !preparingExecution && ['ready', 'running', 'needs-input'].includes(run.status)
           const automaticCategory = task.providerRecommendation?.category
           const automaticCandidate = Boolean(
@@ -841,7 +979,10 @@ export function TaskPlanCards({
           const taskArtifact = artifactViews[task.id]
           const expanded = expandedTaskId === task.id
           const taskPanelId = `task-plan-card-body-${task.id}`
-          const taskNextStep = nextStepText(run.status, dependencyNames, run.automaticExecution?.state, automaticCandidate)
+          const taskNextStep = recoverableCoordination
+            ? '下一步：先核对外部执行，再选择人工处理或确认新尝试。'
+            : coordinatedRun ? '下一步：等待执行状态；必要时单独取消。'
+              : nextStepText(run.status, dependencyNames, run.automaticExecution?.state, automaticCandidate)
 
           return (
             <li className={`task-plan-card is-${run.status}${expanded ? ' is-expanded' : ''}`} key={task.id}>
@@ -860,6 +1001,15 @@ export function TaskPlanCards({
               <div className="task-plan-card-glance">
                 <span>AI：{selectedProviderName}{manuallyOverridden ? '（人工改选）' : ''}</span>
                 <span>依赖：{dependencyNames.length ? dependencyNames.join('、') : '无，可并行'}</span>
+                {schedulingInsight && <span className={`task-priority is-${schedulingInsight.priority}`}>
+                  {priorityLabel(schedulingInsight.priority)}{schedulingInsight.isCriticalPath ? ' · 关键路径任务' : ''}
+                </span>}
+                {schedulingInsight?.status === 'ready' && schedulingInsight.suggestedOrder && (
+                  <span>当前建议第 {schedulingInsight.suggestedOrder} 个处理{ schedulingInsight.parallelReadyCount > 0 ? `；可与 ${schedulingInsight.parallelReadyCount} 个任务并行` : ''}</span>
+                )}
+                {schedulingInsight?.status === 'waiting' && schedulingInsight.blockedByTaskIds.length > 0 && (
+                  <span>等待前置任务：{schedulingInsight.blockedByTaskIds.join('、')}</span>
+                )}
                 <strong>{taskNextStep}</strong>
               </div>
 
@@ -944,9 +1094,43 @@ export function TaskPlanCards({
                     <code>派发 {coordinationRecord.dispatchId.slice(-8)}</code>
                     <time dateTime={coordinationRecord.updatedAt}>{new Date(coordinationRecord.updatedAt).toLocaleString()}</time>
                     {coordinationRecord.error && <strong>{coordinationRecord.error.message}</strong>}
+                    {coordinationRecord.latestSnapshot?.observedAt && (
+                      <span>最近核对：{new Date(coordinationRecord.latestSnapshot.observedAt).toLocaleString()}</span>
+                    )}
+                    {coordinationRecord.error?.retryAfterSeconds !== undefined && (
+                      <span>建议至少等待 {coordinationRecord.error.retryAfterSeconds} 秒；等待结束也不会自动重试。</span>
+                    )}
                     {coordinationRecord.reference && ['queued', 'running', 'needs-input', 'unknown'].includes(coordinationRecord.phase) && (
                       <button type="button" onClick={() => void onCoordinationCancelTask?.(task.id)}>取消执行</button>
                     )}
+                    {recoverableCoordination && <div className="task-coordination-recovery">
+                      <p>请先核对外部执行状态。新尝试不会自动发起，也不会自动切换 AI。</p>
+                      <button type="button" disabled={recoveryBusy} onClick={() => void onCoordinationInspect?.()}>核对外部执行</button>
+                      <button type="button" disabled={recoveryBusy} onClick={() => {
+                        setRecoveryBusy(true)
+                        void (onCoordinationResolveTask?.(task.id, coordinationRecord.dispatchId, 'manual-takeover', false) ?? Promise.resolve())
+                          .catch(() => setActionError('人工接管失败，请重新核对协调记录。', task.id))
+                          .finally(() => setRecoveryBusy(false))
+                      }}>转人工处理</button>
+                      {uncertainCoordination && <p role="alert">旧执行可能仍在继续。重新派发可能造成重复调用或计费；请先在外部核对，并单独确认风险。</p>}
+                      <button type="button" disabled={recoveryBusy} onClick={() => {
+                        if (uncertainCoordination && recoveryConfirmation !== coordinationRecord.dispatchId) {
+                          setRecoveryConfirmation(coordinationRecord.dispatchId)
+                          return
+                        }
+                        setRecoveryConfirmation(null)
+                        setRecoveryBusy(true)
+                        void (onCoordinationResolveTask?.(task.id, coordinationRecord.dispatchId, 'new-attempt', Boolean(uncertainCoordination)) ?? Promise.resolve())
+                          .catch(() => setActionError('新尝试决定未能保存，请重新核对协调记录。', task.id))
+                          .finally(() => setRecoveryBusy(false))
+                      }}>{uncertainCoordination && recoveryConfirmation === coordinationRecord.dispatchId
+                          ? '再次确认：已核对并接受重复调用或计费风险'
+                          : '核对后发起新尝试'}</button>
+                      {uncertainCoordination && recoveryConfirmation === coordinationRecord.dispatchId && (
+                        <button type="button" onClick={() => setRecoveryConfirmation(null)}>取消确认</button>
+                      )}
+                      {coordinationSnapshot.error && <p role="alert">{coordinationSnapshot.error}</p>}
+                    </div>}
                   </div>
                 )}
               </section>
@@ -1062,7 +1246,7 @@ export function TaskPlanCards({
                     providers={providers}
                     workspace={workspace}
                     defaultScope={defaultScope}
-                    disabled={!planEditable}
+                    disabled={!planEditable || Boolean(coordinationRecord)}
                     onSave={definition => applyAction({
                       type: 'update-task-definition',
                       taskId: task.id,
@@ -1329,21 +1513,94 @@ export function TaskPlanCards({
                 </section>
               )}
 
+              {(run.status === 'review' || taskEvaluationRecords.length > 0) && (
+                <section className="task-evaluation-review" aria-label="D 评价建议">
+                  <header>
+                    <div>
+                      <h4>D 评价建议</h4>
+                      <p>评价结论仅供参考，任务状态必须由你确认后才会改变。</p>
+                    </div>
+                    {run.status === 'review' && !currentEvaluationRecord && (
+                      evaluationBusy
+                        ? <button type="button" onClick={() => onCancelEvaluation?.(task.id)}>取消评价</button>
+                        : <TaskEvidencePanel key={coordinationRecord?.dispatchId??task.id} checks={task.acceptanceChecks}
+                            changedFiles={run.result?.changedFiles??[]} disabled={Boolean(evaluationUnavailableReason)||!onRequestEvaluation}
+                            onRequest={evidence=>void onRequestEvaluation?.(task.id,evidence)}/>
+                    )}
+                  </header>
+
+                  {run.status === 'review' && evaluationBusy && <p role="status">正在评价，请稍候…</p>}
+                  {run.status === 'review' && evaluationUnavailableReason && !currentEvaluationRecord && (
+                    <p className="task-evaluation-unavailable" role="status">{evaluationUnavailableReason}</p>
+                  )}
+                  {evaluationError?.taskId === task.id && (
+                    <p className="task-card-action-error" role="alert">{evaluationError.message}</p>
+                  )}
+
+                  {currentEvaluationRecord && <>
+                    <EvaluationRecordDetails record={currentEvaluationRecord} />
+                    {currentEvaluationRecord.decision?.action !== 'manual-review' && run.status === 'review' && (
+                      <div className="task-evaluation-actions">
+                        {currentEvaluationRecord.decision?.action === 'complete' && (
+                          <button
+                            type="button"
+                            className="is-primary"
+                            disabled={pendingAcceptanceCount > 0 || run.automaticExecution?.state === 'review'}
+                            onClick={() => applyAction({ type: 'accept', taskId: task.id })}
+                          >按建议确认完成</button>
+                        )}
+                        {(['request-changes', 'retry'] as AcceptanceDecisionAction[]).includes(currentEvaluationRecord.decision?.action ?? 'manual-review') && (
+                          <button
+                            type="button"
+                            onClick={() => applyAction({ type: 'request-changes', taskId: task.id, message: run.draft.reviewNote })}
+                          >按建议退回修改</button>
+                        )}
+                        {currentEvaluationRecord.decision?.action === 'needs-input' && (
+                          <button
+                            type="button"
+                            onClick={() => applyAction({ type: 'review-needs-input', taskId: task.id, message: run.draft.reviewNote })}
+                          >按建议补充信息</button>
+                        )}
+                        {currentEvaluationRecord.decision?.action === 'fail' && (
+                          <button
+                            type="button"
+                            onClick={() => applyAction({ type: 'fail', taskId: task.id, message: run.draft.reviewNote })}
+                          >按建议标记失败</button>
+                        )}
+                      </div>
+                    )}
+                    {currentEvaluationRecord.decision?.action === 'manual-review' && (
+                      <p className="task-evaluation-manual" role="status">当前策略要求继续使用下方人工逐项验收。</p>
+                    )}
+                  </>}
+
+                  {historicalEvaluationRecords.length > 0 && (
+                    <details className="task-evaluation-history">
+                      <summary>历史评价（{historicalEvaluationRecords.length}）</summary>
+                      {historicalEvaluationRecords.map(record => (
+                        <EvaluationRecordDetails key={record.evaluationId} record={record} />
+                      ))}
+                    </details>
+                  )}
+                </section>
+              )}
+
               {actionErrorTaskId === task.id && <p className="task-card-action-error" role="alert">{actionError}</p>}
               <div className="task-run-actions">
-                {['ready', 'waiting'].includes(run.status) && <button type="button" onClick={() => applyAction({ type: 'cancel', taskId: task.id })}>取消任务</button>}
-                {run.status === 'running' && run.automaticExecution?.state !== 'running' && <>
+                {['ready', 'waiting'].includes(run.status) && !unresolvedCoordination && <button type="button" onClick={() => applyAction({ type: 'cancel', taskId: task.id })}>取消任务</button>}
+                {run.status === 'running' && !coordinatedRun && run.automaticExecution?.state !== 'running' && <>
                   <button type="button" className="is-primary" onClick={() => applyAction({ type: 'submit-result', taskId: task.id })}>提交待验收</button>
                   <button type="button" onClick={() => applyAction({ type: 'needs-input', taskId: task.id, message: run.draft.reviewNote })}>需要补充信息</button>
                   <button type="button" onClick={() => applyAction({ type: 'fail', taskId: task.id, message: run.draft.reviewNote })}>标记失败</button>
                   <button type="button" onClick={() => applyAction({ type: 'cancel', taskId: task.id })}>取消</button>
                 </>}
-                {run.status === 'needs-input' && <>
+                {run.status === 'needs-input' && !unresolvedCoordination && <>
                   <button type="button" className="is-primary" onClick={() => applyAction({ type: 'resume', taskId: task.id })}>信息已补充，继续</button>
                   <button type="button" onClick={() => applyAction({ type: 'fail', taskId: task.id, message: run.draft.reviewNote })}>标记失败</button>
                   <button type="button" onClick={() => applyAction({ type: 'cancel', taskId: task.id })}>取消</button>
                 </>}
                 {run.status === 'review' && run.automaticExecution?.state !== 'review' && <>
+                  
                   {pendingAcceptanceCount > 0 && (
                     <p className="task-acceptance-hint" role="status">还有 {pendingAcceptanceCount} 项验收未通过，请逐项确认。</p>
                   )}
@@ -1356,7 +1613,7 @@ export function TaskPlanCards({
                   <button type="button" onClick={() => applyAction({ type: 'request-changes', taskId: task.id, message: run.draft.reviewNote })}>退回修改</button>
                   <button type="button" onClick={() => applyAction({ type: 'fail', taskId: task.id, message: run.draft.reviewNote })}>标记失败</button>
                 </>}
-                {['failed', 'cancelled'].includes(run.status) && <button type="button" className="is-primary" onClick={() => applyAction({ type: 'retry', taskId: task.id })}>重试任务</button>}
+                {['failed', 'cancelled'].includes(run.status) && !unresolvedCoordination && <button type="button" className="is-primary" onClick={() => applyAction({ type: 'retry', taskId: task.id })}>重试任务</button>}
               </div>
               </div>}
             </li>
@@ -1370,6 +1627,7 @@ export function TaskPlanCards({
 
       <section className="task-plan-footer">
         <h3>最终验收</h3>
+        {session.runs.filter(run=>run.status==='done' && run.result).map(run=><DeliveryVersions key={(deliveryOwner??'local')+session.id+run.taskId} owner={deliveryOwner} id={session.id+'.'+run.taskId} title={session.plan.tasks.find(t=>t.id===run.taskId)?.title??run.taskId} initial={run.result!.outputText||run.result!.summary}/>)}
         {!allTasksDone && <p>完成并验收全部任务后，可进行最终验收并生成报告。</p>}
         {session.finalVerification.map((item, index) => (
           <label className="task-final-check" key={item.label}>

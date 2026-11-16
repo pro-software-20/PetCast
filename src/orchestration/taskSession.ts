@@ -35,7 +35,7 @@ export interface CreateTaskSessionInput {
 
 export type EditableTaskDefinition = Pick<
   TaskNode,
-  'title' | 'description' | 'prompt' | 'expectedDeliverables' | 'acceptanceChecks'
+  'title' | 'description' | 'prompt' | 'expectedDeliverables' | 'acceptanceChecks' | 'priority'
 > & {
   files: TaskFileScope
   recommendedProviderId: ProviderId
@@ -57,6 +57,7 @@ export type TaskSessionAction =
   | { type: 'coordination-complete'; taskId: string; providerId: ProviderId; attempt: number; result: TaskExecutionResult }
   | { type: 'coordination-fail'; taskId: string; providerId: ProviderId; attempt: number; message: string }
   | { type: 'coordination-cancel'; taskId: string; providerId: ProviderId; attempt: number; message?: string }
+  | { type: 'coordination-resolve'; taskId: string; providerId: ProviderId; attempt: number; action: 'manual-takeover' | 'new-attempt' }
   | { type: 'start-automatic'; taskId: string; executionId: string; model: string }
   | { type: 'complete-automatic'; taskId: string; artifactId?: string; summary: string; outputText: string; changedFiles: string[]; usage?: { inputTokens: number; outputTokens: number } }
   | { type: 'apply-automatic'; taskId: string }
@@ -70,6 +71,7 @@ export type TaskSessionAction =
   | { type: 'confirm-handoff-artifact'; taskId: string; dependencyTaskId: string; path: string; provided: boolean }
   | { type: 'update-draft'; taskId: string; draft: Partial<TaskResultDraft> }
   | { type: 'needs-input'; taskId: string; message: string }
+  | { type: 'review-needs-input'; taskId: string; message?: string }
   | { type: 'resume'; taskId: string }
   | { type: 'submit-result'; taskId: string }
   | { type: 'accept'; taskId: string }
@@ -377,6 +379,7 @@ export function updateTaskSession(
           expectedDeliverables: [...action.task.expectedDeliverables],
           acceptanceChecks: [...action.task.acceptanceChecks],
           recommendedProviderId: action.task.recommendedProviderId,
+          priority: action.task.priority ?? 'medium',
           providerRecommendation: action.task.providerRecommendation
             ? clone(action.task.providerRecommendation)
             : undefined,
@@ -431,7 +434,7 @@ export function updateTaskSession(
         run.statusMessage = action.message.trim() || '执行适配器需要补充信息。'
         break
       case 'coordination-complete': {
-        if (!['running', 'needs-input'].includes(run.status)
+        if (!['running', 'needs-input', 'failed', 'cancelled'].includes(run.status)
           || run.assignedProviderId !== action.providerId
           || run.attempt !== action.attempt
           || run.executionMode === 'manual') {
@@ -477,6 +480,30 @@ export function updateTaskSession(
         run.status = 'cancelled'
         run.statusMessage = action.message?.trim() || '协调执行已取消。'
         break
+      case 'coordination-resolve': {
+        if (task.executionMode === 'manual' || run.assignedProviderId !== action.providerId
+          || !['ready', 'needs-input', 'failed', 'cancelled'].includes(run.status)
+          || ![run.attempt, run.attempt + 1].includes(action.attempt)
+          || run.result || run.automaticExecution) {
+          return invalidTransition('当前任务不能处理该协调执行尝试。')
+        }
+        run.attempt = action.attempt
+        run.result = undefined
+        run.draft = emptyDraft(task.acceptanceChecks)
+        run.completedAt = undefined
+        if (action.action === 'manual-takeover') {
+          run.status = 'running'
+          run.executionMode = 'manual'
+          run.startedAt ??= now
+          run.statusMessage = '已人工接管；请核对外部执行后录入结果。'
+        } else {
+          run.status = 'ready'
+          run.executionMode = task.executionMode
+          run.startedAt = undefined
+          run.statusMessage = '已确认可发起新尝试；重新启动协调后才会派发。'
+        }
+        break
+      }
       case 'start-automatic':
         if (run.status !== 'ready' || run.assignedProviderId !== 'codex'
           || task.executionMode !== 'manual'
@@ -616,8 +643,19 @@ export function updateTaskSession(
         run.status = 'needs-input'
         run.statusMessage = action.message.trim() || '需要补充信息。'
         break
+      case 'review-needs-input':
+        if (run.status !== 'review' || !run.result) return invalidTransition('只有待验收任务可以按评价建议补充信息。')
+        if (run.automaticExecution?.state === 'review') {
+          return invalidTransition('请先应用或丢弃 Codex 文件改动，再补充信息。')
+        }
+        run.status = 'needs-input'
+        run.statusMessage = action.message?.trim() || '评价建议补充信息，请核对后继续。'
+        break
       case 'resume':
         if (run.status !== 'needs-input') return invalidTransition('当前任务不处于等待补充信息状态。')
+        if (task.executionMode !== 'manual' && run.executionMode !== 'manual') {
+          return invalidTransition('统一协调器任务须先核对外部执行，再选择人工接管或新尝试。')
+        }
         run.status = 'running'
         run.statusMessage = undefined
         if (run.automaticExecution?.state === 'interrupted') {
@@ -682,6 +720,9 @@ export function updateTaskSession(
         break
       case 'retry': {
         if (!['failed', 'cancelled'].includes(run.status)) return invalidTransition('只有失败或已取消任务可以重试。')
+        if (task.executionMode !== 'manual' && run.executionMode !== 'manual') {
+          return invalidTransition('统一协调器任务须先核对外部执行，再确认新尝试。')
+        }
         const statusById = new Map(session.runs.map(candidate => [candidate.taskId, candidate.status]))
         run.status = task.dependsOn.every(dependencyId => statusById.get(dependencyId) === 'done') ? 'ready' : 'waiting'
         run.result = undefined

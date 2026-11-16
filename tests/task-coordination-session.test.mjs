@@ -313,7 +313,10 @@ test('late old attempts and conflicting terminal results cannot overwrite curren
   let updated = updateTaskSession(session, { type: 'fail', taskId: 'task-1', message: 'manual failure' }, NEXT)
   assert.equal(updated.ok, true, updated.message)
   session = updated.session
-  updated = updateTaskSession(session, { type: 'retry', taskId: 'task-1' }, NEXT)
+  updated = updateTaskSession(session, {
+    type: 'coordination-resolve', taskId: 'task-1', providerId: 'deepseek',
+    attempt: 1, action: 'new-attempt',
+  }, NEXT)
   assert.equal(updated.ok, true, updated.message)
   session = updated.session
 

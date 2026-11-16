@@ -233,6 +233,7 @@ const createTaskNode = (
     dependsOn,
     recommendedProviderId: selected.recommendedProviderId,
     providerRecommendation: selected.recommendation,
+    priority: 'medium',
     executionMode: 'manual',
     prompt: draft.prompt,
     files: {
