@@ -14,6 +14,7 @@ import { registerTaskExecutionIpc } from './taskExecutionIpc.js'
 import { ChatGptAuthService } from './chatGptAuth.js'
 import { registerChatGptAuthIpc } from './chatGptAuthIpc.js'
 import { resolveAiServiceUrl } from './aiServiceConfig.js'
+import { registerDeepSeekExecutionIpc } from './deepSeekExecutionIpc.js'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
 app.setAppUserModelId('io.github.pro-software-20.petcast')
@@ -103,6 +104,9 @@ const createWindow = () => {
           && typeof window.petcast?.optimizeTaskPrompt === 'function'
           && typeof window.petcast?.planTaskWithDeepSeek === 'function'
           && typeof window.petcast?.cancelDeepSeekTaskPlan === 'function'
+          && typeof window.petcast?.dispatchDeepSeekExecution === 'function'
+          && typeof window.petcast?.inspectDeepSeekExecution === 'function'
+          && typeof window.petcast?.cancelDeepSeekExecution === 'function'
           && typeof window.petcast?.selectTaskWorkspace === 'function'
           && typeof window.petcast?.prepareCodexTaskExecution === 'function'
           && typeof window.petcast?.runCodexTaskExecution === 'function'
@@ -198,6 +202,13 @@ if (ownsInstance) app.whenReady().then(async () => {
     rendererUrl,
     aiApiUrl,
   )
+  const deepSeekExecutionManager = registerDeepSeekExecutionIpc({
+    getWindow: () => mainWindow,
+    rendererUrl,
+    storeFile: path.join(app.getPath('userData'), 'deepseek-executions.v1.json'),
+    apiKey: process.env.DEEPSEEK_API_KEY,
+    model: process.env.DEEPSEEK_MODEL,
+  })
   registerWorkspaceIpc(() => mainWindow, app.getPath('userData'), rendererUrl, workspaceRegistry)
   const taskExecutionManager = registerTaskExecutionIpc({
     getWindow: () => mainWindow,
@@ -213,7 +224,10 @@ if (ownsInstance) app.whenReady().then(async () => {
     taskExecutionCleanupStarted = true
     event.preventDefault()
     chatGptAuth.dispose()
-    void taskExecutionManager.dispose().finally(() => app.quit())
+    void Promise.all([
+      taskExecutionManager.dispose(),
+      deepSeekExecutionManager.dispose(),
+    ]).finally(() => app.quit())
   })
   const savePath = path.join(app.getPath('userData'), 'petcast-save.json')
 

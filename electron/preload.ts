@@ -17,6 +17,15 @@ contextBridge.exposeInMainWorld('petcast', {
     ipcRenderer.invoke('task-plan:create', input)
   ),
   cancelDeepSeekTaskPlan: (requestId: string) => ipcRenderer.send('task-plan:cancel', requestId),
+  dispatchDeepSeekExecution: (input: import('./deepSeekExecutionProtocol.js').DeepSeekExecutionDispatchInput) => (
+    ipcRenderer.invoke('deepseek-execution:dispatch', input)
+  ),
+  inspectDeepSeekExecution: (input: import('./deepSeekExecutionProtocol.js').DeepSeekExecutionReferenceInput) => (
+    ipcRenderer.invoke('deepseek-execution:inspect', input)
+  ),
+  cancelDeepSeekExecution: (input: import('./deepSeekExecutionProtocol.js').DeepSeekExecutionReferenceInput) => (
+    ipcRenderer.invoke('deepseek-execution:cancel', input)
+  ),
   selectTaskWorkspace: (requestId: string) => ipcRenderer.invoke('workspace:select', requestId),
   cancelTaskWorkspace: (requestId: string) => ipcRenderer.send('workspace:cancel', requestId),
   prepareCodexTaskExecution: (input: import('./taskExecutionProtocol.js').PrepareCodexTaskExecutionRequest) => (
