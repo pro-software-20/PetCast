@@ -12,7 +12,9 @@ export interface RiverEnvironment {
   flowDurationSeconds: number
   depth: RiverDepth
   depthLabel: string
+  waterTier: 1 | 2 | 3 | 4
   waterTopPercent: number
+  waterRecedePercent: number
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
@@ -42,8 +44,17 @@ export const deriveRiverEnvironment = (
       : 'normal'
   const depthLabel = depth === 'deep' ? '丰沛' : depth === 'shallow' ? '浅水' : '正常'
 
-  // High weekly allowance creates a fuller river; low allowance exposes more riverbank.
-  const waterTopPercent = clamp(68 - usage.weeklyRemaining * 0.22, 46, 68)
+  // Keep every level inside the illustrated river channel. The source artwork already
+  // contains its shoreline, so lower tiers expose a small sand strip over that water.
+  const waterTier: RiverEnvironment['waterTier'] = usage.weeklyRemaining < 25
+    ? 1
+    : usage.weeklyRemaining < 50
+      ? 2
+      : usage.weeklyRemaining < 75
+        ? 3
+        : 4
+  const waterTopPercent = [84, 81, 78, 75.5][waterTier - 1]
+  const waterRecedePercent = [9, 6, 3, 0][waterTier - 1]
 
   return {
     dayPhase,
@@ -53,6 +64,8 @@ export const deriveRiverEnvironment = (
     flowDurationSeconds,
     depth,
     depthLabel,
+    waterTier,
     waterTopPercent,
+    waterRecedePercent,
   }
 }

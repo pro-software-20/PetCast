@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
+type WindowResizeCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+
 contextBridge.exposeInMainWorld('petcast', {
   readCodexUsage: (requestId: string) => ipcRenderer.invoke('codex:read-usage', requestId),
   cancelCodexUsage: (requestId: string) => ipcRenderer.send('codex:cancel-usage', requestId),
@@ -55,8 +57,14 @@ contextBridge.exposeInMainWorld('petcast', {
   beginDrag: () => ipcRenderer.send('window:drag-start'),
   moveDrag: () => ipcRenderer.send('window:drag-move'),
   endDrag: () => ipcRenderer.send('window:drag-end'),
+  beginResize: (corner: WindowResizeCorner) => ipcRenderer.send('window:resize-start', corner),
+  resizeWindow: () => ipcRenderer.send('window:resize-move'),
+  endResize: () => ipcRenderer.send('window:resize-end'),
   toggleExpanded: (expanded: boolean) => ipcRenderer.invoke('window:toggle-expanded', expanded),
   loadGameSave: () => ipcRenderer.invoke('storage:load'),
   saveGame: (value: unknown) => ipcRenderer.invoke('storage:save', value),
+  readCustomPet: () => ipcRenderer.invoke('custom-pet:read'),
+  saveCustomPet: (bytes: Uint8Array) => ipcRenderer.invoke('custom-pet:save', bytes),
+  deleteCustomPet: () => ipcRenderer.invoke('custom-pet:delete'),
   close: () => ipcRenderer.send('window:close'),
 })

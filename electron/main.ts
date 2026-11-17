@@ -14,6 +14,7 @@ import { registerTaskExecutionIpc } from './taskExecutionIpc.js'
 import { ChatGptAuthService } from './chatGptAuth.js'
 import { registerChatGptAuthIpc } from './chatGptAuthIpc.js'
 import { resolveAiServiceUrl } from './aiServiceConfig.js'
+import { registerCustomPetIpc } from './customPetIpc.js'
 import { registerDeepSeekExecutionIpc } from './deepSeekExecutionIpc.js'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
@@ -23,11 +24,15 @@ app.setPath('userData', path.join(app.getPath('appData'), 'petcast-stage1'))
 const COMPACT = { width: 300, height: 340 }
 // Expanded content fills the user-resizable window.
 const EXPANDED = { width: 900, height: 650 }
-let expandedSize = { ...EXPANDED }
+const MIN_EXPANDED = { width: 640, height: 440 }
+type WindowResizeCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 
 let mainWindow: BrowserWindow | null = null
 let compactBounds: Electron.Rectangle | null = null
 let dragOffset: { x: number; y: number } | null = null
+let expandedSize = { ...EXPANDED }
+let windowExpanded = false
+let resizeState: { corner: WindowResizeCorner; bounds: Electron.Rectangle; pointer: Electron.Point; area: Electron.Rectangle } | null = null
 let animationToken = 0
 const isSmokeTest = process.env.PETCAST_SMOKE_TEST === '1'
 if (isSmokeTest) app.setPath('userData', mkdtempSync(path.join(app.getPath('temp'), 'petcast-smoke-')))
@@ -110,10 +115,33 @@ const createWindow = () => {
           && typeof window.petcast?.selectTaskWorkspace === 'function'
           && typeof window.petcast?.prepareCodexTaskExecution === 'function'
           && typeof window.petcast?.runCodexTaskExecution === 'function'
+          && typeof window.petcast?.readCustomPet === 'function'
+          && typeof window.petcast?.saveCustomPet === 'function'
+          && typeof window.petcast?.deleteCustomPet === 'function'
+          && typeof window.petcast?.beginResize === 'function'
+          && typeof window.petcast?.resizeWindow === 'function'
+          && typeof window.petcast?.endResize === 'function'
           && typeof window.petcast?.loadGameSave === 'function'`,
       ).then(async ready => {
         if (!ready) { console.error('PETCAST_PRELOAD_FAILED'); app.exit(1); return }
         console.log('PETCAST_PRELOAD_READY')
+        const customPetReady = await mainWindow?.webContents.executeJavaScript(
+          `(async () => {
+            const canvas = document.createElement('canvas'); canvas.width = 16; canvas.height = 16;
+            const context = canvas.getContext('2d'); if (!context) return false;
+            context.fillStyle = '#e8a7bd'; context.fillRect(0, 0, 16, 16);
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+            if (!blob) return false;
+            const saved = await window.petcast.saveCustomPet(new Uint8Array(await blob.arrayBuffer()));
+            const read = await window.petcast.readCustomPet();
+            const removed = await window.petcast.deleteCustomPet();
+            return saved.ok && saved.asset?.width === 16 && saved.asset?.height === 16
+              && read.ok && read.asset?.revision === saved.asset.revision
+              && removed.ok && removed.asset === null;
+          })()`,
+        )
+        if (!customPetReady) { console.error('PETCAST_CUSTOM_PET_IPC_FAILED'); app.exit(1); return }
+        console.log('PETCAST_CUSTOM_PET_IPC_READY')
         if (process.env.PETCAST_SMOKE_CODEX === '1') {
           const result = await mainWindow?.webContents.executeJavaScript(
             `new Promise(resolve => {
@@ -184,6 +212,7 @@ if (ownsInstance) app.whenReady().then(async () => {
     experimentalLocalAuth: process.env.PETCAST_EXPERIMENTAL_LOCAL_CODEX_AUTH === '1',
   })
   registerUsageHistoryIpc(() => mainWindow, app.getPath('userData'), rendererUrl)
+  registerCustomPetIpc(() => mainWindow, app.getPath('userData'), rendererUrl)
   const aiApiUrl = await resolveAiServiceUrl({
     configPath: path.join(currentDir, 'ai-service-config.json'),
     runtimeUrl: process.env.PETCAST_AI_API_URL,
@@ -264,8 +293,64 @@ if (ownsInstance) app.whenReady().then(async () => {
     dragOffset = null
   })
 
+  const trustedWindowEvent = (event: Electron.IpcMainEvent) => Boolean(mainWindow && !mainWindow.isDestroyed()
+    && event.sender === mainWindow.webContents && event.senderFrame === mainWindow.webContents.mainFrame)
+  const resizeCorners: readonly WindowResizeCorner[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right']
+
+  ipcMain.on('window:resize-start', (event, corner: unknown) => {
+    if (!trustedWindowEvent(event) || !mainWindow || !windowExpanded
+      || typeof corner !== 'string' || !resizeCorners.includes(corner as WindowResizeCorner)) return
+    const bounds = mainWindow.getBounds()
+    resizeState = {
+      corner: corner as WindowResizeCorner,
+      bounds,
+      pointer: screen.getCursorScreenPoint(),
+      area: screen.getDisplayMatching(bounds).workArea,
+    }
+    dragOffset = null
+  })
+
+  ipcMain.on('window:resize-move', event => {
+    if (!trustedWindowEvent(event) || !mainWindow || !resizeState || !windowExpanded) return
+    const pointer = screen.getCursorScreenPoint()
+    const { corner, bounds, area } = resizeState
+    const dx = pointer.x - resizeState.pointer.x
+    const dy = pointer.y - resizeState.pointer.y
+    const fromLeft = corner.endsWith('left')
+    const fromTop = corner.startsWith('top')
+    const horizontalLimit = fromLeft
+      ? bounds.x + bounds.width - (area.x + 12)
+      : area.x + area.width - 12 - bounds.x
+    const verticalLimit = fromTop
+      ? bounds.y + bounds.height - (area.y + 12)
+      : area.y + area.height - 12 - bounds.y
+    const minWidth = Math.min(MIN_EXPANDED.width, horizontalLimit)
+    const minHeight = Math.min(MIN_EXPANDED.height, verticalLimit)
+    const proposedWidth = fromLeft ? bounds.width - dx : bounds.width + dx
+    const proposedHeight = fromTop ? bounds.height - dy : bounds.height + dy
+    const width = Math.max(minWidth, Math.min(horizontalLimit, proposedWidth))
+    const height = Math.max(minHeight, Math.min(verticalLimit, proposedHeight))
+    mainWindow.setBounds({
+      x: fromLeft ? bounds.x + bounds.width - width : bounds.x,
+      y: fromTop ? bounds.y + bounds.height - height : bounds.y,
+      width,
+      height,
+    }, false)
+  })
+
+  ipcMain.on('window:resize-end', event => {
+    if (!trustedWindowEvent(event)) return
+    if (mainWindow && resizeState && windowExpanded) {
+      const bounds = mainWindow.getBounds()
+      expandedSize = { width: bounds.width, height: bounds.height }
+    }
+    resizeState = null
+  })
+
   ipcMain.handle('window:toggle-expanded', async (_event, expanded: boolean) => {
     if (!mainWindow) return
+    resizeState = null
+    windowExpanded = expanded
     if (expanded) {
       mainWindow.setResizable(true)
       compactBounds = mainWindow.getBounds()

@@ -53,6 +53,13 @@ test('preload runs in a sandbox-style CommonJS environment and exposes only name
   await bridge.readTaskExecutionArtifact('artifact-1')
   await bridge.applyTaskExecutionArtifact('artifact-1')
   await bridge.discardTaskExecutionArtifact('artifact-1')
+  await bridge.readCustomPet()
+  const customBytes = new Uint8Array([1, 2, 3])
+  await bridge.saveCustomPet(customBytes)
+  await bridge.deleteCustomPet()
+  bridge.beginResize('bottom-right')
+  bridge.resizeWindow()
+  bridge.endResize()
   assert.deepEqual(calls, [
     ['codex:read-usage', 'request-1'],
     ['codex:cancel-usage', 'request-1'],
@@ -77,6 +84,12 @@ test('preload runs in a sandbox-style CommonJS environment and exposes only name
     ['task-execution:artifact-read', 'artifact-1'],
     ['task-execution:artifact-apply', 'artifact-1'],
     ['task-execution:artifact-discard', 'artifact-1'],
+    ['custom-pet:read'],
+    ['custom-pet:save', customBytes],
+    ['custom-pet:delete'],
+    ['window:resize-start', 'bottom-right'],
+    ['window:resize-move'],
+    ['window:resize-end'],
   ])
   assert.equal(typeof bridge.loadGameSave, 'function')
   assert.equal(typeof bridge.beginDrag, 'function')

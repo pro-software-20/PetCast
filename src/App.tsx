@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CompactDevice, type MainPage } from './components/CompactDevice'
 import { AppearanceSettings } from './components/AppearanceSettings'
-import { loadAppearance } from './appearance/preferences'
+import { loadAppearance, saveAppearance } from './appearance/preferences'
 import { RiverScene } from './RiverScene'
 import { MockUsageControls } from './components/MockUsageControls'
 import { FishingGame } from './components/FishingGame'
@@ -23,6 +23,9 @@ import { useUsageConnection } from './usage/useUsageConnection'
 import { usageStatus } from './components/UsageSettings'
 import { UsageHistoryPanel } from './components/UsageHistoryPanel'
 import { useUsageHistory } from './history/useUsageHistory'
+import type { CustomPetAsset } from '../electron/customPetProtocol'
+
+type WindowResizeCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 
 const taskEvidenceAdapter = new TaskEvidenceAdapter()
 export default function App() {
@@ -33,7 +36,10 @@ export default function App() {
   const [expanded, setExpanded] = useState(false)
   const [page, setPage] = useState<MainPage>('home')
   const [appearance, setAppearance] = useState(loadAppearance)
+  const [customPetAsset, setCustomPetAsset] = useState<CustomPetAsset | null>(null)
+  const [petHeartBurst, setPetHeartBurst] = useState<{ id: number; x: number; y: number } | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [resizing, setResizing] = useState(false)
   const [dragDirection, setDragDirection] = useState<'left' | 'right'>('right')
   const [mockSaveUsage, setMockSaveUsage] = useState(() => createMockUsageState('balanced'))
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -79,9 +85,30 @@ export default function App() {
   const lastPointerScreenY = useRef(0)
   const dragDistance = useRef(0)
   const petPointerStart = useRef(false)
+  const petHeartOrigin = useRef({ x: 0, y: 0 })
+  const petHeartTimer = useRef<number | null>(null)
   const bubbleTimer = useRef<number | null>(null)
   const reactionTimer = useRef<number | null>(null)
   const analysis = useMemo(() => usage ? analyzeUsage(usage) : null, [usage])
+
+  useEffect(() => {
+    let active = true
+    if (!desktopApi) return () => { active = false }
+    void desktopApi.readCustomPet().then(result => {
+      if (!active) return
+      if (result.ok) {
+        setCustomPetAsset(result.asset)
+        if (!result.asset) {
+          setAppearance(current => {
+            if (current.petId !== 'custom') return current
+            const fallback = { ...current, petId: 'shark' }
+            try { return saveAppearance(fallback) } catch { return fallback }
+          })
+        }
+      }
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [desktopApi])
 
   const showPetMessage = (message?: string) => {
     if (dragDistance.current > 5) return
@@ -92,6 +119,15 @@ export default function App() {
     if (reactionTimer.current) window.clearTimeout(reactionTimer.current)
     bubbleTimer.current = window.setTimeout(() => setBubbleVisible(false), 4_500)
     reactionTimer.current = window.setTimeout(() => setReaction(null), 1_350)
+  }
+
+  const showPetHeartBurst = () => {
+    const id = Date.now()
+    if (petHeartTimer.current) window.clearTimeout(petHeartTimer.current)
+    setPetHeartBurst({ id, ...petHeartOrigin.current })
+    petHeartTimer.current = window.setTimeout(() => {
+      setPetHeartBurst(current => current?.id === id ? null : current)
+    }, 1_200)
   }
 
   const showFeedReaction = (fishName: string) => {
@@ -393,6 +429,7 @@ export default function App() {
   useEffect(() => () => {
     if (bubbleTimer.current) window.clearTimeout(bubbleTimer.current)
     if (reactionTimer.current) window.clearTimeout(reactionTimer.current)
+    if (petHeartTimer.current) window.clearTimeout(petHeartTimer.current)
   }, [])
 
   useEffect(() => {
@@ -400,7 +437,10 @@ export default function App() {
       if (!dragging) return
       desktopApi?.endDrag()
       setDragging(false)
-      if (petPointerStart.current && dragDistance.current <= 5) showPetMessage()
+      if (petPointerStart.current && dragDistance.current <= 5) {
+        showPetHeartBurst()
+        showPetMessage()
+      }
       petPointerStart.current = false
     }
     window.addEventListener('pointerup', finish)
@@ -411,11 +451,45 @@ export default function App() {
     }
   }, [desktopApi, dragging])
 
+  useEffect(() => {
+    if (!resizing) return
+    const move = () => desktopApi?.resizeWindow()
+    const finish = () => {
+      desktopApi?.endResize()
+      setResizing(false)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', finish, { once: true })
+    window.addEventListener('pointercancel', finish, { once: true })
+    return () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+    }
+  }, [desktopApi, resizing])
+
+  const startResize = (corner: WindowResizeCorner, event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!desktopApi || event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    setResizing(true)
+    desktopApi.beginResize(corner)
+  }
+
   const startDrag = (event: React.PointerEvent) => {
     if (event.button !== 0 || (event.target as HTMLElement).closest('button, input, textarea, select, a, [role=slider], [role=group], .task-analysis-panel, .usage-history-panel, .mailbox-panel, .appearance-frame, .quota-page-panel, .fishing-game, .home-panel, .fish-detail')) return
     setDragging(true)
     dragDistance.current = 0
-    petPointerStart.current = Boolean((event.target as HTMLElement).closest('.pet-wrap'))
+    const petTarget = (event.target as HTMLElement).closest<HTMLElement>('.pet-wrap')
+    petPointerStart.current = Boolean(petTarget)
+    if (petTarget) {
+      const petBounds = petTarget.getBoundingClientRect()
+      const cardBounds = event.currentTarget.getBoundingClientRect()
+      petHeartOrigin.current = {
+        x: petBounds.left - cardBounds.left + petBounds.width / 2,
+        y: petBounds.top - cardBounds.top + petBounds.height * .38,
+      }
+    }
     lastPointerScreenX.current = event.screenX
     lastPointerScreenY.current = event.screenY
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -496,17 +570,17 @@ export default function App() {
     setPage('quota'); setFishingOpen(false); setHomeOpen(false); setMailboxOpen(false); setTaskAnalysisOpen(false); setHistoryOpen(true)
   }
   return (
-    <main className={`app petcast-warm ${isBrowserFallback ? 'browser-mode' : 'desktop-mode'} ${expanded ? 'expanded' : 'compact'} ${dragging ? 'dragging' : ''}`}
+    <main className={`app petcast-warm ${isBrowserFallback ? 'browser-mode' : 'desktop-mode'} ${expanded ? 'expanded' : 'compact'} ${dragging ? 'dragging' : ''} ${resizing ? 'resizing' : ''}`}
       data-drag-direction={dragDirection} data-usage-source={connection.source} data-history-status={history.recordingState} data-usage-status={connection.reading?.status ?? 'loading'} data-page={expanded ? page : 'compact'}>
       <section className="card" style={isBrowserFallback ? { transform: `translate(${browserPosition.x}px, ${browserPosition.y}px)` } : undefined} onPointerDown={startDrag} onPointerMove={moveDrag}>
-        {!expanded && <CompactDevice appearance={appearance} usage={usage} status={usageReadStatus} stale={!fresh} onNavigate={target => void navigate(target)} onClose={desktopApi ? () => desktopApi.close() : undefined} />}
+        {!expanded && <CompactDevice appearance={appearance} customPetImage={customPetAsset?.dataUrl} usage={usage} status={usageReadStatus} stale={!fresh} onNavigate={target => void navigate(target)} onClose={desktopApi ? () => desktopApi.close() : undefined} />}
         {expanded && <>
-          <RiverScene usage={usage} analysis={analysis} appearance={appearance} status={usageReadStatus} stale={!fresh}
+          <RiverScene usage={usage} analysis={analysis} appearance={appearance} customPetImage={customPetAsset?.dataUrl} status={usageReadStatus} stale={!fresh}
             petActive={page === 'home' && !homeOpen && !fishingOpen && !mailboxOpen && !historyOpen && !taskAnalysisOpen}
             onStartFishing={() => { setHomeOpen(false); setMailboxOpen(false); setTaskAnalysisOpen(false); setHistoryOpen(false); if (fresh) setFishingOpen(true) }}
             onOpenHome={openRoom} onOpenMailbox={openMailbox} unreadMailCount={unreadMailIds.length} />
-          {homeOpen && page === 'home' && <HomeScene aquarium={aquarium} codex={codex} capacity={AQUARIUM_CAPACITY} petId={appearance.petId} petName={appearance.petName || '布罗艾'} onClose={() => setHomeOpen(false)} onFeed={fish => handleStoredFish(fish, 'fed')} onRelease={fish => handleStoredFish(fish, 'released')} />}
-          {page === 'appearance' && <AppearanceSettings value={appearance} onChange={setAppearance} onClose={() => void navigate('home')} />}
+          {homeOpen && page === 'home' && <HomeScene aquarium={aquarium} codex={codex} capacity={AQUARIUM_CAPACITY} petId={appearance.petId} petName={appearance.petName || '布罗艾'} customPetImage={customPetAsset?.dataUrl} onClose={() => setHomeOpen(false)} onFeed={fish => handleStoredFish(fish, 'fed')} onRelease={fish => handleStoredFish(fish, 'released')} />}
+          {page === 'appearance' && <AppearanceSettings value={appearance} customPetAsset={customPetAsset} onCustomPetAssetChange={setCustomPetAsset} onChange={setAppearance} onClose={() => void navigate('home')} />}
           {fishingOpen && fresh && usage && <FishingGame usage={usage} petName={appearance.petName} aquarium={aquarium} capacity={AQUARIUM_CAPACITY} onCatch={handleCatch} onKeep={handleKeep} onFeed={handleFeedCatch} onRelease={handleReleaseCatch} onReplace={handleReplaceFish} onClose={() => setFishingOpen(false)} />}
           {mailboxOpen && <MailboxPanel items={mailItems} usage={fresh ? usage : null} onClose={() => setMailboxOpen(false)} />}
           {taskAnalysisOpen && page === 'tasks' && (
@@ -524,10 +598,13 @@ export default function App() {
           <button className="expand-button" onClick={toggleExpanded} aria-label="收起场景"><span>收起</span></button>
         </>}
         {expanded && unreadMailIds.length > 0 && <button className="notification-envelope is-expanded" onClick={openMailbox} aria-label={`查看${unreadMailIds.length}封新消息`}><span>✉</span><b>{unreadMailIds.length}</b></button>}
+        {petHeartBurst && <div key={petHeartBurst.id} className="pet-heart-burst" style={{ left: petHeartBurst.x, top: petHeartBurst.y }} aria-hidden="true">{Array.from({ length: 9 }, (_, index) => <i className="pet-heart-particle" key={index} />)}</div>}
         {bubbleVisible && <div className={`pet-bubble ${expanded ? 'bubble-expanded' : 'device-bubble'}`} role="status"><button aria-label="关闭提醒" onClick={() => setBubbleVisible(false)}>×</button><strong>{appearance.petName || '布罗艾'}提醒</strong><span>{bubbleMessage ?? (fresh ? analysis?.message : '额度暂未更新，连接恢复后会自动刷新。')}</span></div>}
         {dragging && <div className="drag-pill">移动中</div>}
       </section>
-
+      {expanded && desktopApi && (['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const).map(corner => <button
+        type="button" key={corner} className={`window-resize-handle resize-${corner}`} aria-label={`从${corner === 'top-left' ? '左上角' : corner === 'top-right' ? '右上角' : corner === 'bottom-left' ? '左下角' : '右下角'}调整窗口大小`}
+        onPointerDown={event => startResize(corner, event)} />)}
     </main>
   )
 }

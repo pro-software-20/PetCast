@@ -1,5 +1,6 @@
 import type { PetAnimation, PetAnimationClip, PetDefinition, SceneDefinition } from '../types/appearance'
 export const assetUrl = (path: string) => `${import.meta.env?.BASE_URL ?? '/'}assets/${path}`
+export const CUSTOM_PET_ID = 'custom'
 const IDLE_FRAMES = Array.from({ length: 16 }, (_, index) => [index % 4, Math.floor(index / 4)] as const)
 const MOVING_FRAMES = Array.from({ length: 8 }, (_, index) => [index % 4, 1 + Math.floor(index / 4)] as const)
 const native = (id: string, action: string) => assetUrl(`pets/rest-breathing-20261025/native/${id}-${action}.png`)
@@ -14,6 +15,7 @@ const pet = (id: string, name: string, movingFrameSize: number): PetDefinition =
     frameWidth: 256, frameHeight: 256, columns: 4, rows: 4, animations: { idle, [getPetMovingAction(id)]: moving } }
 }
 export const PETS: readonly PetDefinition[] = [pet('cat', '猫', 448), pet('dog', '狗', 448), pet('shark', '鲨鱼', 464), pet('chicken', '鸡', 448), pet('rabbit', '兔子', 336)]
+export const isPetId = (id: unknown): id is string => id === CUSTOM_PET_ID || PETS.some(pet => pet.id === id)
 export const getPet = (id: string) => PETS.find(pet => pet.id === id) ?? PETS[2]
 export const SCENES: readonly SceneDefinition[] = [
   { id: 'river', name: '河畔小屋', backgroundUrl: assetUrl('scenes/river-cartoon.png'), themeClass: 'warm-river' },

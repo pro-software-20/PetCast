@@ -10,7 +10,14 @@ const seeded = seed => () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>
 test('pet activity uses separate bounded sand and water habitats', () => {
   for (const id of ['cat','dog','chicken','rabbit']) assert.equal(roaming.getPetHabitat(id).kind, 'sand')
   assert.equal(roaming.getPetHabitat('shark').kind, 'water')
-  assert.equal(roaming.getPetHabitat('unknown').kind, 'water')
+  assert.equal(roaming.getPetHabitat('custom').kind, 'sand')
+  assert.equal(roaming.getPetHabitat('unknown').kind, 'sand')
+})
+test('custom uploads use the inverse mirror rule without changing built-in pets', () => {
+  assert.equal(roaming.getPetFacingScale('cat', 'right'), 1)
+  assert.equal(roaming.getPetFacingScale('cat', 'left'), -1)
+  assert.equal(roaming.getPetFacingScale('custom', 'right'), -1)
+  assert.equal(roaming.getPetFacingScale('custom', 'left'), 1)
 })
 test('five-minute roaming stays in bounds, rests without drifting, and turns at least 18 seconds apart', () => {
   for (const id of ['cat','shark','rabbit']) {

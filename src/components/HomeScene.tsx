@@ -10,12 +10,13 @@ type HomeSceneProps = {
   capacity: number
   petId: string
   petName: string
+  customPetImage?: string | null
   onClose: () => void
   onFeed: (fish: KeptFish) => void
   onRelease: (fish: KeptFish) => void
 }
 
-export function HomeScene({ aquarium, codex, capacity, petId, petName, onClose, onFeed, onRelease }: HomeSceneProps) {
+export function HomeScene({ aquarium, codex, capacity, petId, petName, customPetImage, onClose, onFeed, onRelease }: HomeSceneProps) {
   const [view, setView] = useState<'room' | 'codex'>('room')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selectedFish = aquarium.find((fish) => fish.id === selectedId) ?? null
@@ -30,7 +31,7 @@ export function HomeScene({ aquarium, codex, capacity, petId, petName, onClose, 
   return (
     <section className="home-scene cartoon-room" aria-label={`${petName}的河边小屋`}>
       <div className="room-art" />
-      <div className="room-pet"><Pet petId={petId} name={petName} dragging={false} expanded dragDirection="right" mood="normal" reaction={null} action="idle" /></div>
+      <div className="room-pet"><Pet petId={petId} name={petName} customPetImage={customPetImage} dragging={false} expanded dragDirection="right" mood="normal" reaction={null} action="idle" /></div>
       <button className="home-back" onClick={onClose}>← 返回河边</button>
       <div className="home-title"><strong>{petName}的小屋</strong></div>
       <button className="codex-frame" onClick={() => setView('codex')} aria-label="打开墙上的鱼类图鉴">

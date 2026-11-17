@@ -114,3 +114,11 @@
 .petcast-warm .fishing-card .catch-actions .keep-action { background:#d8e3c5; color:#61774f; }
 .petcast-warm .fishing-card .catch-actions .feed-action,.petcast-warm .fishing-card .replacement-actions .feed-action { background:#f0d6b3; color:#956d41; }
 .petcast-warm .fishing-card .catch-actions .release-action,.petcast-warm .fishing-card .replacement-actions .release-action { background:#d6e5e4; color:#668589; }
+.petcast-warm.desktop-mode.expanded { position:relative; }
+.petcast-warm .window-resize-handle { position:absolute; z-index:220; width:24px; height:24px; padding:0; border:0; border-radius:0; background:transparent; box-shadow:none; }
+.petcast-warm .window-resize-handle::after { content:''; position:absolute; width:10px; height:10px; opacity:.56; border-color:#8a633f; }
+.petcast-warm .resize-top-left { top:0; left:0; cursor:nwse-resize; }.petcast-warm .resize-top-left::after { top:5px; left:5px; border-top:2px solid; border-left:2px solid; }
+.petcast-warm .resize-top-right { top:0; right:0; cursor:nesw-resize; }.petcast-warm .resize-top-right::after { top:5px; right:5px; border-top:2px solid; border-right:2px solid; }
+.petcast-warm .resize-bottom-left { bottom:0; left:0; cursor:nesw-resize; }.petcast-warm .resize-bottom-left::after { bottom:5px; left:5px; border-bottom:2px solid; border-left:2px solid; }
+.petcast-warm .resize-bottom-right { right:0; bottom:0; cursor:nwse-resize; }.petcast-warm .resize-bottom-right::after { right:5px; bottom:5px; border-right:2px solid; border-bottom:2px solid; }
+.petcast-warm .window-resize-handle:hover::after,.petcast-warm .window-resize-handle:focus-visible::after,.petcast-warm.resizing .window-resize-handle::after { opacity:1; }
