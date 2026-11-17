@@ -29,7 +29,12 @@ type WindowResizeCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-rig
 
 let mainWindow: BrowserWindow | null = null
 let compactBounds: Electron.Rectangle | null = null
-let dragOffset: { x: number; y: number } | null = null
+let dragState: {
+  offsetX: number
+  offsetY: number
+  width: number
+  height: number
+} | null = null
 let expandedSize = { ...EXPANDED }
 let windowExpanded = false
 let resizeState: { corner: WindowResizeCorner; bounds: Electron.Rectangle; pointer: Electron.Point; area: Electron.Rectangle } | null = null
@@ -280,17 +285,27 @@ if (ownsInstance) app.whenReady().then(async () => {
     if (!mainWindow) return
     const pointer = screen.getCursorScreenPoint()
     const bounds = mainWindow.getBounds()
-    dragOffset = { x: pointer.x - bounds.x, y: pointer.y - bounds.y }
+    dragState = {
+      offsetX: pointer.x - bounds.x,
+      offsetY: pointer.y - bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+    }
   })
 
   ipcMain.on('window:drag-move', () => {
-    if (!mainWindow || !dragOffset) return
+    if (!mainWindow || !dragState) return
     const pointer = screen.getCursorScreenPoint()
-    mainWindow.setPosition(pointer.x - dragOffset.x, pointer.y - dragOffset.y, false)
+    mainWindow.setBounds({
+      x: pointer.x - dragState.offsetX,
+      y: pointer.y - dragState.offsetY,
+      width: dragState.width,
+      height: dragState.height,
+    }, false)
   })
 
   ipcMain.on('window:drag-end', () => {
-    dragOffset = null
+    dragState = null
   })
 
   const trustedWindowEvent = (event: Electron.IpcMainEvent) => Boolean(mainWindow && !mainWindow.isDestroyed()
@@ -307,7 +322,7 @@ if (ownsInstance) app.whenReady().then(async () => {
       pointer: screen.getCursorScreenPoint(),
       area: screen.getDisplayMatching(bounds).workArea,
     }
-    dragOffset = null
+    dragState = null
   })
 
   ipcMain.on('window:resize-move', event => {
@@ -352,7 +367,9 @@ if (ownsInstance) app.whenReady().then(async () => {
     resizeState = null
     windowExpanded = expanded
     if (expanded) {
-      mainWindow.setResizable(true)
+      // Four explicit renderer handles own resizing. Native resizing on a
+      // transparent frameless window can change its size during interior drag.
+      mainWindow.setResizable(false)
       compactBounds = mainWindow.getBounds()
       const display = screen.getDisplayMatching(compactBounds)
       const area = display.workArea
