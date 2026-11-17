@@ -40,6 +40,8 @@ export default function App() {
   const [petHeartBurst, setPetHeartBurst] = useState<{ id: number; x: number; y: number } | null>(null)
   const [dragging, setDragging] = useState(false)
   const [resizing, setResizing] = useState(false)
+  const pointerPressed = useRef(false)
+  const draggingRef = useRef(false)
   const [dragDirection, setDragDirection] = useState<'left' | 'right'>('right')
   const [mockSaveUsage, setMockSaveUsage] = useState(() => createMockUsageState('balanced'))
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -434,10 +436,13 @@ export default function App() {
 
   useEffect(() => {
     const finish = () => {
-      if (!dragging) return
-      desktopApi?.endDrag()
+      if (!pointerPressed.current) return
+      pointerPressed.current = false
+      const wasDragging = draggingRef.current
+      draggingRef.current = false
+      if (wasDragging) desktopApi?.endDrag()
       setDragging(false)
-      if (petPointerStart.current && dragDistance.current <= 5) {
+      if (!wasDragging && petPointerStart.current && dragDistance.current <= 5) {
         showPetHeartBurst()
         showPetMessage()
       }
@@ -449,7 +454,7 @@ export default function App() {
       window.removeEventListener('pointerup', finish)
       window.removeEventListener('pointercancel', finish)
     }
-  }, [desktopApi, dragging])
+  }, [desktopApi])
 
   useEffect(() => {
     if (!resizing) return
@@ -478,7 +483,9 @@ export default function App() {
 
   const startDrag = (event: React.PointerEvent) => {
     if (event.button !== 0 || (event.target as HTMLElement).closest('button, input, textarea, select, a, [role=slider], [role=group], .task-analysis-panel, .usage-history-panel, .mailbox-panel, .appearance-frame, .quota-page-panel, .fishing-game, .home-panel, .fish-detail')) return
-    setDragging(true)
+    pointerPressed.current = true
+    draggingRef.current = false
+    setDragging(false)
     dragDistance.current = 0
     const petTarget = (event.target as HTMLElement).closest<HTMLElement>('.pet-wrap')
     petPointerStart.current = Boolean(petTarget)
@@ -493,9 +500,7 @@ export default function App() {
     lastPointerScreenX.current = event.screenX
     lastPointerScreenY.current = event.screenY
     event.currentTarget.setPointerCapture(event.pointerId)
-    if (desktopApi) {
-      desktopApi.beginDrag()
-    } else {
+    if (!desktopApi) {
       browserDragOrigin.current = {
         pointerX: event.clientX,
         pointerY: event.clientY,
@@ -506,7 +511,7 @@ export default function App() {
   }
 
   const moveDrag = (event: React.PointerEvent) => {
-    if (!dragging || !event.buttons) return
+    if (!pointerPressed.current || !event.buttons) return
     const horizontalDelta = event.screenX - lastPointerScreenX.current
     const verticalDelta = event.screenY - lastPointerScreenY.current
     dragDistance.current += Math.hypot(horizontalDelta, verticalDelta)
@@ -515,6 +520,12 @@ export default function App() {
     }
     lastPointerScreenX.current = event.screenX
     lastPointerScreenY.current = event.screenY
+    if (!draggingRef.current && dragDistance.current <= 5) return
+    if (!draggingRef.current) {
+      draggingRef.current = true
+      setDragging(true)
+      desktopApi?.beginDrag()
+    }
     if (desktopApi) {
       desktopApi.moveDrag()
     } else {
