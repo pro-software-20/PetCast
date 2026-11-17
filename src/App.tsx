@@ -4,7 +4,6 @@ import { AppearanceSettings } from './components/AppearanceSettings'
 import { loadAppearance, saveAppearance } from './appearance/preferences'
 import { RiverScene } from './RiverScene'
 import { MockUsageControls } from './components/MockUsageControls'
-import { UsageBoard } from './components/UsageBoard'
 import { FishingGame } from './components/FishingGame'
 import { HomeScene } from './components/HomeScene'
 import { MailboxPanel } from './components/MailboxPanel'
@@ -21,7 +20,7 @@ import type { UsageScenarioId, UsageState } from './types/usage'
 import { createMockUsageState, MockUsageProvider } from './usage/MockUsageProvider'
 import { MockResetSignalProvider } from './usage/MockResetSignalProvider'
 import { useUsageConnection } from './usage/useUsageConnection'
-import { UsageSettings, usageStatus } from './components/UsageSettings'
+import { usageStatus } from './components/UsageSettings'
 import { UsageHistoryPanel } from './components/UsageHistoryPanel'
 import { useUsageHistory } from './history/useUsageHistory'
 import type { CustomPetAsset } from '../electron/customPetProtocol'
@@ -561,6 +560,7 @@ export default function App() {
     setPage(target)
     setFishingOpen(false); setHomeOpen(false); setMailboxOpen(false); setHistoryOpen(false); setSettingsOpen(false)
     setTaskAnalysisOpen(target === 'tasks')
+    setHistoryOpen(target === 'quota')
     if (!expanded) { setExpanded(true); await desktopApi?.toggleExpanded(true) }
   }
   const openRoom = () => {
@@ -581,7 +581,6 @@ export default function App() {
             onOpenHome={openRoom} onOpenMailbox={openMailbox} unreadMailCount={unreadMailIds.length} />
           {homeOpen && page === 'home' && <HomeScene aquarium={aquarium} codex={codex} capacity={AQUARIUM_CAPACITY} petId={appearance.petId} petName={appearance.petName || '布罗艾'} customPetImage={customPetAsset?.dataUrl} onClose={() => setHomeOpen(false)} onFeed={fish => handleStoredFish(fish, 'fed')} onRelease={fish => handleStoredFish(fish, 'released')} />}
           {page === 'appearance' && <AppearanceSettings value={appearance} customPetAsset={customPetAsset} onCustomPetAssetChange={setCustomPetAsset} onChange={setAppearance} onClose={() => void navigate('home')} />}
-          {page === 'quota' && !historyOpen && <section className="quota-page" aria-label="真实额度页面"><div className="room-art" /><div className="room-nameplate">{appearance.petName || '布罗艾'}的小屋</div><div className="quota-page-panel"><header className="quota-page-heading"><h1>额度数据</h1><button type="button" className="quota-page-close" onClick={() => void navigate('home')} aria-label="关闭真实额度" title="关闭真实额度">×</button></header><UsageSettings state={connection} desktop={!isBrowserFallback} onSelect={connection.select} onRefresh={() => void connection.refresh()} /><UsageBoard usage={usage} analysis={analysis} stale={!fresh} status={usageReadStatus} /></div></section>}
           {fishingOpen && fresh && usage && <FishingGame usage={usage} petName={appearance.petName} aquarium={aquarium} capacity={AQUARIUM_CAPACITY} onCatch={handleCatch} onKeep={handleKeep} onFeed={handleFeedCatch} onRelease={handleReleaseCatch} onReplace={handleReplaceFish} onClose={() => setFishingOpen(false)} />}
           {mailboxOpen && <MailboxPanel items={mailItems} usage={fresh ? usage : null} onClose={() => setMailboxOpen(false)} />}
           {taskAnalysisOpen && page === 'tasks' && (
@@ -593,22 +592,16 @@ export default function App() {
                 : undefined}
             /></section>
           )}
-          {historyOpen && <UsageHistoryPanel key={`${historyScope?.source}-${historyScope?.scopeId}`} scope={historyScope} store={history.store} currentQuota={historyScope && usage ? { ...historyScope, fresh, sampledAt: usage.sampledAt.toISOString(), shortRemaining: usage.shortWindowRemaining, weeklyRemaining: usage.weeklyRemaining, shortResetAt: usage.shortWindowResetAt.toISOString(), weeklyResetAt: usage.weeklyResetAt.toISOString() } : null} revision={history.revision} recordStatus={history.status} onClear={scope => history.recorder.clear(scope)} onClose={() => setHistoryOpen(false)} />}
-          <nav className="wood-nav" aria-label="主导航">{([{ id: 'home', label: '主页' }, { id: 'appearance', label: '形象' }, { id: 'tasks', label: '任务分析' }, { id: 'quota', label: '真实额度' }] as const).map(item => <button key={item.id} aria-current={page === item.id ? 'page' : undefined} onClick={() => void navigate(item.id)}>{item.label}</button>)}</nav>
-          <header className="warm-window-actions"><span title={usageReadStatus}>{usageReadStatus}</span>{desktopApi && <button className="close" onClick={() => desktopApi.close()} aria-label="关闭">×</button>}</header>
+          {historyOpen && <UsageHistoryPanel key={`${historyScope?.source}-${historyScope?.scopeId}`} scope={historyScope} store={history.store} currentQuota={historyScope && usage ? { ...historyScope, fresh, sampledAt: usage.sampledAt.toISOString(), shortRemaining: usage.shortWindowRemaining, weeklyRemaining: usage.weeklyRemaining, shortResetAt: usage.shortWindowResetAt.toISOString(), weeklyResetAt: usage.weeklyResetAt.toISOString() } : null} revision={history.revision} recordStatus={history.status} onClear={scope => history.recorder.clear(scope)} onClose={() => void navigate('home')} />}
+          <nav className="wood-nav" aria-label="主导航">{([{ id: 'home', label: '主页' }, { id: 'appearance', label: '形象' }, { id: 'tasks', label: '任务分析' }, { id: 'quota', label: '报告与建议' }] as const).map(item => <button key={item.id} aria-current={page === item.id ? 'page' : undefined} onClick={() => void navigate(item.id)}>{item.label}</button>)}</nav>
+          <header className="warm-window-actions"><button type="button" disabled={!fresh && !autoFishingEnabled} onClick={toggleAutoFishing}>{autoFishingEnabled ? '关闭自动钓鱼' : '开启自动钓鱼'}</button>{desktopApi && <button className="close" onClick={() => desktopApi.close()} aria-label="关闭">×</button>}</header>
           <button className="expand-button" onClick={toggleExpanded} aria-label="收起场景"><span>收起</span></button>
         </>}
         {expanded && unreadMailIds.length > 0 && <button className="notification-envelope is-expanded" onClick={openMailbox} aria-label={`查看${unreadMailIds.length}封新消息`}><span>✉</span><b>{unreadMailIds.length}</b></button>}
         {petHeartBurst && <div key={petHeartBurst.id} className="pet-heart-burst" style={{ left: petHeartBurst.x, top: petHeartBurst.y }} aria-hidden="true">{Array.from({ length: 9 }, (_, index) => <i className="pet-heart-particle" key={index} />)}</div>}
-        {bubbleVisible && <div className={`pet-bubble ${expanded ? 'bubble-expanded' : 'device-bubble'}`} role="status"><button aria-label="关闭提醒" onClick={() => setBubbleVisible(false)}>×</button><strong>{appearance.petName || '布罗艾'}提醒</strong><span>{bubbleMessage ?? (fresh ? analysis?.message : '额度暂未更新，请打开真实额度页面查看状态。')}</span></div>}
+        {bubbleVisible && <div className={`pet-bubble ${expanded ? 'bubble-expanded' : 'device-bubble'}`} role="status"><button aria-label="关闭提醒" onClick={() => setBubbleVisible(false)}>×</button><strong>{appearance.petName || '布罗艾'}提醒</strong><span>{bubbleMessage ?? (fresh ? analysis?.message : '额度暂未更新，连接恢复后会自动刷新。')}</span></div>}
         {dragging && <div className="drag-pill">移动中</div>}
       </section>
-      {expanded && <aside className="usage-sidecar">
-        <button className="history-open" onClick={openHistory}>使用历史与报告</button>
-        {(page !== 'quota' || historyOpen) && <UsageSettings state={connection} desktop={!isBrowserFallback} onSelect={connection.select} onRefresh={() => void connection.refresh()} />}
-        {connection.source === 'real' && <button className="auto-fishing-toggle" disabled={!fresh && !autoFishingEnabled} onClick={toggleAutoFishing}>{autoFishingEnabled ? '关闭自动钓鱼' : '开启自动钓鱼'}</button>}
-        {connection.source === 'mock' && usage && fresh && <MockUsageControls usage={usage} onScenario={selectScenario} onPatch={patchUsage} onMockResetSignal={triggerMockResetSignal} resetWatchEnabled={resetWatchEnabled} resetWatchNextAt={resetWatchNextAt} resetCheckStatus={resetCheckStatus} onToggleResetWatch={toggleResetWatch} autoFishingEnabled={autoFishingEnabled} autoFishingNextAt={autoFishingNextAt} onToggleAutoFishing={toggleAutoFishing} onRunAutoFishing={runAutoFishingNow} onClearCodexHistory={clearCodexHistory} saveStatus={saveStatus} />}
-      </aside>}
       {expanded && desktopApi && (['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const).map(corner => <button
         type="button" key={corner} className={`window-resize-handle resize-${corner}`} aria-label={`从${corner === 'top-left' ? '左上角' : corner === 'top-right' ? '右上角' : corner === 'bottom-left' ? '左下角' : '右下角'}调整窗口大小`}
         onPointerDown={event => startResize(corner, event)} />)}

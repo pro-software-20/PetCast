@@ -39,6 +39,11 @@ test('preload runs in a sandbox-style CommonJS environment and exposes only name
   const planningInput = { requestId: 'plan-1', input: { prompt: 'test' } }
   await bridge.planTaskWithDeepSeek(planningInput)
   bridge.cancelDeepSeekTaskPlan('plan-1')
+  const deepSeekDispatch = { dispatchId: 'dispatch-1' }
+  const deepSeekReference = { dispatchId: 'dispatch-1', adapterExecutionId: 'execution-1', taskId: 'task-1' }
+  await bridge.dispatchDeepSeekExecution(deepSeekDispatch)
+  await bridge.inspectDeepSeekExecution(deepSeekReference)
+  await bridge.cancelDeepSeekExecution(deepSeekReference)
   await bridge.selectTaskWorkspace('workspace-1')
   bridge.cancelTaskWorkspace('workspace-1')
   const executionInput = { requestId: 'prepare-1' }
@@ -68,6 +73,9 @@ test('preload runs in a sandbox-style CommonJS environment and exposes only name
     ['prompt:optimize', promptInput],
     ['task-plan:create', planningInput],
     ['task-plan:cancel', 'plan-1'],
+    ['deepseek-execution:dispatch', deepSeekDispatch],
+    ['deepseek-execution:inspect', deepSeekReference],
+    ['deepseek-execution:cancel', deepSeekReference],
     ['workspace:select', 'workspace-1'],
     ['workspace:cancel', 'workspace-1'],
     ['task-execution:prepare', executionInput],

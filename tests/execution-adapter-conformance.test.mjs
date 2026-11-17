@@ -6,6 +6,12 @@ const { runExecutionAdapterConformance } = await loadTs('../src/orchestration/ad
 const {
   createInMemoryExecutionAdapterConformanceFixture,
 } = await loadTs('../src/orchestration/executionAdapterFixtures.ts')
+const {
+  createDeepSeekExecutionAdapterConformanceFixture,
+  createDeepSeekExecutionConformanceRequest,
+  FakeDeepSeekExecutionClient,
+} = await loadTs('../src/orchestration/deepSeekExecutionFixture.ts')
+const { DeepSeekExecutionAdapter } = await loadTs('../src/orchestration/DeepSeekExecutionAdapter.ts')
 
 test('standard in-memory adapter passes the complete zero-network conformance suite', async () => {
   const fixture = createInMemoryExecutionAdapterConformanceFixture()
@@ -89,6 +95,27 @@ test('standard fixture rejects a conflicting dispatch id', async () => {
   const fixture = createInMemoryExecutionAdapterConformanceFixture()
   const report = await runExecutionAdapterConformance(fixture)
   assert.equal(report.checks.find(check => check.id === 'dispatch.conflict')?.passed, true)
+})
+
+test('A DeepSeek API adapter passes the shared zero-network conformance suite', async () => {
+  const report = await runExecutionAdapterConformance(
+    createDeepSeekExecutionAdapterConformanceFixture(),
+  )
+  assert.equal(report.providerId, 'deepseek')
+  assert.equal(report.executionMode, 'api')
+  assert.equal(report.passed, true, JSON.stringify(report.checks.filter(check => !check.passed)))
+})
+
+test('A DeepSeek adapter starts the provider only once for a repeated dispatch id', async () => {
+  const client = new FakeDeepSeekExecutionClient('complete')
+  const adapter = new DeepSeekExecutionAdapter(client)
+  const request = createDeepSeekExecutionConformanceRequest()
+  const first = await adapter.dispatch(request)
+  const second = await adapter.dispatch(structuredClone(request))
+
+  assert.equal(first.ok, true)
+  assert.deepEqual(second, first)
+  assert.equal(client.providerStartCallCount, 1)
 })
 
 test('runner rejects receipts with unknown fields', async () => {

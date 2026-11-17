@@ -19,6 +19,11 @@ import {
   type TaskCoordinationStore,
 } from '../orchestration/TaskCoordinationStore'
 import {
+  LocalTaskCoordinationAuditStore,
+  type TaskCoordinationAuditStore,
+} from '../orchestration/TaskCoordinationAuditStore'
+import { appendTaskCoordinationAuditEvent } from '../orchestration/taskCoordinationAudit'
+import {
   LocalTaskAcceptanceStore,
   type TaskAcceptanceStore,
 } from '../orchestration/TaskAcceptanceStore'
@@ -80,6 +85,7 @@ export interface TaskAnalysisPanelProps {
   sessionStore?: TaskSessionStore
   coordinationAdapters?: ExecutionAdapterRegistry
   coordinationStore?: TaskCoordinationStore
+  coordinationAuditStore?: TaskCoordinationAuditStore
   evaluationAdapter?: TaskEvaluationAdapter
   acceptanceStore?: TaskAcceptanceStore
   acceptancePolicy?: AcceptancePolicy
@@ -92,6 +98,7 @@ const defaultLocalBrainProvider = new LocalBrainProvider()
 const defaultDeepSeekBrainProvider = new DeepSeekBrainProvider()
 const defaultSessionStore = new LocalTaskSessionStore()
 const defaultCoordinationStore = new LocalTaskCoordinationStore()
+const defaultCoordinationAuditStore = new LocalTaskCoordinationAuditStore()
 const defaultCoordinationAdapters = new MapExecutionAdapterRegistry()
 const defaultAcceptanceStore = new LocalTaskAcceptanceStore()
 const defaultAcceptancePolicy: AcceptancePolicy = {
@@ -142,6 +149,7 @@ export function TaskAnalysisPanel({
   sessionStore = defaultSessionStore,
   coordinationAdapters = defaultCoordinationAdapters,
   coordinationStore = defaultCoordinationStore,
+  coordinationAuditStore = defaultCoordinationAuditStore,
   evaluationAdapter,
   acceptanceStore = defaultAcceptanceStore,
   acceptancePolicy = defaultAcceptancePolicy,
@@ -335,18 +343,20 @@ export function TaskAnalysisPanel({
     const controller = createTaskCoordinationController({
       session: taskSession,
       coordinationStore,
+      auditStore: coordinationAuditStore,
       sessionStore,
       adapters: coordinationAdapters,
       onSessionChange: setTaskSession,
     })
     coordinationController.current = controller
     const unsubscribe = controller.subscribe(setCoordinationSnapshot)
+    void controller.refreshAudit()
     return () => {
       unsubscribe()
       controller.dispose()
       if (coordinationController.current === controller) coordinationController.current = null
     }
-  }, [taskSession?.id, coordinationAdapters, coordinationStore, sessionStore])
+  }, [taskSession?.id, coordinationAdapters, coordinationStore, coordinationAuditStore, sessionStore])
 
   useEffect(() => {
     const requestId = acceptanceLoadId.current + 1
@@ -425,6 +435,26 @@ export function TaskAnalysisPanel({
     if (persistImmediately) void persistSession(session)
   }
 
+  const recordCoordinationAudit = async (
+    event: Parameters<NonNullable<TaskCoordinationController['recordAudit']>>[0],
+  ) => {
+    if (!taskSession) return
+    const context = { sessionId: taskSession.id, planId: taskSession.plan.id, taskIds: taskSession.plan.tasks.map(task => task.id) }
+    const loaded = await coordinationAuditStore.load(context)
+    if (!loaded.ok) {
+      setStorageNotice(loaded.message)
+      return
+    }
+    const appended = appendTaskCoordinationAuditEvent(loaded.state, context, event)
+    if (!appended.ok) {
+      setStorageNotice(appended.message)
+      return
+    }
+    const saved = await coordinationAuditStore.save(appended.state)
+    if (!saved.ok) setStorageNotice(saved.message)
+    else await coordinationController.current?.refreshAudit()
+  }
+
   const handleRequestEvaluation = async (taskId: string, evidence?: import('../types/taskCoordination').EvaluationEvidenceRef[]) => {
     if (!taskSession || acceptanceBlocked || evaluationController.current) return
     const controller = new AbortController()
@@ -432,6 +462,7 @@ export function TaskAnalysisPanel({
     evaluationController.current = { taskId, sessionId, controller }
     setEvaluatingTaskId(taskId)
     setEvaluationError(null)
+    void recordCoordinationAudit({ type: 'evaluation-requested', level: 'info', summary: '用户请求 D 评价建议。', taskId })
     const outcome = await requestTaskEvaluation({
       session: taskSession,
       taskId,
@@ -448,6 +479,17 @@ export function TaskAnalysisPanel({
     setEvaluatingTaskId(null)
     if (outcome.ok) {
       setAcceptanceState(outcome.state)
+      const record = outcome.state.records.find(item => item.taskId === taskId)
+      if (record) {
+        void recordCoordinationAudit({
+          type: 'evaluation-received', level: 'info', summary: `已收到 D 评价建议：${record.report.verdict}。`,
+          taskId, dispatchId: record.dispatchId, attempt: record.attempt,
+        })
+        if (record.decision) void recordCoordinationAudit({
+          type: 'acceptance-decision', level: 'info', summary: `B 已生成建议动作：${record.decision.action}。`,
+          taskId, dispatchId: record.dispatchId, attempt: record.attempt,
+        })
+      }
       setAcceptanceNotice(outcome.reused ? '已加载当前派发的既有评价，没有再次调用 D 评价器。' : null)
     } else if (outcome.code !== 'CANCELLED') {
       setEvaluationError({ taskId, message: `${outcome.message}（${outcome.code}）` })
@@ -1028,6 +1070,7 @@ export function TaskAnalysisPanel({
           onCoordinationCancelTask={(taskId) => coordinationController.current?.cancelTask(taskId) ?? Promise.resolve()}
           onCoordinationResolveTask={(taskId, dispatchId, action, riskAcknowledged) => coordinationController.current?.resolveTask(taskId, dispatchId, action, riskAcknowledged) ?? Promise.resolve()}
           onCoordinationClear={() => coordinationController.current?.clearState() ?? Promise.resolve()}
+          onAuditEvent={recordCoordinationAudit}
         />
       )}
     </section>

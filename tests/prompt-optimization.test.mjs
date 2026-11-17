@@ -4,6 +4,7 @@ import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { loadTs } from './load-ts.mjs'
+import { closeLoopback, listenLoopback } from './http-test-server.mjs'
 
 const protocol = await loadTs('../electron/promptOptimizationProtocol.ts')
 const { requestPromptOptimization } = await loadTs('../electron/promptOptimizationClient.ts')
@@ -140,12 +141,6 @@ test('daily limiter persists counters and stores only HMAC identifiers', async (
   assert.equal((await restored.consume(installId, '203.0.113.9', now)).allowed, false)
 })
 
-const listen = server => new Promise((resolve, reject) => {
-  server.once('error', reject)
-  server.listen(0, '127.0.0.1', () => resolve(server.address().port))
-})
-const close = server => new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
-
 test('HTTP service strips unknown fields before optimizer invocation', async () => {
   let received
   const server = createPromptOptimizationServer({
@@ -155,7 +150,7 @@ test('HTTP service strips unknown fields before optimizer invocation', async () 
       return { ok: true, optimizedPrompt: 'server result', provider: 'deepseek' }
     },
   })
-  const port = await listen(server)
+  const port = await listenLoopback(server)
   try {
     const response = await fetch(`http://127.0.0.1:${port}/v1/prompt/optimize`, {
       method: 'POST',
@@ -169,7 +164,7 @@ test('HTTP service strips unknown fields before optimizer invocation', async () 
     assert.equal(response.status, 200)
     assert.deepEqual(received, request)
   } finally {
-    await close(server)
+    await closeLoopback(server)
   }
 })
 
@@ -178,7 +173,7 @@ test('HTTP service returns structured rate-limit responses', async () => {
     limiter: { consume: async () => ({ allowed: false, retryAfterSeconds: 45 }) },
     optimize: async () => { throw new Error('must not run') },
   })
-  const port = await listen(server)
+  const port = await listenLoopback(server)
   try {
     const response = await fetch(`http://127.0.0.1:${port}/v1/prompt/optimize`, {
       method: 'POST',
@@ -192,6 +187,6 @@ test('HTTP service returns structured rate-limit responses', async () => {
       retryAfterSeconds: 45,
     })
   } finally {
-    await close(server)
+    await closeLoopback(server)
   }
 })

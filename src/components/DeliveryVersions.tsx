@@ -25,7 +25,7 @@ export function DeliveryLibrary({owner}:{owner:string}){
       setItems(found);setError('')
     }catch{setError('部分成果索引无法读取')}
   }
-  return <details className="history-chart" onToggle={e=>{if(e.currentTarget.open)refresh()}}><summary>已归档成果</summary>{error&&<p role="alert">{error}</p>}{!items.length&&<p>暂无已归档成果</p>}{items.map(i=><DeliveryVersions key={i.id} owner={owner} id={i.id} title={i.title} initial=""/>)}</details>
+  return <details className="history-chart" onToggle={e=>{if(e.currentTarget.open)refresh()}}><summary>已归档成果</summary><p>查看主动保存的任务结果和历史版本。</p>{error&&<p role="alert">{error}</p>}{!items.length&&<p>暂无已归档成果</p>}{items.map(i=><DeliveryVersions key={i.id} owner={owner} id={i.id} title={i.title} initial=""/>)}</details>
 }
 export function DeliveryVersions({id,title,initial,owner='local'}:{id:string;title:string;initial:string;owner?:string}) {
   const key=archivePrefix(owner)+id

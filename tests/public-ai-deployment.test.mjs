@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { test } from 'node:test'
 import { runPublicAiAcceptance } from '../scripts/test-public-ai-deployment.mjs'
+import { closeLoopback, listenLoopback } from './http-test-server.mjs'
 
 const validPlan = {
   schemaVersion: 1,
@@ -30,20 +31,16 @@ const validPlan = {
 
 const withServer = async handler => {
   const server = createServer(handler)
-  await new Promise((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', resolve)
-  })
-  const address = server.address()
+  const port = await listenLoopback(server)
   try {
     return await runPublicAiAcceptance({
-      serviceUrl: `http://127.0.0.1:${address.port}`,
+      serviceUrl: `http://127.0.0.1:${port}`,
       live: true,
       allowLoopbackHttp: true,
       writeReport: false,
     })
   } finally {
-    await new Promise(resolve => server.close(resolve))
+    await closeLoopback(server)
   }
 }
 

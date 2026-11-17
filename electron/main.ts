@@ -15,15 +15,16 @@ import { ChatGptAuthService } from './chatGptAuth.js'
 import { registerChatGptAuthIpc } from './chatGptAuthIpc.js'
 import { resolveAiServiceUrl } from './aiServiceConfig.js'
 import { registerCustomPetIpc } from './customPetIpc.js'
+import { registerDeepSeekExecutionIpc } from './deepSeekExecutionIpc.js'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
 app.setAppUserModelId('io.github.pro-software-20.petcast')
 // Keep the existing data directory when the packaged product name becomes PetCast.
 app.setPath('userData', path.join(app.getPath('appData'), 'petcast-stage1'))
 const COMPACT = { width: 300, height: 340 }
-// 760 × 510 game scene + 218 px mock sidecar + 14 px gap + 16 px app padding.
-const EXPANDED = { width: 1008, height: 526 }
-const MIN_EXPANDED = { width: 900, height: 480 }
+// Expanded content fills the user-resizable window.
+const EXPANDED = { width: 900, height: 650 }
+const MIN_EXPANDED = { width: 640, height: 440 }
 type WindowResizeCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 
 let mainWindow: BrowserWindow | null = null
@@ -75,7 +76,7 @@ const createWindow = () => {
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
-    alwaysOnTop: true,
+    alwaysOnTop: false,
     resizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -89,7 +90,7 @@ const createWindow = () => {
     },
   })
 
-  mainWindow.setAlwaysOnTop(true, 'floating')
+  mainWindow.setAlwaysOnTop(false)
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   mainWindow.once('ready-to-show', () => {
     if (!isSmokeTest) mainWindow?.show()
@@ -108,6 +109,9 @@ const createWindow = () => {
           && typeof window.petcast?.optimizeTaskPrompt === 'function'
           && typeof window.petcast?.planTaskWithDeepSeek === 'function'
           && typeof window.petcast?.cancelDeepSeekTaskPlan === 'function'
+          && typeof window.petcast?.dispatchDeepSeekExecution === 'function'
+          && typeof window.petcast?.inspectDeepSeekExecution === 'function'
+          && typeof window.petcast?.cancelDeepSeekExecution === 'function'
           && typeof window.petcast?.selectTaskWorkspace === 'function'
           && typeof window.petcast?.prepareCodexTaskExecution === 'function'
           && typeof window.petcast?.runCodexTaskExecution === 'function'
@@ -227,6 +231,13 @@ if (ownsInstance) app.whenReady().then(async () => {
     rendererUrl,
     aiApiUrl,
   )
+  const deepSeekExecutionManager = registerDeepSeekExecutionIpc({
+    getWindow: () => mainWindow,
+    rendererUrl,
+    storeFile: path.join(app.getPath('userData'), 'deepseek-executions.v1.json'),
+    apiKey: process.env.DEEPSEEK_API_KEY,
+    model: process.env.DEEPSEEK_MODEL,
+  })
   registerWorkspaceIpc(() => mainWindow, app.getPath('userData'), rendererUrl, workspaceRegistry)
   const taskExecutionManager = registerTaskExecutionIpc({
     getWindow: () => mainWindow,
@@ -242,7 +253,10 @@ if (ownsInstance) app.whenReady().then(async () => {
     taskExecutionCleanupStarted = true
     event.preventDefault()
     chatGptAuth.dispose()
-    void taskExecutionManager.dispose().finally(() => app.quit())
+    void Promise.all([
+      taskExecutionManager.dispose(),
+      deepSeekExecutionManager.dispose(),
+    ]).finally(() => app.quit())
   })
   const savePath = path.join(app.getPath('userData'), 'petcast-save.json')
 
@@ -338,6 +352,7 @@ if (ownsInstance) app.whenReady().then(async () => {
     resizeState = null
     windowExpanded = expanded
     if (expanded) {
+      mainWindow.setResizable(true)
       compactBounds = mainWindow.getBounds()
       const display = screen.getDisplayMatching(compactBounds)
       const area = display.workArea
@@ -348,9 +363,12 @@ if (ownsInstance) app.whenReady().then(async () => {
       const x = Math.max(area.x + 12, Math.min(Math.round(centerX - width / 2), area.x + area.width - width - 12))
       const y = Math.max(area.y + 12, Math.min(Math.round(centerY - height / 2), area.y + area.height - height - 12))
       await animateBounds({ x, y, width, height })
+      mainWindow?.setMinimumSize(Math.min(640, width), Math.min(440, height))
     } else if (compactBounds) {
-      const current = mainWindow.getBounds()
-      expandedSize = { width: current.width, height: current.height }
+      const bounds = mainWindow.getBounds()
+      expandedSize = { width: bounds.width, height: bounds.height }
+      mainWindow.setMinimumSize(COMPACT.width, COMPACT.height)
+      mainWindow.setResizable(false)
       await animateBounds(compactBounds)
       compactBounds = null
     }

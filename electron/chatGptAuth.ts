@@ -74,6 +74,17 @@ interface OAuthCallback {
 
 interface ClosableServer {
   close(): unknown
+  closeIdleConnections?(): unknown
+  closeAllConnections?(): unknown
+}
+
+const closeCallbackServer = (server: ClosableServer | undefined) => {
+  // A loopback browser callback can retain a keep-alive socket after the
+  // response has completed. Release sockets before closing the listener so
+  // cancellation and test teardown cannot leave a live handle behind.
+  server?.closeIdleConnections?.()
+  server?.closeAllConnections?.()
+  server?.close()
 }
 
 interface ChatGptAuthDependencies {
@@ -570,7 +581,7 @@ export class ChatGptAuthService {
       return { ok: false, code: typed.code, checkedAt: this.checkedAt() }
     } finally {
       clearTimeout(timer)
-      active.server?.close()
+      closeCallbackServer(active.server)
       if (this.activeSignIn === active) this.activeSignIn = undefined
     }
   }
@@ -578,7 +589,7 @@ export class ChatGptAuthService {
   cancelSignIn(requestId: string) {
     if (this.activeSignIn?.requestId !== requestId) return
     this.activeSignIn.controller.abort()
-    this.activeSignIn.server?.close()
+    closeCallbackServer(this.activeSignIn.server)
   }
 
   private async refresh(profile: ProtectedProfile, envelope: StoredEnvelope) {
@@ -721,7 +732,7 @@ export class ChatGptAuthService {
 
   dispose() {
     this.activeSignIn?.controller.abort()
-    this.activeSignIn?.server?.close()
+    closeCallbackServer(this.activeSignIn?.server)
     this.activeSignIn = undefined
   }
 }

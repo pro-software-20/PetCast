@@ -15,10 +15,16 @@ export function taskTiming(task: TaskRecord) {
 export function taskHabits(tasks: TaskRecord[]) {
   const models = new Map<string,number>(), categories = new Map<string,number>()
   const providers = new Map<string,{ provider:string; calls:number; measured:number; tokens:number }>()
+  const stages = ['planning','execution','unknown'].map(stage=>({stage,calls:0,measured:0,tokens:0}))
+  let multiAiTasks = 0
   let retryCalls = 0, retryTokens = 0, measuredRetries = 0
   for (const task of tasks) {
+    if (new Set(task.calls.map(c=>JSON.stringify([c.provider,c.model]))).size>1) multiAiTasks++
     categories.set(task.category,(categories.get(task.category)??0)+1)
     for (const c of task.calls) {
+      const stage = stages.find(s=>s.stage===(c.stage??'unknown'))!
+      stage.calls++
+      if (c.usage) { stage.measured++; stage.tokens+=c.usage.inputTokens+c.usage.outputTokens }
       const model = c.provider+' / '+c.model
       models.set(model,(models.get(model)??0)+1)
       const row = providers.get(c.provider) ?? {provider:c.provider,calls:0,measured:0,tokens:0}
@@ -29,6 +35,6 @@ export function taskHabits(tasks: TaskRecord[]) {
     }
   }
   const rank = (map: Map<string,number>)=>Array.from(map).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]))
-  return {models:rank(models),categories:rank(categories),providers:[...providers.values()],retryCalls,retryTokens,measuredRetries}
+  return {models:rank(models),categories:rank(categories),providers:[...providers.values()],retryCalls,retryTokens,measuredRetries,stages,multiAiTasks}
 }
 

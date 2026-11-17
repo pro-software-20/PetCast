@@ -5,10 +5,11 @@ import { validateEvaluationReport } from '../orchestration/taskCoordinationValid
 
 export type EvidenceClient = (request:TaskEvaluationRequest, signal:AbortSignal)=>Promise<TaskVerificationResult[]>
 export const checkEvidence:EvidenceClient = async request=>request.task.acceptanceChecks.map((label,index)=>{
-  const row=request.result.verification.find(v=>v.label===label)
+  // The contract matches checks by position. Labels can legitimately repeat.
+  const row=request.result.verification[index]
   const evidence=request.result.evidence.find(e=>e.reference==='check:'+index &&
     (e.type==='user-review'||e.type==='test-log'||(e.type==='artifact' && /文件存在|非空文件/.test(label))))
-  if(row?.status==='failed') return {label,status:'failed',details:'验收项记录了失败，请修改后复查。'}
+  if(row?.status==='failed') return {label,status:'failed',details:row.details?.trim() || '验收项记录了失败，请修改后复查。'}
   if(row?.status==='passed' && evidence) return {label,status:'passed',details:evidence.summary}
   return {label,status:'not-run',details:'缺少与本项关联的检查记录。'}
 })
@@ -38,7 +39,7 @@ export class TaskEvidenceAdapter implements TaskEvaluationAdapter {
     if(verification.length!==request.task.acceptanceChecks.length || verification.some((v,i)=>v.label!==request.task.acceptanceChecks[i]))throw Error('验收项目不匹配')
     const verdict=verification.some(v=>v.status==='failed')?'revise':verification.length && verification.every(v=>v.status==='passed')?'accepted':'unknown'
     const report:EvaluationReport={evaluationId:request.evaluationId,dispatchId:request.dispatchId,taskId:request.taskId,
-      verdict,verification,method:'rubric',ruleVersion:'petcast-d-1',comparisonBasis:'逐项核对验收状态与关联证据',evidence:request.result.evidence,
+      verdict,verification,method:'rubric',ruleVersion:'petcast-d-2',comparisonBasis:'逐项核对验收状态与关联证据',evidence:request.result.evidence,
       note:verdict==='unknown'?'请补充检查证据。':verdict==='revise'?'请按失败项返工。':'检查项均有依据。',createdAt:new Date().toISOString()}
     if(!validateEvaluationReport(report,{taskId:request.taskId,dispatchId:request.dispatchId}).ok)throw Error('评价结果无效')
     entry.report=structuredClone(report)

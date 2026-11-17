@@ -22,6 +22,15 @@ interface Window {
       input: import('../electron/taskPlanningProtocol').TaskPlanningIpcRequest,
     ) => Promise<import('../electron/taskPlanningProtocol').TaskPlanningServiceResult>
     cancelDeepSeekTaskPlan: (requestId: string) => void
+    dispatchDeepSeekExecution: (
+      input: import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionDispatchInput,
+    ) => Promise<import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionOutcome<import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionReceipt>>
+    inspectDeepSeekExecution: (
+      input: import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionReferenceInput,
+    ) => Promise<import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionOutcome<import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionSnapshot>>
+    cancelDeepSeekExecution: (
+      input: import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionReferenceInput,
+    ) => Promise<import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionOutcome<import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionSnapshot>>
     selectTaskWorkspace: (
       requestId: string,
     ) => Promise<import('../electron/workspaceProtocol').WorkspaceSelectionResult>
