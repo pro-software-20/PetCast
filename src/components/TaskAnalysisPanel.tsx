@@ -34,10 +34,8 @@ import {
   type TaskCoordinationController,
   type TaskCoordinationControllerSnapshot,
 } from '../orchestration/TaskCoordinationController'
-import {
-  MapExecutionAdapterRegistry,
-  type ExecutionAdapterRegistry,
-} from '../orchestration/taskCoordinator'
+import type { ExecutionAdapterRegistry } from '../orchestration/taskCoordinator'
+import { createDesktopCoordinationAdapterRegistry } from '../orchestration/desktopExecutionAdapters'
 import { createTaskSession, recoverInterruptedTaskExecutions } from '../orchestration/taskSession'
 import { HeuristicTaskAnalyzer, MAX_TASK_ANALYSIS_PROMPT_LENGTH } from '../task-analysis/HeuristicTaskAnalyzer'
 import { createDefaultPromptOptimizer } from '../task-analysis/RemotePromptOptimizer'
@@ -99,7 +97,7 @@ const defaultDeepSeekBrainProvider = new DeepSeekBrainProvider()
 const defaultSessionStore = new LocalTaskSessionStore()
 const defaultCoordinationStore = new LocalTaskCoordinationStore()
 const defaultCoordinationAuditStore = new LocalTaskCoordinationAuditStore()
-const defaultCoordinationAdapters = new MapExecutionAdapterRegistry()
+const defaultCoordinationAdapters = createDesktopCoordinationAdapterRegistry()
 const defaultAcceptanceStore = new LocalTaskAcceptanceStore()
 const defaultAcceptancePolicy: AcceptancePolicy = {
   mode: 'manual',
@@ -350,6 +348,9 @@ export function TaskAnalysisPanel({
     })
     coordinationController.current = controller
     const unsubscribe = controller.subscribe(setCoordinationSnapshot)
+    // Restore durable dispatch evidence for review and D evaluation, but keep
+    // every reopened session paused until the user explicitly confirms it.
+    void controller.hydrate()
     void controller.refreshAudit()
     return () => {
       unsubscribe()

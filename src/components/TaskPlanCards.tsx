@@ -872,6 +872,11 @@ export function TaskPlanCards({
             A 组执行适配器尚未接入；不会创建模拟执行或静默切换 Provider，人工流程仍可使用。
           </p>
         )}
+        {connectedCoordinationProviders.some(provider => provider.id === 'deepseek') && (
+          <p className="task-coordination-unavailable" role="status">
+            DeepSeek API 自动执行已接入桌面端。请在启动应用前仅在本机配置 <code>DEEPSEEK_API_KEY</code>；密钥不会显示或保存到任务记录中。未配置时会安全提示不可用，不会自动重试或切换执行 AI。
+          </p>
+        )}
         {coordinationSnapshot.error && <p className="task-plan-error" role="alert">{coordinationSnapshot.error}</p>}
         {coordinationSnapshot.notices.map(notice => (
           <p key={`${notice.dispatchId}:${notice.code}`} className={`task-coordination-notice is-${notice.level}`} role={notice.level === 'error' ? 'alert' : 'status'}>
