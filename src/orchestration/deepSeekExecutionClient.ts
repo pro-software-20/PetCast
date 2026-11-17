@@ -76,6 +76,11 @@ export class BridgeDeepSeekExecutionClient implements DeepSeekExecutionClient {
   }
 }
 
-export const createBrowserDeepSeekExecutionClient = () => new BridgeDeepSeekExecutionClient(
-  typeof window === 'undefined' ? undefined : window.petcast,
+/**
+ * Creates the renderer client from the Electron preload bridge.  The optional
+ * parameter keeps the bridge injectable for zero-network composition tests;
+ * callers never receive or inspect the local API key.
+ */
+export const createBrowserDeepSeekExecutionClient = (bridge?: DeepSeekExecutionBridge) => new BridgeDeepSeekExecutionClient(
+  bridge ?? (typeof window === 'undefined' ? undefined : window.petcast),
 )

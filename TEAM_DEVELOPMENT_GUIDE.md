@@ -1483,3 +1483,10 @@ git diff --check
 - 审计写入失败仅显示警告，不阻断既有协调、人工验收、异常恢复或 D 评价流程；默认发行版仍不注册通用真实 A 适配器。
 
 验证：`tests/task-coordination-audit.test.mjs` 覆盖幂等、损坏保留、容量、上下文与敏感内容拒绝；并继续运行现有契约、桌面和任务 UI 验收。
+
+## 37. B 模块 P3.8A：桌面端 DeepSeek 执行适配器接入
+
+- 桌面端仅在受限 Electron preload 提供完整 DeepSeek 执行桥时，向统一协调器默认注册 A 组的 DeepSeek API 适配器；浏览器构建继续使用空注册表，显式注入的测试适配器优先级不变。
+- 本机 `DEEPSEEK_API_KEY` 只由 Electron 主进程读取；页面、会话、协调状态、审计记录和导出均不保存或展示密钥。未配置时以脱敏 `UNAVAILABLE` 失败，不自动重试或切换 Provider。
+- 用户必须先在任务开始前选择 DeepSeek 的 API 自动执行方式，再在队列确认区二次确认可能的外部调用和费用；完成结果仍进入 `review`，不会自动验收。
+- 零网络覆盖见 `tests/desktop-execution-adapters.test.mjs`；一次真实本机验收步骤见 `docs/B_P38A_DEEPSEEK_DESKTOP_INTEGRATION.md`。

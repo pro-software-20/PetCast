@@ -74,6 +74,9 @@ if (!process.versions.electron) {
   const taskRecords = []
   const cancelledExecutions = []
   let executionCount = 0
+  let deepSeekDispatchCount = 0
+  let deepSeekInspectCount = 0
+  const deepSeekExecutions = new Map()
 
   session.defaultSession.webRequest.onBeforeRequest(
     { urls: ['http://*/*', 'https://*/*'] },
@@ -136,6 +139,43 @@ if (!process.versions.electron) {
   ipcMain.handle('prompt:optimize', () => ({ ok: false, code: 'UPSTREAM_UNAVAILABLE' }))
   ipcMain.handle('task-plan:create', () => ({ ok: false, code: 'UPSTREAM_UNAVAILABLE' }))
   ipcMain.on('task-plan:cancel', () => undefined)
+  ipcMain.handle('deepseek-execution:dispatch', (_event, input) => {
+    deepSeekDispatchCount += 1
+    const receipt = {
+      dispatchId: input.dispatchId,
+      adapterExecutionId: `fixture-deepseek-${input.dispatchId}`,
+      taskId: input.taskId,
+      state: 'queued',
+      acceptedAt: now(),
+    }
+    deepSeekExecutions.set(input.dispatchId, {
+      ...receipt,
+      state: 'completed',
+      observedAt: now(),
+      result: {
+        summary: 'DeepSeek 桌面桥接模拟执行已完成。',
+        outputText: '仅用于零网络桌面验收的模拟结果。',
+        verification: input.acceptanceChecks.map(label => ({ label, status: 'not-run' })),
+      },
+    })
+    return { ok: true, value: receipt }
+  })
+  ipcMain.handle('deepseek-execution:inspect', (_event, reference) => {
+    deepSeekInspectCount += 1
+    const snapshot = deepSeekExecutions.get(reference.dispatchId)
+    return snapshot
+      ? { ok: true, value: snapshot }
+      : { ok: false, error: { code: 'EXECUTION_NOT_FOUND', retryable: false, message: 'fixture' } }
+  })
+  ipcMain.handle('deepseek-execution:cancel', (_event, reference) => ({
+    ok: true,
+    value: {
+      ...reference,
+      state: 'cancelled',
+      observedAt: now(),
+      error: { code: 'CANCELLED', retryable: false, message: 'fixture' },
+    },
+  }))
   ipcMain.handle('workspace:select', () => ({ ok: true, workspace }))
   ipcMain.on('workspace:cancel', () => undefined)
 
@@ -497,7 +537,8 @@ if (!process.versions.electron) {
     await analyze(mixedPrompt)
     console.log('Task UI: mixed plan created')
     assert.equal(await js("document.querySelectorAll('.task-plan-card').length"), 4)
-    assert.match(await js("document.querySelector('.task-coordination-controls').textContent"), /暂无 A 组执行适配器/)
+    assert.match(await js("document.querySelector('.task-coordination-controls').textContent"), /已接入：DeepSeek/)
+    assert.match(await js("document.querySelector('.task-coordination-controls').textContent"), /DEEPSEEK_API_KEY/)
     assert.equal(await js("[...document.querySelectorAll('.task-coordination-controls button')].find(button=>button.textContent.trim()==='启动自动协调').disabled"), true)
     assert.equal(await js("document.querySelector('.task-execution-mode select').value"), 'manual')
     assert.equal(await js("!!document.querySelector('.task-analysis-overview')"), true)
@@ -616,6 +657,32 @@ if (!process.versions.electron) {
     assert.doesNotMatch(JSON.stringify(prepared), /petcast-task-workspace|secret\.txt|never expose/i)
   }
 
+  async function deepSeekCoordinationScenario() {
+    console.log('Task UI: DeepSeek coordination bridge scenario')
+    fixtureMode = 'manual'
+    await createWindow({ clearStorage: true })
+    await openTaskAnalysis()
+    await analyze('请分析这项需求并给出可验证的实施建议。')
+    const deepSeekIndex = await js(`[...document.querySelectorAll('.task-plan-card')].findIndex(card=>card.textContent.includes('AI：DeepSeek'))`)
+    assert.ok(deepSeekIndex >= 0, 'fixture should create a DeepSeek-recommended task')
+    await openCard(deepSeekIndex)
+    await js(`(()=>{
+      const element=document.querySelectorAll('.task-plan-card')[${deepSeekIndex}]?.querySelector('.task-execution-mode select');
+      if(!element) throw Error('missing DeepSeek execution mode selector');
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(element,'api');
+      element.dispatchEvent(new Event('change',{bubbles:true}));
+    })()`)
+    await wait(`document.querySelectorAll('.task-plan-card')[${deepSeekIndex}]?.querySelector('.task-execution-mode select')?.value==='api'`, 'DeepSeek API mode selected')
+    assert.equal(await js("[...document.querySelectorAll('.task-coordination-controls button')].find(button=>button.textContent.trim()==='启动自动协调').disabled"), false)
+    await click('启动自动协调')
+    await wait("document.querySelector('.task-coordination-confirm')?.textContent.includes('deepseek')", 'DeepSeek queue confirmation')
+    await click('确认并启动')
+    await wait(`document.querySelectorAll('.task-plan-card')[${deepSeekIndex}]?.classList.contains('is-review')`, 'DeepSeek result enters review')
+    assert.equal(deepSeekDispatchCount, 1)
+    assert.ok(deepSeekInspectCount >= 1)
+    assert.equal(await js("document.querySelector('.task-coordination-controls').textContent.includes('DEEPSEEK_API_KEY')"), true)
+  }
+
   async function interruptedAndCorruptRecoveryScenario() {
     console.log('Task UI: interrupted and corrupt recovery scenario')
     fixtureMode = 'automatic'
@@ -651,11 +718,12 @@ if (!process.versions.electron) {
 
   try {
     await manualFallbackScenario()
+    await deepSeekCoordinationScenario()
     await automaticExecutionScenario()
     await interruptedAndCorruptRecoveryScenario()
     assert.deepEqual(networkRequests, [], `Unexpected network requests: ${networkRequests.join(', ')}`)
     assert.ok(cancelledExecutions.length > 0, 'Interrupted execution should be cancelled during reload')
-    console.log('Task analysis UI acceptance passed: manual fallback, mixed planning, persistence, simulated Codex execution, artifacts, acceptance, report, interruption and corrupt-session recovery; zero network/model calls')
+    console.log('Task analysis UI acceptance passed: manual fallback, DeepSeek bridge coordination, persistence, simulated Codex execution, artifacts, acceptance, report, interruption and corrupt-session recovery; zero network/model calls')
     app.exit(0)
   } catch (error) {
     console.error(error)

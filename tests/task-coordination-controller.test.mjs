@@ -205,6 +205,63 @@ test('paused manual checks inspect persisted executions without redispatching', 
   controller.dispose()
 })
 
+test('rehydrates completed execution evidence after restart without inspecting or redispatching', async () => {
+  const session = createSession()
+  const dispatchId = createStableDispatchId(session.id, session.plan.id, 'task-1', 1, 'deepseek')
+  const result = {
+    taskId: 'task-1',
+    providerId: 'deepseek',
+    summary: 'Completed implementation summary.',
+    outputText: 'Completed implementation summary.',
+    changedFiles: [],
+    verification: [{ label: 'Implementation accepted', status: 'passed', details: 'Fixture verification passed.' }],
+  }
+  const coordinationStore = new MemoryTaskCoordinationStore({
+    schemaVersion: 1,
+    sessionId: session.id,
+    planId: session.plan.id,
+    updatedAt: NEXT,
+    records: [{
+      taskId: 'task-1',
+      providerId: 'deepseek',
+      attempt: 1,
+      dispatchId,
+      phase: 'completed',
+      reference: { dispatchId, adapterExecutionId: `adapter-${dispatchId}`, taskId: 'task-1' },
+      latestSnapshot: {
+        dispatchId,
+        adapterExecutionId: `adapter-${dispatchId}`,
+        taskId: 'task-1',
+        state: 'completed',
+        observedAt: NEXT,
+        result,
+      },
+      createdAt: NOW,
+      updatedAt: NEXT,
+    }],
+  })
+  const adapter = createAdapter()
+  const controller = createTaskCoordinationController({
+    session,
+    coordinationStore,
+    sessionStore: createSessionStore(),
+    adapters: new MapExecutionAdapterRegistry([['deepseek', adapter.adapter]]),
+  })
+  const observed = snapshotCollector(controller)
+
+  await controller.hydrate()
+
+  assert.equal(observed.latest().status, 'paused')
+  assert.equal(observed.latest().error, undefined)
+  assert.equal(observed.latest().records.length, 1)
+  assert.equal(observed.latest().records[0].dispatchId, dispatchId)
+  assert.equal(observed.latest().records[0].phase, 'completed')
+  assert.equal(adapter.calls.dispatch.length, 0)
+  assert.equal(adapter.calls.inspect.length, 0)
+  controller.dispose()
+  observed.unsubscribe()
+})
+
 test('cancel uses the registered adapter and reconciles the task safely', async () => {
   const adapter = createAdapter()
   const sessions = createSessionStore()

@@ -49,6 +49,12 @@ export interface TaskCoordinationControllerSnapshot {
 }
 
 export interface TaskCoordinationController {
+  /**
+   * Restores the already-persisted coordination evidence into the paused UI.
+   * This is deliberately read-only: reopening the app must never inspect,
+   * dispatch, or otherwise resume an external execution by itself.
+   */
+  hydrate(): Promise<void>
   start(): Promise<void>
   pause(): void
   resume(): Promise<void>
@@ -146,6 +152,42 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
     this.listeners.add(listener)
     listener(clone(this.snapshot))
     return () => this.listeners.delete(listener)
+  }
+
+  async hydrate() {
+    if (this.isDisposed()) return
+    const loaded = await this.options.coordinationStore.load({
+      sessionId: this.session.id,
+      planId: this.session.plan.id,
+      taskIds: this.session.plan.tasks.map(task => task.id),
+    })
+    if (this.isDisposed()) return
+    if (!loaded.ok) {
+      this.clearTimer()
+      this.confirmed = false
+      this.publish({
+        status: 'paused',
+        records: [],
+        activeTaskIds: [],
+        notices: [],
+        nextPollAt: undefined,
+        error: loaded.message,
+        confirmationAction: undefined,
+      })
+      return
+    }
+    const records = loaded.state?.records ?? []
+    this.clearTimer()
+    this.confirmed = false
+    this.publish({
+      status: initialStatus(this.session),
+      records: clone(records),
+      activeTaskIds: activeTaskIds(records),
+      notices: [],
+      nextPollAt: undefined,
+      error: undefined,
+      confirmationAction: undefined,
+    })
   }
 
   private publish(patch: Partial<TaskCoordinationControllerSnapshot>) {
