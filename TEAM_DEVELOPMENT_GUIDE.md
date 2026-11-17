@@ -1496,3 +1496,9 @@ git diff --check
 - 新增 `pnpm test:desktop-deepseek-d-e2e`，在零网络 fixture 中复用桌面 DeepSeek bridge 与 D 组真实 `TaskEvidenceAdapter`，验证“用户确认派发 → review → D 建议 → 用户决定”的完整边界。
 - 重启后的控制器只读恢复完成协调记录并维持暂停；不会重新派发、隐式查询或重复评价。D 只接收摘要、验收状态和显式证据，完整模型输出、凭据、绝对路径与额度不会跨越边界。
 - 本机真实验收与异常处理步骤见 `docs/B_P38B_DESKTOP_DEEPSEEK_D_ACCEPTANCE.md`。真实模型调用必须由用户在页面中明确确认，自动化测试不会读取 Key 或产生费用。
+
+## 39. B 模块 P3.9A：发布前验收与交接
+
+- 新增 `pnpm verify:release` 本地发布门禁，顺序执行 B 协调相关契约、A/D 合规、桌面 DeepSeek × D 联调、构建与 Electron 验收；运行过程中不读取 Key、不启动真实模型，也不产生外部费用。
+- 发布说明、人工恢复/评价复用步骤、Windows 异机安装要求和 A/B/C/D 交接责任见 `docs/B_P39A_RELEASE_READINESS.md`。
+- 公开安装包继续要求显式配置非敏感 HTTPS 公网服务地址；API Key、认证缓存、诊断输出和本机验收文件均不得提交或随安装包发布。

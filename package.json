@@ -21,6 +21,8 @@
     "test:coordination-e2e": "node --test --test-concurrency=1 tests/task-coordination-e2e.test.mjs",
     "test:coordination-d-e2e": "node --test --test-concurrency=1 tests/task-coordination-d-e2e.test.mjs",
     "test:desktop-deepseek-d-e2e": "node --test --test-concurrency=1 tests/desktop-deepseek-d-e2e.test.mjs",
+    "test:release-readiness": "node --test --test-concurrency=1 tests/release-readiness.test.mjs",
+    "verify:release": "node scripts/verify-release-readiness.mjs",
     "check:codex": "npm run build:electron && node scripts/check-codex-usage.mjs",
     "test:desktop": "npm run build && node scripts/smoke-desktop.mjs",
     "test:task-ui": "npm run build && node scripts/test-task-analysis-ui.mjs",
