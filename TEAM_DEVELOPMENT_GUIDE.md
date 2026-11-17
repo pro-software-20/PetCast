@@ -1490,3 +1490,9 @@ git diff --check
 - 本机 `DEEPSEEK_API_KEY` 只由 Electron 主进程读取；页面、会话、协调状态、审计记录和导出均不保存或展示密钥。未配置时以脱敏 `UNAVAILABLE` 失败，不自动重试或切换 Provider。
 - 用户必须先在任务开始前选择 DeepSeek 的 API 自动执行方式，再在队列确认区二次确认可能的外部调用和费用；完成结果仍进入 `review`，不会自动验收。
 - 零网络覆盖见 `tests/desktop-execution-adapters.test.mjs`；一次真实本机验收步骤见 `docs/B_P38A_DEEPSEEK_DESKTOP_INTEGRATION.md`。
+
+## 38. B 模块 P3.8B：桌面 DeepSeek 与 D 评价受控联调
+
+- 新增 `pnpm test:desktop-deepseek-d-e2e`，在零网络 fixture 中复用桌面 DeepSeek bridge 与 D 组真实 `TaskEvidenceAdapter`，验证“用户确认派发 → review → D 建议 → 用户决定”的完整边界。
+- 重启后的控制器只读恢复完成协调记录并维持暂停；不会重新派发、隐式查询或重复评价。D 只接收摘要、验收状态和显式证据，完整模型输出、凭据、绝对路径与额度不会跨越边界。
+- 本机真实验收与异常处理步骤见 `docs/B_P38B_DESKTOP_DEEPSEEK_D_ACCEPTANCE.md`。真实模型调用必须由用户在页面中明确确认，自动化测试不会读取 Key 或产生费用。
