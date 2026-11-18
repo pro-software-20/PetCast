@@ -18,12 +18,13 @@ export interface TaskPlanQualityIssue {
 const vagueTitlePattern = /^(?:处理任务|执行任务|完成任务|后续处理|总结|其他|task|work|todo)$/i
 
 /**
- * Treats model-selected worker providers as suggestions only. The existing local
- * recommender remains the authority for worker capabilities and display reasons.
+ * The local recommender identifies required capabilities. Remote brains may keep
+ * their selected provider when it meets those requirements.
  */
 export function refreshTaskPlanRecommendations(
   plan: TaskPlan,
   input: BrainPlanningInput,
+  preserveBrainChoice = false,
 ): TaskPlan {
   return {
     ...plan,
@@ -37,12 +38,16 @@ export function refreshTaskPlanRecommendations(
         files: task.files.inputs,
         availableProviders: input.availableProviders,
       })
+      const proposed = input.availableProviders.find(provider => provider.id === task.recommendedProviderId)
+      const keepChoice = preserveBrainChoice && proposed
+        && selected.recommendation.requiredCapabilities.every(capability => proposed.capabilities.includes(capability))
       return {
         ...task,
         dependsOn: [...task.dependsOn],
-        recommendedProviderId: selected.recommendedProviderId,
+        recommendedProviderId: keepChoice ? task.recommendedProviderId : selected.recommendedProviderId,
         providerRecommendation: {
           ...selected.recommendation,
+          ...(keepChoice ? { reason: `主控 AI 推荐 ${proposed.displayName}；已核对该任务所需能力。` } : {}),
           requiredCapabilities: [...selected.recommendation.requiredCapabilities],
         },
         files: {

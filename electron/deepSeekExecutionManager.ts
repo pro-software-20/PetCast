@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { TASK_PLANNING_QUALITY_INSTRUCTIONS } from './personalPlanningInstructions.js'
+import { sanitizeRemoteTaskPlan, type TaskPlanningRequest, type TaskPlanningServiceResult } from './taskPlanningProtocol.js'
 import {
   type DeepSeekExecutionDispatchInput,
   type DeepSeekExecutionError,
@@ -28,6 +30,7 @@ interface StoredDocument {
 }
 
 export interface DeepSeekExecutionManagerOptions {
+  taskRunner?: (request: DeepSeekExecutionDispatchInput, signal: AbortSignal) => Promise<{ outputText: string; usage?: { inputTokens: number; outputTokens: number } }>
   apiKey?: string
   model?: string
   endpoint?: string
@@ -70,11 +73,12 @@ export class DeepSeekExecutionManager {
   private readonly active = new Map<string, AbortController>()
   private writeQueue: Promise<unknown> = Promise.resolve()
   private disposed = false
-  private readonly apiKey: string
-  private readonly model: string
+  private apiKey: string
+  private model: string
   private readonly endpoint: string
   private readonly timeoutMs: number
   private readonly fetchImpl: typeof fetch
+  private readonly taskRunner?: DeepSeekExecutionManagerOptions['taskRunner']
 
   constructor(private readonly file: string, options: DeepSeekExecutionManagerOptions = {}) {
     this.apiKey = options.apiKey?.trim() ?? ''
@@ -82,6 +86,65 @@ export class DeepSeekExecutionManager {
     this.endpoint = options.endpoint?.trim() || 'https://api.deepseek.com/chat/completions'
     this.timeoutMs = options.timeoutMs ?? 120_000
     this.fetchImpl = options.fetchImpl ?? fetch
+    this.taskRunner = options.taskRunner
+  }
+
+  connectionStatus() { return { configured: Boolean(this.apiKey), model: this.model } }
+
+  async planWithPersonalAccount(input: TaskPlanningRequest, signal: AbortSignal): Promise<TaskPlanningServiceResult> {
+    if (signal.aborted) return { ok: false, code: 'UPSTREAM_UNAVAILABLE' }
+    if (!this.apiKey) return { ok: false, code: 'UPSTREAM_UNAVAILABLE' }
+    const controller = new AbortController()
+    const abort = () => controller.abort()
+    if (signal.aborted) controller.abort()
+    signal.addEventListener('abort', abort, { once: true })
+    const timer = setTimeout(abort, 60000)
+    try {
+      const response = await this.fetchImpl(this.endpoint, {
+        method: 'POST', headers: { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: this.model, stream: false, response_format: { type: 'json_object' },
+          messages: [{ role: 'system', content: TASK_PLANNING_QUALITY_INSTRUCTIONS },
+            { role: 'user', content: JSON.stringify({ prompt: input.prompt, analysis: input.analysis, files: input.files, availableProviders: input.providers }) }] }),
+        signal: controller.signal,
+      })
+      if (!response.ok) return { ok: false, code: response.status === 429 ? 'RATE_LIMITED' : 'UPSTREAM_UNAVAILABLE' }
+      const raw = await response.text()
+      if (raw.length > 1024 * 1024) return { ok: false, code: 'INVALID_RESPONSE' }
+      const content = JSON.parse(raw)?.choices?.[0]?.message?.content
+      if (typeof content !== 'string') return { ok: false, code: 'INVALID_RESPONSE' }
+      const plan = sanitizeRemoteTaskPlan(JSON.parse(content)?.plan, input)
+      return plan ? { ok: true, plan, provider: 'deepseek' } : { ok: false, code: 'INVALID_RESPONSE' }
+    } catch { return { ok: false, code: controller.signal.aborted ? 'UPSTREAM_TIMEOUT' : 'INVALID_RESPONSE' } }
+    finally { clearTimeout(timer); signal.removeEventListener('abort', abort) }
+  }
+
+  async configureAccount(apiKey: string, model: string) {
+    await this.load()
+    if (this.active.size || [...this.executions.values()].some(e => ['queued', 'running', 'unknown'].includes(e.snapshot.state))) {
+      return { ok: false as const, message: '请先停止或核对已有执行，再切换账户。' }
+    }
+    if (!apiKey.trim() || apiKey.length > 1024 || /[\s\x00-\x1f]/.test(apiKey) || !/^[A-Za-z0-9._:-]{1,100}$/.test(model)) {
+      return { ok: false as const, message: '请填写有效的 API Key 和模型名称。' }
+    }
+    try {
+      const response = await this.fetchImpl('https://api.deepseek.com/models', {
+        headers: { authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(15000),
+      })
+      if (!response.ok) return { ok: false as const, message: response.status === 401 || response.status === 403 ? '账户凭据无效或无访问权限。' : '连接检测失败，请稍后重试。' }
+      const raw = await response.text()
+      if (raw.length > 100000) return { ok: false as const, message: '模型列表异常。' }
+      const value = JSON.parse(raw)
+      if (!Array.isArray(value.data) || !value.data.some((m: { id?: string }) => m?.id === model)) {
+        return { ok: false as const, message: '此账户未返回指定模型，请核对模型名称。' }
+      }
+      // Recheck after the network request: configuration must not race a dispatch.
+      if (this.active.size || [...this.executions.values()].some(e => ['queued', 'running', 'unknown'].includes(e.snapshot.state))) {
+        return { ok: false as const, message: '已有任务开始执行，请停止后再连接。' }
+      }
+      this.apiKey = apiKey
+      this.model = model
+      return { ok: true as const, message: '账户和模型检测通过。实际执行仍受余额与限流影响。' }
+    } catch { return { ok: false as const, message: '无法连接 DeepSeek，请检查网络后重试。' } }
   }
 
   private load() {
@@ -151,7 +214,7 @@ export class DeepSeekExecutionManager {
         ? { ok: true, value: structuredClone(existing.receipt) }
         : failure(safeError('INVALID_INPUT', '同一 dispatchId 不能对应不同执行请求。'))
     }
-    if (!this.apiKey) return failure(safeError('UNAVAILABLE', 'DeepSeek API 尚未配置。', true))
+    if (!this.apiKey && !this.taskRunner) return failure(safeError('UNAVAILABLE', '执行账户尚未配置。', true))
 
     const acceptedAt = now()
     const receipt: DeepSeekExecutionReceipt = {
@@ -242,6 +305,11 @@ export class DeepSeekExecutionManager {
       const acceptanceText = stored.request.acceptanceChecks.length
         ? `\n\n验收标准：\n${stored.request.acceptanceChecks.map(item => `- ${item}`).join('\n')}`
         : ''
+      let payload: DeepSeekApiResponse
+      if (this.taskRunner) {
+        const result = await this.taskRunner(stored.request, controller.signal)
+        payload = { choices: [{ message: { content: result.outputText } }], ...(result.usage ? { usage: { prompt_tokens: result.usage.inputTokens, completion_tokens: result.usage.outputTokens } } : {}) }
+      } else {
       const response = await this.fetchImpl(this.endpoint, {
         method: 'POST',
         headers: {
@@ -284,7 +352,9 @@ export class DeepSeekExecutionManager {
       }
       const raw = await response.text()
       if (Buffer.byteLength(raw) > 1024 * 1024) throw new Error('response too large')
-      const payload = JSON.parse(raw) as DeepSeekApiResponse
+      payload = JSON.parse(raw) as DeepSeekApiResponse
+      }
+      if (controller.signal.aborted || stored.snapshot.state === 'cancelled') return
       const outputText = payload.choices?.[0]?.message?.content?.trim()
       if (!outputText || outputText.length > 50_000) {
         stored.snapshot = {

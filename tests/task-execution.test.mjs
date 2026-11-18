@@ -169,6 +169,24 @@ test('OAuth app-server receives the access token only through its child environm
   session.close()
 })
 
+test('local HTTP compatibility uses Codex ChatGPT authentication without changing endpoint, key or model', async () => {
+  const messages = []
+  let launchArgs
+  const session = new CodexAppServerSession('C:/isolated',
+    { hashAccount: async () => 'scope' }, () => {},
+    (_executable, _cwd, args) => { launchArgs = args; return fakeChild(messages) },
+    async () => ({ executable: 'fake', source: 'explicit' }),
+  )
+  await session.prepare('scope', { mode: 'local-codex-experimental', transport: 'http' })
+  assert.ok(launchArgs.includes('model_provider="petcast_openai_http"'))
+  assert.ok(launchArgs.includes('model_providers.petcast_openai_http.requires_openai_auth=true'))
+  assert.ok(launchArgs.includes('model_providers.petcast_openai_http.supports_websockets=false'))
+  assert.equal(launchArgs.some(arg => /base_url|env_key|^model=|model_providers\.openai\./.test(arg)), false)
+  assert.ok(messages.some(message => message.method === 'account/read'))
+  assert.equal((await session.run('fixture')).outputText, '完成修改')
+  session.close()
+})
+
 function statusChild(status, lateStatus) {
   const child = new EventEmitter()
   child.stdin = new PassThrough()

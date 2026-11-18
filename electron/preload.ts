@@ -19,6 +19,16 @@ contextBridge.exposeInMainWorld('petcast', {
     ipcRenderer.invoke('task-plan:create', input)
   ),
   cancelDeepSeekTaskPlan: (requestId: string) => ipcRenderer.send('task-plan:cancel', requestId),
+  readDeepSeekConnection: () => ipcRenderer.invoke('deepseek-execution:status'),
+  connectCodexQueue: () => ipcRenderer.invoke('codex-queue:connect'),
+  readCodexQueueStatus: () => ipcRenderer.invoke('codex-queue:status'),
+  readCodexActivity: () => ipcRenderer.invoke('codex-queue:activity'),
+  planTaskWithCodex: (input: import('./taskPlanningProtocol.js').TaskPlanningIpcRequest) => ipcRenderer.invoke('codex-plan:create', input),
+  cancelCodexTaskPlan: (id: string) => ipcRenderer.send('codex-plan:cancel', id),
+  dispatchCodexQueue: (input: import('./deepSeekExecutionProtocol.js').DeepSeekExecutionDispatchInput) => ipcRenderer.invoke('codex-queue:dispatch', input),
+  inspectCodexQueue: (input: import('./deepSeekExecutionProtocol.js').DeepSeekExecutionReferenceInput) => ipcRenderer.invoke('codex-queue:inspect', input),
+  cancelCodexQueue: (input: import('./deepSeekExecutionProtocol.js').DeepSeekExecutionReferenceInput) => ipcRenderer.invoke('codex-queue:cancel', input),
+  configureDeepSeekConnection: (input: { apiKey: string; model: string }) => ipcRenderer.invoke('deepseek-execution:configure', input),
   dispatchDeepSeekExecution: (input: import('./deepSeekExecutionProtocol.js').DeepSeekExecutionDispatchInput) => (
     ipcRenderer.invoke('deepseek-execution:dispatch', input)
   ),

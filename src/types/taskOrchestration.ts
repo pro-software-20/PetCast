@@ -1,6 +1,6 @@
 import type { TaskAnalysisFile, TaskAnalysisInput, TaskAnalysisResult } from './taskAnalysis'
 
-export const TASK_BRAIN_IDS = ['local', 'deepseek'] as const
+export const TASK_BRAIN_IDS = ['local', 'deepseek', 'codex'] as const
 export type TaskBrainId = (typeof TASK_BRAIN_IDS)[number]
 
 export const TASK_BRAIN_MODES = ['local', 'remote'] as const

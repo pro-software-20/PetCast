@@ -283,6 +283,32 @@ test('cancel uses the registered adapter and reconciles the task safely', async 
   controller.dispose()
 })
 
+test('cancel during dispatch waits for receipt and cancels without redispatch', async () => {
+  const adapter = createAdapter()
+  const originalDispatch = adapter.adapter.dispatch
+  let release, entered
+  const gate = new Promise(resolve => { release = resolve })
+  const dispatched = new Promise(resolve => { entered = resolve })
+  adapter.adapter.dispatch = async request => { entered(); await gate; return originalDispatch(request) }
+  const sessions = createSessionStore()
+  const controller = createTaskCoordinationController({
+    session: createSession(), coordinationStore: new MemoryTaskCoordinationStore(),
+    sessionStore: sessions, adapters: new MapExecutionAdapterRegistry([['deepseek', adapter.adapter]]),
+    policy: { pollIntervalMs: 60_000 }, now: () => new Date(NOW),
+  })
+  try {
+    await controller.resume()
+    const starting = controller.start()
+    await dispatched
+    const stopping = controller.cancelTask('task-1')
+    release()
+    await Promise.all([starting, stopping])
+    assert.equal(adapter.calls.dispatch.length, 1)
+    assert.equal(adapter.calls.cancel.length, 1)
+    assert.equal(sessions.saved.at(-1).runs[0].status, 'cancelled')
+  } finally { release(); controller.dispose() }
+})
+
 test('empty adapter registry never creates a simulated execution', async () => {
   const controller = createTaskCoordinationController({
     session: createSession(),

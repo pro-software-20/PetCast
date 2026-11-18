@@ -15,6 +15,7 @@ export function registerTaskPlanningIpc(
   userData: string,
   rendererUrl: string,
   endpoint: string,
+  personalPlanner?: (input: import('./taskPlanningProtocol.js').TaskPlanningRequest, signal: AbortSignal) => Promise<TaskPlanningServiceResult> | null,
 ) {
   const active = new Map<string, AbortController>()
   let installIdPromise: Promise<string> | undefined
@@ -47,7 +48,7 @@ export function registerTaskPlanningIpc(
   ipcMain.handle('task-plan:create', async (event, value: unknown): Promise<TaskPlanningServiceResult> => {
     const request = sanitizeTaskPlanningIpcRequest(value)
     if (!authorized(event) || !request) return { ok: false, code: 'INVALID_REQUEST' }
-    if (!endpoint.trim()) return { ok: false, code: 'UPSTREAM_UNAVAILABLE' }
+    if (!endpoint.trim() && !personalPlanner) return { ok: false, code: 'UPSTREAM_UNAVAILABLE' }
     if (active.has(request.requestId)) return { ok: false, code: 'RATE_LIMITED', retryAfterSeconds: 1 }
 
     const controller = new AbortController()
@@ -56,7 +57,8 @@ export function registerTaskPlanningIpc(
     event.sender.once('destroyed', abort)
     event.sender.once('did-start-navigation', abort)
     try {
-      const result = await requestTaskPlan(request.input, {
+      const personal = personalPlanner?.(request.input, controller.signal)
+      const result = personal ? await personal : await requestTaskPlan(request.input, {
         endpoint,
         installId: await installId(),
         signal: controller.signal,

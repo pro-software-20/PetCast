@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { BrainProvider } from '../orchestration/BrainProvider'
 import { DeepSeekBrainProvider } from '../orchestration/DeepSeekBrainProvider'
+import { CodexBrainProvider } from '../orchestration/CodexBrainProvider'
 import { LocalBrainProvider } from '../orchestration/LocalBrainProvider'
 import { DEFAULT_PROVIDER_PROFILES } from '../orchestration/providerProfiles'
 import { createPlanWithTaskBrain } from '../orchestration/taskBrainPlanning'
@@ -38,7 +39,6 @@ import type { ExecutionAdapterRegistry } from '../orchestration/taskCoordinator'
 import { createDesktopCoordinationAdapterRegistry } from '../orchestration/desktopExecutionAdapters'
 import { createTaskSession, recoverInterruptedTaskExecutions } from '../orchestration/taskSession'
 import { HeuristicTaskAnalyzer, MAX_TASK_ANALYSIS_PROMPT_LENGTH } from '../task-analysis/HeuristicTaskAnalyzer'
-import { createDefaultPromptOptimizer } from '../task-analysis/RemotePromptOptimizer'
 import {
   MAX_TASK_ANALYSIS_FILES,
   MAX_TASK_ANALYSIS_FILE_SIZE,
@@ -63,6 +63,8 @@ import type {
 } from '../types/taskOrchestration'
 import { copyText } from '../utils/copyText'
 import { TaskPlanCards } from './TaskPlanCards'
+import { PlanningConnectionSettings } from './PlanningConnectionSettings'
+import { CodexActivity } from './CodexActivity'
 import {
   describeCodexEnvironment,
   type CodexEnvironmentState,
@@ -91,9 +93,10 @@ export interface TaskAnalysisPanelProps {
   onClose?: () => void
 }
 
-const defaultAnalyzer = new HeuristicTaskAnalyzer(createDefaultPromptOptimizer())
+const defaultAnalyzer = new HeuristicTaskAnalyzer()
 const defaultLocalBrainProvider = new LocalBrainProvider()
 const defaultDeepSeekBrainProvider = new DeepSeekBrainProvider()
+const defaultCodexBrainProvider = new CodexBrainProvider()
 const defaultSessionStore = new LocalTaskSessionStore()
 const defaultCoordinationStore = new LocalTaskCoordinationStore()
 const defaultCoordinationAuditStore = new LocalTaskCoordinationAuditStore()
@@ -106,7 +109,7 @@ const defaultAcceptancePolicy: AcceptancePolicy = {
 }
 
 const brainFallbackLabels: Partial<Record<BrainPlanningErrorCode, string>> = {
-  NOT_CONFIGURED: 'DeepSeek 任务规划尚未接入，已安全回退到本地规则。',
+  NOT_CONFIGURED: 'DeepSeek 尚未连接账户，已使用本地规则拆解。',
   RATE_LIMITED: 'DeepSeek 任务规划请求受限，已安全回退到本地规则。',
   UNAVAILABLE: 'DeepSeek 任务规划当前不可用，已安全回退到本地规则。',
   TIMEOUT: 'DeepSeek 任务规划响应超时，已安全回退到本地规则。',
@@ -176,6 +179,13 @@ export function TaskAnalysisPanel({
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [clearArmed, setClearArmed] = useState(false)
+  const [endDialog, setEndDialog] = useState(false)
+  const [ending, setEnding] = useState(false)
+  const [endError, setEndError] = useState<string | null>(null)
+  const [suspended, setSuspended] = useState(false)
+  const endingRef = useRef(false)
+  const latestSession = useRef(taskSession)
+  latestSession.current = taskSession
   const [selectedBrainId, setSelectedBrainId] = useState<TaskBrainId>(() => (
     brainProvider?.profile.id ?? readTaskBrainPreference()
   ))
@@ -184,6 +194,8 @@ export function TaskAnalysisPanel({
   const [attachmentsOpen, setAttachmentsOpen] = useState(initialFiles.length > 0)
   const analysisRequestId = useRef(0)
   const planningController = useRef<AbortController | null>(null)
+  const [brainReady, setBrainReady] = useState(false)
+  const [analysisStartedAt, setAnalysisStartedAt] = useState(0)
   const coordinationController = useRef<TaskCoordinationController | null>(null)
   const evaluationController = useRef<{ taskId: string; sessionId: string; controller: AbortController } | null>(null)
   const acceptanceLoadId = useRef(0)
@@ -289,6 +301,7 @@ export function TaskAnalysisPanel({
   }, [checkCodex, readChatGptSession])
 
   const persistSession = async (session: TaskSessionV1) => {
+    if (endingRef.current) return
     const outcome = await sessionStore.save(session)
     if (!outcome.ok) setStorageNotice(outcome.message)
     else setStorageNotice(null)
@@ -322,7 +335,10 @@ export function TaskAnalysisPanel({
       const restored = recoverInterruptedTaskExecutions(outcome.session)
       if (restored !== outcome.session) void persistSession(restored)
       if (restored.completedAt) setCompletedSession(restored)
-      else showSession(restored)
+      else {
+        showSession(restored)
+        try { setSuspended(localStorage.getItem('petcast.suspended-session.v1') === restored.id) } catch { /* Still recover the saved session. */ }
+      }
     })
     return () => { active = false }
   }, [sessionStore])
@@ -583,6 +599,7 @@ export function TaskAnalysisPanel({
     setCompletedSession(null)
     setPlanError(null)
     setIsAnalyzing(true)
+    setAnalysisStartedAt(Date.now())
     setCopyStatus('idle')
     setClearArmed(false)
     setAnalysisDetailsOpen(true)
@@ -615,6 +632,16 @@ export function TaskAnalysisPanel({
         let planningOutcome
         try {
           const requestedBrainId = brainProvider?.profile.id ?? selectedBrainId
+          // Recheck at dispatch time; never send to a team account when a personal connection is absent.
+          let ready = requestedBrainId === 'local' || Boolean(brainProvider)
+          if (!ready) {
+            try {
+              const status = requestedBrainId === 'codex' ? await window.petcast?.readCodexQueueStatus?.()
+                : await window.petcast?.readDeepSeekConnection?.()
+              ready = Boolean(status?.configured)
+            } catch { ready = false }
+          }
+          const unavailableBrain: BrainProvider = { profile: TASK_BRAIN_PROFILES[requestedBrainId], createPlan: async () => ({ ok: false, code: 'NOT_CONFIGURED', message: '尚未连接账户，已使用本地规则。' }) }
           planningOutcome = await createPlanWithTaskBrain(
             requestedBrainId,
             {
@@ -624,7 +651,8 @@ export function TaskAnalysisPanel({
             },
             {
               local: brainProvider?.profile.id === 'local' ? brainProvider : defaultLocalBrainProvider,
-              deepseek: brainProvider?.profile.id === 'deepseek' ? brainProvider : defaultDeepSeekBrainProvider,
+              deepseek: !ready ? unavailableBrain : brainProvider?.profile.id === 'deepseek' ? brainProvider : defaultDeepSeekBrainProvider,
+              codex: !ready ? unavailableBrain : brainProvider?.profile.id === 'codex' ? brainProvider : defaultCodexBrainProvider,
             },
             controller.signal,
           )
@@ -663,6 +691,79 @@ export function TaskAnalysisPanel({
         setIsAnalyzing(false)
       }
     }
+  }
+
+  const endCurrentTask = async (save: boolean) => {
+    if (endingRef.current) return
+    endingRef.current = true
+    setEnding(true)
+    setEndError(null)
+    try {
+      evaluationController.current?.controller.abort()
+      evaluationController.current = null
+      await coordinationController.current?.pauseAndWait()
+      const loaded = await coordinationStore.load({})
+      if (!loaded.ok) throw new Error(loaded.message)
+      for (const record of loaded.state?.records ?? []) {
+        if (['dispatching', 'queued', 'running', 'needs-input', 'unknown'].includes(record.phase)) {
+          await coordinationController.current?.cancelTask(record.taskId)
+        }
+      }
+      const legacy = latestSession.current?.runs.filter(run => run.automaticExecution?.state === 'running') ?? []
+      for (const run of legacy) window.petcast?.cancelCodexTaskExecution?.(run.automaticExecution!.executionId)
+      if (legacy.length) {
+        for (let i = 0; i < 100 && latestSession.current?.runs.some(run => run.automaticExecution?.state === 'running'); i++) {
+          await new Promise(resolve => setTimeout(resolve, 100))
+        }
+        if (latestSession.current?.runs.some(run => run.automaticExecution?.state === 'running')) {
+          throw new Error('已请求停止 Codex，正在等待执行结果确认。当前任务已保留，请稍后再试。')
+        }
+      }
+      // Let coordinator callbacks update the current session before saving its draft.
+      await new Promise(resolve => setTimeout(resolve, 0))
+      const current = latestSession.current
+      if (!current) throw new Error('当前没有可结束的任务。')
+      if (save) {
+        const saved = await sessionStore.save(current)
+        if (!saved.ok) throw new Error(saved.message)
+        localStorage.setItem('petcast.suspended-session.v1', current.id)
+        setSuspended(true)
+      } else {
+        const checked = await coordinationStore.load({})
+        if (!checked.ok) throw new Error(checked.message)
+        if (checked.state?.records.some(record => ['dispatching', 'queued', 'running', 'needs-input', 'unknown'].includes(record.phase))) {
+          throw new Error('外部执行尚未确认停止，暂不能放弃记录。可以选择暂存，下次核对后继续。')
+        }
+        for (const store of [coordinationStore, acceptanceStore, sessionStore]) {
+          const cleared = await store.clear()
+          if (!cleared.ok) throw new Error(cleared.message)
+        }
+        localStorage.removeItem('petcast.suspended-session.v1')
+        setTaskSession(null)
+        setCompletedSession(null)
+        setResult(null)
+        setPrompt('')
+        setFiles([])
+        setSuspended(false)
+        setAnalysisDetailsOpen(true)
+      }
+      setEndDialog(false)
+      onClose?.()
+    } catch (error) {
+      setEndError(error instanceof Error ? error.message : '结束任务失败，进度已保留，请重试。')
+    } finally {
+      endingRef.current = false
+      setEnding(false)
+    }
+  }
+
+  const handleCancelAnalysis = () => {
+    analysisRequestId.current += 1
+    planningController.current?.abort()
+    planningController.current = null
+    setIsAnalyzing(false)
+    setResult(null)
+    setPlanError('已停止分析，输入内容已保留。已发送的远程请求可能仍在服务端结束处理，其返回结果不会写入任务。')
   }
 
   const handleCopyPrompt = async () => {
@@ -735,7 +836,7 @@ export function TaskAnalysisPanel({
     ? `计划选择：${requestedBrainName} · 实际使用：${actualBrainName}`
     : `任务拆解大脑：${actualBrainName}`
   const planningBrainFallback = planningBrain?.fallbackCode
-    ? brainFallbackLabels[planningBrain.fallbackCode]
+    ? brainFallbackLabels[planningBrain.fallbackCode]?.replaceAll('DeepSeek', requestedBrainName ?? '所选 AI')
     : undefined
   const codexEnvironmentPresentation = describeCodexEnvironment(codexEnvironment)
   const chatGptAuthPresentation = describeChatGptAuth(chatGptAuth)
@@ -767,10 +868,32 @@ export function TaskAnalysisPanel({
     >
       <header className="task-analysis-header">
         <h2 id="task-analysis-title">任务分析</h2>
+        {taskSession && !suspended && <button type="button" onClick={() => { setEndError(null); setEndDialog(true) }}>结束当前任务</button>}
       </header>
+
+      {endDialog && <section className="task-session-restore" role="dialog" aria-label="结束当前任务" aria-modal="true">
+        <strong>是否暂存当前任务？</strong>
+        <p>暂存保留输入、子任务进度和已有结果，下次可继续；自动执行会先请求停止，恢复后不会自动重新调用 AI。手动交给外部软件的任务需在该软件停止。</p>
+        <p>不暂存将放弃当前任务记录。已归档成果不受影响。</p>
+        {endError && <p role="alert">{endError}</p>}
+        <button type="button" disabled={ending} onClick={() => void endCurrentTask(true)}>{ending ? '正在处理…' : '暂存并退出'}</button>
+        <button type="button" disabled={ending} onClick={() => void endCurrentTask(false)}>不暂存，结束任务</button>
+        <button type="button" disabled={ending} onClick={() => setEndDialog(false)}>返回任务</button>
+      </section>}
+      {suspended && taskSession && !endDialog && <section className="task-session-restore" aria-label="暂存的任务">
+        <strong>暂存的任务：{taskSession.plan.title}</strong>
+        <span>已完成 {taskSession.runs.filter(run => run.status === 'done').length}/{taskSession.runs.length}。自动执行保持暂停，停止的子任务需核对后重试。</span>
+        <button type="button" onClick={() => {
+          try { localStorage.removeItem('petcast.suspended-session.v1'); setSuspended(false) }
+          catch { setStorageNotice('无法更新暂存状态，请重试。') }
+        }}>继续任务</button>
+        <button type="button" onClick={() => { setEndError(null); setEndDialog(true) }}>放弃暂存任务</button>
+      </section>}
 
       {onClose && (
         <button type="button" className="task-analysis-close" onClick={() => {
+          if (ending) return
+          if (taskSession && !suspended) { setEndDialog(true); return }
           evaluationController.current?.controller.abort()
           evaluationController.current = null
           onClose()
@@ -779,6 +902,7 @@ export function TaskAnalysisPanel({
 
 
 
+      <fieldset disabled={endDialog || ending} hidden={suspended} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       {completedSession && !taskSession && (
         <div className="task-session-restore" role="status">
           <strong>发现最近已完成的任务报告</strong>
@@ -899,17 +1023,24 @@ export function TaskAnalysisPanel({
           >
             <option value="local">本地规则（默认）</option>
             <option value="deepseek">DeepSeek</option>
+            <option value="codex">Codex（本机已登录账户）</option>
           </select>
           {brainProvider ? (
             <p role="status">当前任务拆解大脑由调用方指定为 {brainProvider.profile.displayName}。</p>
           ) : selectedBrainId === 'deepseek' ? (
-            <p role="status">分析时会把 Prompt、本地分析结果和附件元信息发送到团队服务；不会上传附件内容、工作区路径、账号或额度。服务不可用时自动回退本地规则。</p>
+            <p>需要你自己的 DeepSeek API Key 和可用余额。网页登录不能替代 API 账户；未连接时使用本地规则。</p>
+          ) : selectedBrainId === 'codex' ? (
+            <p>由 Codex 拆解目标、安排依赖并推荐各任务的执行 AI。需要本机 Codex 已登录且可正常对话。</p>
           ) : (
             <p>本地规则不会联网，也不会产生模型调用费用。</p>
           )}
         </div>
+        {!brainProvider && <PlanningConnectionSettings brain={selectedBrainId} disabled={isAnalyzing || sessionLocked} onReady={setBrainReady} />}
+        {isAnalyzing && <p role="status">{selectedBrainId === 'local' || !brainReady ? '正在按本地规则整理任务…' : `正在请 ${TASK_BRAIN_PROFILES[selectedBrainId].displayName} 拆解任务，请稍候。可点击停止分析。`}</p>}
+        {selectedBrainId === 'codex' && analysisStartedAt > 0 && <CodexActivity kind="planning" since={analysisStartedAt} />}
 
         <div className="task-analysis-actions">
+          {isAnalyzing && <button type="button" onClick={handleCancelAnalysis}>停止分析</button>}
           <button
             type="button"
             onClick={handleAnalyze}
@@ -927,7 +1058,7 @@ export function TaskAnalysisPanel({
             {clearArmed ? '再次点击确认清空' : sessionStarted ? '新建任务' : '清空输入'}
           </button>
         </div>
-        <p className="task-analysis-privacy">启用 AI 优化或 DeepSeek 大脑时只发送任务描述、分析结果和文件元信息，不读取或上传文件内容。</p>
+        <p className="task-analysis-privacy">选择并连接 AI 后，开始分析会发送任务描述、分析结果和文件元信息，不读取或上传附件内容。AI 不可用时会明确标记本地回退。</p>
       </div>
 
       {error && (
@@ -1074,6 +1205,7 @@ export function TaskAnalysisPanel({
           onAuditEvent={recordCoordinationAudit}
         />
       )}
+      </fieldset>
     </section>
   )
 }

@@ -8,6 +8,15 @@ export class CodexAppServerError extends Error {
   }
 }
 
+// Only fixed descriptions reach the UI; upstream messages can contain private paths.
+export function codexFailureMessage(error: unknown): string {
+  const code = error instanceof CodexAppServerError ? error.code : ''
+  return code === 'TIMEOUT' ? 'Codex 等待超时，请检查 Codex 自身能否完成对话，以及网络和模型访问权限。'
+    : code === 'ACCOUNT_MISMATCH' ? 'Codex 账户已变化，请重新连接。'
+    : code === 'CANCELLED' ? 'Codex 请求已停止。'
+    : 'Codex 未能返回结果，请检查本机登录、剩余额度与网络后重试。'
+}
+
 interface PendingRequest {
   resolve: (value: unknown) => void
   reject: (error: Error) => void
@@ -20,7 +29,7 @@ interface CodexRunResult {
 
 export type CodexAppServerAuth =
   | { mode: 'chatgpt-oauth'; accessToken: string }
-  | { mode: 'local-codex-experimental' }
+  | { mode: 'local-codex-experimental'; transport?: 'default' | 'http' }
 
 const object = (value: unknown): Record<string, unknown> | undefined => (
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
@@ -30,6 +39,7 @@ const childEnvironment = (accessToken?: string) => {
   const allowed = new Set([
     'PATH', 'PATHEXT', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'USERPROFILE', 'HOME',
     'APPDATA', 'LOCALAPPDATA', 'CODEX_HOME', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'TERM',
+    'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
   ])
   return {
     ...Object.fromEntries(Object.entries(process.env).filter(([key]) => allowed.has(key.toUpperCase()))),
@@ -47,6 +57,7 @@ export class CodexAppServerSession {
   private threadId?: string
   private turnId?: string
   private output = ''
+  private finalOutput: string | undefined
   private usage: CodexRunResult['usage'] = null
   private completion?: { resolve: () => void; reject: (error: Error) => void }
   private pendingCompletionStatus?: unknown
@@ -87,8 +98,16 @@ export class CodexAppServerSession {
   private request(method: string, params: unknown) {
     return new Promise<unknown>((resolve, reject) => {
       const id = ++this.nextId
-      this.pending.set(id, { resolve, reject })
-      this.send({ id, method, params })
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        reject(new CodexAppServerError('TIMEOUT'))
+      }, 30_000)
+      this.pending.set(id, {
+        resolve: value => { clearTimeout(timer); resolve(value) },
+        reject: error => { clearTimeout(timer); reject(error) },
+      })
+      try { this.send({ id, method, params }) }
+      catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error) }
     })
   }
 
@@ -124,6 +143,25 @@ export class CodexAppServerSession {
   }
 
   private notification(method: string, params: Record<string, unknown>) {
+    if (this.terminal) return
+    if (method === 'error') {
+      const error = object(params.error)
+      const info = error?.codexErrorInfo
+      const code = typeof info === 'string' ? info : Object.keys(object(info) ?? {})[0]
+      const detail = code === 'usageLimitExceeded' ? 'Codex 额度不足。'
+        : code === 'unauthorized' ? 'Codex 登录已失效，请重新登录。'
+        : code === 'httpConnectionFailed' || code === 'responseStreamConnectionFailed' || code === 'responseStreamDisconnected'
+          ? 'Codex 与模型服务的连接中断，请检查网络。'
+          : 'Codex 上游请求异常，请检查网络、额度和模型权限。'
+      this.onProgress(params.willRetry === true ? `${detail} 服务正在重试，可随时停止。` : detail)
+      if (params.willRetry !== true) this.fail(new CodexAppServerError('PROVIDER_FAILED'))
+      return
+    }
+    if (method === 'item/started') {
+      const type = object(params.item)?.type
+      if (type === 'reasoning') this.onProgress('Codex 正在思考和组织结果…')
+      else if (type === 'agentMessage') this.onProgress('Codex 正在生成结果…')
+    }
     if (method === 'item/agentMessage/delta') {
       const delta = params.delta
       if (typeof delta === 'string') {
@@ -132,10 +170,13 @@ export class CodexAppServerSession {
       }
       return
     }
-    if (method === 'item/completed' && !this.output) {
+    if (method === 'item/completed') {
       const item = object(params.item)
       const text = item?.text ?? item?.message
-      if (item?.type === 'agentMessage' && typeof text === 'string') this.output = this.redact(text).slice(0, 50_000)
+      if (item?.type === 'agentMessage' && typeof text === 'string') {
+        if (!this.output) this.output = this.redact(text).slice(0, 50_000)
+        if (item.phase === 'final_answer' || item.phase == null) this.finalOutput = this.redact(text).slice(0, 50_000)
+      }
       return
     }
     if (method === 'thread/tokenUsage/updated') {
@@ -187,7 +228,16 @@ export class CodexAppServerSession {
           '-c', 'model_providers.openai_chatgpt_plan.requires_openai_auth=false',
           '-c', 'model_providers.openai_chatgpt_plan.supports_websockets=false',
         ]
-      : ['app-server', '--listen', 'stdio://']
+      : auth.transport === 'http' ? [
+          'app-server', '--listen', 'stdio://',
+          // A separate provider is required: recent Codex versions reserve `openai`.
+          // No base_url/env_key override: Codex retains its ChatGPT auth routing.
+          '-c', 'model_provider="petcast_openai_http"',
+          '-c', 'model_providers.petcast_openai_http.name="OpenAI HTTP"',
+          '-c', 'model_providers.petcast_openai_http.wire_api="responses"',
+          '-c', 'model_providers.petcast_openai_http.requires_openai_auth=true',
+          '-c', 'model_providers.petcast_openai_http.supports_websockets=false',
+        ] : ['app-server', '--listen', 'stdio://']
     const environment = childEnvironment(auth.mode === 'chatgpt-oauth' ? auth.accessToken : undefined)
     this.child = this.launch?.(executable, this.cwd, args, environment) ?? spawn(executable, args, {
       cwd: this.cwd,
@@ -210,6 +260,7 @@ export class CodexAppServerSession {
       }
     })
     this.child.stderr.on('data', () => {})
+    this.child.stdin.on('error', () => this.fail(new CodexAppServerError('CODEX_UNAVAILABLE')))
     this.child.on('error', () => this.fail(new CodexAppServerError('CODEX_UNAVAILABLE')))
     this.child.on('exit', () => this.fail(new CodexAppServerError('CODEX_UNAVAILABLE')))
     await this.request('initialize', {
@@ -252,6 +303,7 @@ export class CodexAppServerSession {
   async run(prompt: string, timeoutMs = 10 * 60_000): Promise<CodexRunResult> {
     if (!this.threadId) throw new CodexAppServerError('PROVIDER_FAILED')
     this.output = ''
+    this.finalOutput = undefined
     this.usage = null
     this.pendingCompletionStatus = undefined
     this.turnTerminalReceived = false
@@ -271,7 +323,8 @@ export class CodexAppServerSession {
     const turn = object(response?.turn)
     if (typeof turn?.id !== 'string') throw new CodexAppServerError('PROVIDER_FAILED')
     this.turnId = turn.id
-    this.onProgress('Codex 已接受任务，正在隔离副本中执行。')
+    this.onProgress('Codex 已接受任务，正在等待模型响应…')
+    if (this.terminal) throw this.terminal
     await new Promise<void>((resolve, reject) => {
       this.completion = { resolve, reject }
       const timer = setTimeout(() => {
@@ -296,7 +349,7 @@ export class CodexAppServerSession {
         else completion.reject(new CodexAppServerError('PROVIDER_FAILED'))
       }
     })
-    return { outputText: this.output.trim(), usage: this.usage }
+    return { outputText: (this.finalOutput ?? this.output).trim(), usage: this.usage }
   }
 
   async interrupt() {
@@ -313,6 +366,7 @@ export class CodexAppServerSession {
   }
 
   close() {
+    this.fail(new CodexAppServerError('CODEX_UNAVAILABLE'))
     this.child?.stdin.end()
     this.child?.kill()
     this.child = undefined

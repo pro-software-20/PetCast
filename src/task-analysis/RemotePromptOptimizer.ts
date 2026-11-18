@@ -63,5 +63,16 @@ export class RemotePromptOptimizer implements PromptOptimizer {
 
 export const createDefaultPromptOptimizer = (): PromptOptimizer => {
   const bridge = typeof window === 'undefined' ? undefined : window.petcast?.optimizeTaskPrompt
-  return new RemotePromptOptimizer(bridge)
+  const remote = new RemotePromptOptimizer(bridge)
+  return {
+    async optimize(prompt, context) {
+      // A connected personal account must not leak the same prompt to the team optimizer.
+      if (typeof window !== 'undefined' && window.petcast?.readDeepSeekConnection) {
+        try {
+          if ((await window.petcast.readDeepSeekConnection()).configured) return localPromptOptimizer.optimize(prompt, context)
+        } catch { return localPromptOptimizer.optimize(prompt, context) }
+      }
+      return remote.optimize(prompt, context)
+    },
+  }
 }

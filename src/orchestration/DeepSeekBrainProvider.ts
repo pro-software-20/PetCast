@@ -73,7 +73,7 @@ export class DeepSeekBrainProvider implements BrainProvider {
       })
       if (signal?.aborted) return { ok: false, code: 'CANCELLED', message: '任务拆解已取消。' }
       if (!result.ok) return errorOutcome(result)
-      const plan = refreshTaskPlanRecommendations(result.plan as TaskPlan, input)
+      const plan = refreshTaskPlanRecommendations(result.plan as TaskPlan, input, true)
       if (inspectTaskPlanQuality(plan, input).length > 0) {
         return {
           ok: false,

@@ -2,6 +2,7 @@ import type { ExecutionAdapterRegistry } from './taskCoordinator'
 import { MapExecutionAdapterRegistry } from './taskCoordinator'
 import type { DeepSeekExecutionBridge } from './deepSeekExecutionClient'
 import { createAExecutionAdapterRegistry } from './registerExecutionAdapters'
+import { CodexQueueAdapter } from './CodexQueueAdapter'
 
 /**
  * This check deliberately proves only that the trusted preload surface exists.
@@ -25,8 +26,10 @@ const browserBridge = (): unknown => (
  */
 export const createDesktopCoordinationAdapterRegistry = (
   bridge: unknown = browserBridge(),
-): ExecutionAdapterRegistry => (
-  isDeepSeekExecutionBridge(bridge)
-    ? createAExecutionAdapterRegistry(bridge)
-    : new MapExecutionAdapterRegistry()
-)
+): ExecutionAdapterRegistry => {
+  const base = isDeepSeekExecutionBridge(bridge) ? createAExecutionAdapterRegistry(bridge) : new MapExecutionAdapterRegistry()
+  const desktop = bridge as typeof window.petcast | undefined
+  const codex = desktop && typeof desktop.dispatchCodexQueue === 'function' && typeof desktop.inspectCodexQueue === 'function' && typeof desktop.cancelCodexQueue === 'function'
+    ? new CodexQueueAdapter({ dispatch: input => desktop.dispatchCodexQueue(input), inspect: input => desktop.inspectCodexQueue(input), cancel: input => desktop.cancelCodexQueue(input) }) : undefined
+  return { get: id => id === 'codex' && codex ? codex : base.get(id) }
+}
