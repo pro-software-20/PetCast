@@ -1,3 +1,4 @@
+import './task-workflow.css'
 import { TaskEvidencePanel } from './TaskEvidencePanel'
 import { DeliveryVersions } from './DeliveryVersions'
 import { DeepSeekConnectionSettings } from './DeepSeekConnectionSettings'
@@ -354,6 +355,7 @@ export function TaskPlanCards({
   const [codexQueueBusy, setCodexQueueBusy] = useState(false)
   const [codexQueueMessage, setCodexQueueMessage] = useState('连接本机已登录的 Codex 后，可加入自动任务队列。')
   const [batchNotice, setBatchNotice] = useState('')
+  const [executionChoice, setExecutionChoice] = useState<'codex' | 'deepseek'>('codex')
   useEffect(() => {
     let active = true
     const check = () => {
@@ -831,10 +833,12 @@ export function TaskPlanCards({
       </header>
 
       <section className="task-session-restore" aria-label="整组任务执行方式">
-        <strong>这组任务怎么执行？</strong>
-        <div>
+        <strong>2 · 选择执行 AI</strong>
+        <p>连接账户 → 应用到任务 → 确认启动。支持纯文本任务，涉及文件操作的任务需单独设置。</p>
+        <label>执行 AI <select value={executionChoice} onChange={event => setExecutionChoice(event.target.value as 'codex' | 'deepseek')} disabled={coordinationSnapshot.status === 'running'}><option value="codex">Codex · 本机账户</option><option value="deepseek">DeepSeek · API 账户</option></select></label>
+        {executionChoice === 'codex' && <div>
           <strong>Codex 本机自动执行 · {codexQueueConfigured ? '已连接' : '未连接'}</strong>
-          <p>使用本机 Codex 已登录账户和额度，不需要 DeepSeek 密钥。此队列先支持文本成果；项目改动仍使用下方原有 Codex 执行入口。</p>
+          <p>使用你本机已登录的 Codex 额度。</p>
           <button type="button" disabled={codexQueueBusy || !window.petcast?.connectCodexQueue} onClick={async () => {
             setCodexQueueBusy(true)
             try {
@@ -843,23 +847,23 @@ export function TaskPlanCards({
               setCodexQueueMessage(result.message)
             } catch { setCodexQueueMessage('本机 Codex 连接失败，请重试。') }
             finally { setCodexQueueBusy(false) }
-          }}>{codexQueueBusy ? '检查本机登录…' : '连接并允许使用本机 Codex'}</button>
+          }}>{codexQueueBusy ? '连接中…' : codexQueueConfigured ? '重新连接' : '连接 Codex'}</button>
           <p role="status">{codexQueueMessage}</p>
           <button type="button" disabled={!codexQueueConfigured || !coordinationAdapters?.get('codex') || coordinationSnapshot.status === 'running'} onClick={() => {
             const batch = prepareDeepSeekBatch(sessionRef.current, 'codex')
             sessionRef.current = batch.session
             onSessionChange(batch.session, true)
             setBatchNotice(`已设置 ${batch.configured.length} 个 Codex 自动任务；${batch.skipped.length} 个保留原方式。${batch.skipped.map(item => item.reason).join('；')}`)
-          }}>将适合的任务统一设为 Codex 自动执行</button>
-        </div>
-        <DeepSeekConnectionSettings />
-        <p>连接自己的账户后，可将尚未开始且无需操作文件或软件的任务统一交给 DeepSeek。其余任务保留原方式；结果仍需验收后才会解锁下一步。</p>
+          }}>应用 Codex 到待执行任务</button>
+        </div>}
+        {executionChoice === 'deepseek' && <div><DeepSeekConnectionSettings />
+        <p>使用个人 API Key；调用将消耗账户余额。</p>
         <button type="button" disabled={!deepSeekConfigured || !coordinationAdapters?.get('deepseek') || coordinationSnapshot.status === 'running'} onClick={() => {
           const batch = prepareDeepSeekBatch(sessionRef.current)
           sessionRef.current = batch.session
           onSessionChange(batch.session, true)
           setBatchNotice(`已设置 ${batch.configured.length} 个自动任务。${batch.skipped.map(item => `${session.plan.tasks.find(t => t.id === item.taskId)?.title}：${item.reason}`).join('；')}`)
-        }}>将适合的任务统一设为 DeepSeek 自动执行</button>
+        }}>应用 DeepSeek 到待执行任务</button></div>}
         {batchNotice && <p role="status">{batchNotice}</p>}
         {!deepSeekConfigured && !codexQueueConfigured && <p>先连接本机 Codex 或填写个人 DeepSeek 账户；选择拆解大脑不会自动连接执行账户。</p>}
       </section>
@@ -868,17 +872,17 @@ export function TaskPlanCards({
         <CodexActivity kind="execution" since={Date.parse(session.createdAt)} taskIds={session.plan.tasks.map(task => task.id)} />
         <header>
           <div>
-            <strong>自动协调</strong>
+            <strong>3 · 执行进度</strong>
             <span role="status">{coordinationStatusLabels[coordinationSnapshot.status]}</span>
           </div>
           <small>
             已接入：{connectedCoordinationProviders.length
               ? connectedCoordinationProviders.map(provider => provider.displayName).join('、')
-              : '暂无 A 组执行适配器'}；自动任务：{automaticTaskCount}；活动任务：{coordinationSnapshot.activeTaskIds.length}
+              : '暂无可用执行服务'}；自动任务：{automaticTaskCount}；活动任务：{coordinationSnapshot.activeTaskIds.length}
           </small>
         </header>
         <p className="task-coordination-queue" role="status">
-          队列说明：当前可执行 {scheduling.runnableTaskIds.length} 个；关键路径任务 {scheduling.criticalPathTaskIds.length} 个；等待依赖 {scheduling.waitingTaskIds.length} 个。
+          待执行 {scheduling.runnableTaskIds.length} 个；等待前置任务 {scheduling.waitingTaskIds.length} 个。
         </p>
         {coordinationSnapshot.status === 'confirming' && (
           <div className="task-coordination-confirm" role="alert">
@@ -926,10 +930,10 @@ export function TaskPlanCards({
         )}
         {!connectedCoordinationProviders.length && (
           <p className="task-coordination-unavailable" role="status">
-            A 组执行适配器尚未接入；不会创建模拟执行或静默切换 Provider，人工流程仍可使用。
+            当前没有可用的自动执行服务，请检查桌面应用连接。
           </p>
         )}
-        {connectedCoordinationProviders.some(provider => provider.id === 'deepseek') && (
+        {needsDeepSeek && !deepSeekConfigured && (
           <p className="task-coordination-unavailable" role="status">
             {deepSeekConfigured ? 'DeepSeek 个人执行账户已配置，启动前请检查任务队列。' : 'DeepSeek 执行接口已接入，但尚未连接个人账户，请先在上方配置。'}
           </p>
@@ -1267,7 +1271,7 @@ export function TaskPlanCards({
                   )}
                 </select>
                 <small>
-                  {coordinationAdapterAvailable
+                  {availableAutomaticModes.length === 0 ? '当前任务分配给人工平台。请在上方连接 Codex 或 DeepSeek，并点击批量自动执行按钮；也可先修改本任务的执行 AI。' : coordinationAdapterAvailable
                     ? availableAutomaticModes.some(mode => !automaticModeReadiness[mode].ready)
                       ? '部分自动模式仍缺少交接文件确认或读取授权；补齐后才能启用。'
                       : '自动模式由统一协调器派发；切换执行 AI 后会恢复为人工执行。'

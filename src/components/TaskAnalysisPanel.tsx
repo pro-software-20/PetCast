@@ -1,3 +1,4 @@
+import { prepareDeepSeekBatch } from '../orchestration/batchExecutionSetup'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { BrainProvider } from '../orchestration/BrainProvider'
@@ -670,9 +671,15 @@ export function TaskAnalysisPanel({
             plan: planningOutcome.plan,
           })
           if (sessionOutcome.ok) {
-            setTaskSession(sessionOutcome.session)
+            let preparedSession = sessionOutcome.session
+            // A successful personal AI plan reuses its connection for eligible text tasks.
+            const executionBrain = planningOutcome.plan.planningBrain?.actualBrainId
+            if (executionBrain === 'codex' || executionBrain === 'deepseek') {
+              preparedSession = prepareDeepSeekBatch(preparedSession, executionBrain).session
+            }
+            setTaskSession(preparedSession)
             setAnalysisDetailsOpen(false)
-            void persistSession(sessionOutcome.session)
+            void persistSession(preparedSession)
           } else {
             setPlanError(`${sessionOutcome.message}（${sessionOutcome.code}）`)
           }
@@ -1125,58 +1132,7 @@ export function TaskAnalysisPanel({
       )}
       </div>
 
-      <details
-        className={`codex-setup-status is-${codexSetupTone}`}
-        open={codexSetupOpen}
-        onToggle={(event) => setCodexSetupOpen(event.currentTarget.open)}
-      >
-        <summary>
-          <span><strong>Codex 自动执行（可选）</strong><small>不会影响人工复制与任务跟踪</small></span>
-          <em role="status">{codexSetupLabel}</em>
-        </summary>
-        <div className="codex-setup-content">
-          <section className={`chatgpt-auth-status is-${chatGptAuthPresentation.tone}`} role="status">
-            <div>
-              <strong>{chatGptAuthPresentation.title}</strong>
-              <p>{chatGptAuthPresentation.message}</p>
-              <small>PetCast 只在主进程安全保存凭据；任务页面、日志和任务存档不会收到 Token。</small>
-            </div>
-            <div className="chatgpt-auth-actions">
-              {chatGptAuth.status === 'connecting' ? (
-                <button type="button" onClick={() => {
-                  const requestId = chatGptSignInRequest.current
-                  if (requestId) window.petcast?.cancelChatGptSignIn?.(requestId)
-                }}>取消登录</button>
-              ) : chatGptAuthPresentation.connected ? <>
-                <button type="button" onClick={() => void window.petcast?.openChatGptUsage?.()}>管理用量</button>
-                <button type="button" onClick={() => void signOutChatGpt()}>断开连接</button>
-              </> : chatGptAuth.status !== 'browser' ? (
-                <button type="button" className="chatgpt-continue" onClick={() => void signInWithChatGpt()}>
-                  {chatGptAuthPresentation.actionLabel}
-                </button>
-              ) : null}
-            </div>
-          </section>
 
-          <section className={`codex-environment-status is-${codexEnvironmentPresentation.tone}`} role="status">
-            <div>
-              <strong>{codexEnvironmentPresentation.title}</strong>
-              <p>{codexEnvironmentPresentation.message}</p>
-              {codexEnvironmentPresentation.version && (
-                <small>当前版本：{codexEnvironmentPresentation.version}；最低支持：{MINIMUM_CODEX_VERSION}</small>
-              )}
-            </div>
-            {codexEnvironment.status !== 'browser' && (
-              <button type="button" disabled={codexEnvironment.status === 'checking'} onClick={() => {
-                setCodexSetupOpen(true)
-                void checkCodex()
-              }}>
-                {codexEnvironment.status === 'checking' ? '检查中…' : '重新检查'}
-              </button>
-            )}
-          </section>
-        </div>
-      </details>
 
       {result && taskSession && (
         <TaskPlanCards
