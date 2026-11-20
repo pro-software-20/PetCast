@@ -15,4 +15,5 @@ export const DEEPSEEK_TASK_BRAIN_PROFILE: TaskBrainProfile = {
 export const TASK_BRAIN_PROFILES: Record<TaskBrainId, TaskBrainProfile> = {
   local: LOCAL_TASK_BRAIN_PROFILE,
   deepseek: DEEPSEEK_TASK_BRAIN_PROFILE,
+  codex: { id: 'codex', displayName: 'Codex', mode: 'remote' },
 }

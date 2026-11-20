@@ -4,8 +4,8 @@ import type { UsageConnectionState, UsageSource } from '../usage/UsageConnection
 export function usageStatus(state: UsageConnectionState) {
   const source = state.source === 'real' ? '真实额度' : '模拟数据'
   if (!state.reading) return `${source} · ${state.refreshing ? '读取中' : '等待读取'}`
-  if (state.reading.status === 'unavailable') return `${source} · 不可用`
-  if (state.reading.status === 'stale') return `${source} · 旧数据`
+  if (state.reading.status === 'unavailable') return `额度暂不可用：${state.reading.error}`
+  if (state.reading.status === 'stale') return `上次额度，待更新：${state.reading.error}`
   return `${source}${state.refreshing ? ' · 刷新中' : ''}`
 }
 

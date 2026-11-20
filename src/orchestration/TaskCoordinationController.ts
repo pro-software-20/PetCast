@@ -57,6 +57,7 @@ export interface TaskCoordinationController {
   hydrate(): Promise<void>
   start(): Promise<void>
   pause(): void
+  pauseAndWait(): Promise<void>
   resume(): Promise<void>
   runNow(): Promise<void>
   inspectExisting(): Promise<void>
@@ -426,6 +427,10 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
 
   async cancelTask(taskId: string) {
     if (this.snapshot.status === 'disposed') return
+    this.pause()
+    // A dispatch already in progress must persist its receipt before cancellation.
+    if (this.cycle) await this.cycle
+    if (this.isDisposed()) return
     await this.recordAudit({ type: 'execution-cancel-requested', level: 'info', summary: '用户请求取消外部执行。', taskId })
     const result = await cancelCoordinatedTask({
       session: this.session,
@@ -463,6 +468,11 @@ class DefaultTaskCoordinationController implements TaskCoordinationController {
       type: 'execution-cancelled', level: 'info', summary: '外部执行已请求取消并完成状态核对。',
       taskId, providerId: record.providerId, dispatchId: record.dispatchId, attempt: record.attempt,
     })
+  }
+
+  async pauseAndWait() {
+    this.pause()
+    if (this.cycle) await this.cycle
   }
 
   async resolveTask(taskId: string, dispatchId: string, action: TaskRecoveryAction, riskAcknowledged: boolean) {

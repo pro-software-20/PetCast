@@ -35,6 +35,19 @@ const providers = () => ({
   deepseek: new DeepSeekBrainProvider(),
 })
 
+test('Codex planning stamps its source; missing connection falls back without invoking another AI', async () => {
+  const set = providers()
+  const localPlan = await set.local.createPlan(input)
+  set.codex = { profile: { id: 'codex', displayName: 'Codex', mode: 'remote' }, createPlan: async () => localPlan }
+  const result = await createPlanWithTaskBrain('codex', input, set)
+  assert.equal(result.ok, true)
+  assert.equal(result.plan.planningBrain.actualBrainId, 'codex')
+  delete set.codex
+  set.deepseek.createPlan = () => { throw Error('must not call DeepSeek') }
+  const fallback = await createPlanWithTaskBrain('codex', input, set)
+  assert.deepEqual(fallback.plan.planningBrain, { requestedBrainId: 'codex', actualBrainId: 'local', fallbackCode: 'NOT_CONFIGURED' })
+})
+
 test('local brain creates a sourced plan without calling DeepSeek', async () => {
   let deepSeekCalls = 0
   const set = providers()

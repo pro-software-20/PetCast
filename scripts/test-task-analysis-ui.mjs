@@ -139,6 +139,55 @@ if (!process.versions.electron) {
   ipcMain.handle('prompt:optimize', () => ({ ok: false, code: 'UPSTREAM_UNAVAILABLE' }))
   ipcMain.handle('task-plan:create', () => ({ ok: false, code: 'UPSTREAM_UNAVAILABLE' }))
   ipcMain.on('task-plan:cancel', () => undefined)
+  let personalConfigured = true
+  let codexQueueConnected = false
+  let codexQueueCalls = 0
+  const codexQueueResults = new Map()
+  ipcMain.handle('codex-queue:status', () => ({ configured: codexQueueConnected }))
+  let codexPlanCalls = 0
+  let codexPlanCancelled = false
+  let codexPlanBehavior = 'success'
+  const codexActivity = []
+  ipcMain.handle('codex-queue:activity', () => codexActivity)
+  ipcMain.handle('codex-plan:create', async (_event, request) => {
+    codexPlanCalls++
+    codexPlanCancelled = false
+    const entry = { id: request.requestId, kind: 'planning', message: 'Codex 正在生成测试方案…', active: true, updatedAt: now() }
+    codexActivity.push(entry)
+    if (codexPlanBehavior === 'wait') {
+      await new Promise(resolve => setTimeout(resolve, 1800))
+      if (codexPlanCancelled) return { ok: false, code: 'UPSTREAM_UNAVAILABLE' }
+    }
+    entry.active = false
+    entry.message = 'Codex 测试方案已返回'
+    return { ok: true, provider: 'codex', plan: {
+      schemaVersion: 1, id: 'codex-plan-fixture', title: 'Codex 校园活动方案', goal: request.input.prompt,
+      assumptions: [], finalAcceptanceChecks: ['方案包含活动步骤'], tasks: [{
+        id: 'draft', title: '撰写校园活动详细方案', description: '根据用户的目标整理校园活动安排，给出活动步骤及人员分配。',
+        dependsOn: [], recommendedProviderId: 'codex', executionMode: 'manual', prompt: '撰写一份包含时间安排和人员分工的校园活动方案，交付可检查的文本。',
+        files: { inputs: [], readPaths: [], allowedWritePaths: [], forbiddenPaths: [], outputPaths: [] },
+        expectedDeliverables: ['校园活动方案文本'], acceptanceChecks: ['包含活动步骤与分工'],
+      }],
+    } }
+  })
+  ipcMain.on('codex-plan:cancel', () => { codexPlanCancelled = true })
+  ipcMain.handle('codex-queue:connect', () => { codexQueueConnected = true; return { configured: true, message: 'fixture connected' } })
+  ipcMain.handle('codex-queue:dispatch', (_event, input) => {
+    codexQueueCalls++
+    const receipt = { dispatchId: input.dispatchId, adapterExecutionId: `codex-${codexQueueCalls}`, taskId: input.taskId, state: 'queued', acceptedAt: now() }
+    codexQueueResults.set(input.dispatchId, { dispatchId: receipt.dispatchId, adapterExecutionId: receipt.adapterExecutionId, taskId: receipt.taskId, state: 'completed', observedAt: now(), result: {
+      summary: 'Codex 文本结果', outputText: '仅用于界面测试的 Codex 输出。', verification: input.acceptanceChecks.map(label => ({ label, status: 'not-run' })),
+    } })
+    return { ok: true, value: receipt }
+  })
+  ipcMain.handle('codex-queue:inspect', (_event, reference) => ({ ok: true, value: codexQueueResults.get(reference.dispatchId) }))
+  ipcMain.handle('codex-queue:cancel', (_event, reference) => ({ ok: true, value: { ...reference, state: 'cancelled', observedAt: now() } }))
+  ipcMain.handle('deepseek-execution:status', () => ({ configured: personalConfigured, model: 'fixture-only' }))
+  ipcMain.handle('deepseek-execution:configure', (_event, input) => {
+    assert.equal(input.apiKey, 'fixture-only-secret')
+    personalConfigured = true
+    return { ok: true, message: '测试连接通过' }
+  })
   ipcMain.handle('deepseek-execution:dispatch', (_event, input) => {
     deepSeekDispatchCount += 1
     const receipt = {
@@ -502,7 +551,7 @@ if (!process.versions.electron) {
     await setValue('#task-planning-brain', 'deepseek')
     assert.match(
       await js("document.querySelector('.task-brain-selector').textContent"),
-      /Prompt、本地分析结果和附件元信息发送到团队服务/,
+      /需要你自己的 DeepSeek API Key/,
     )
     assert.equal(await js("document.querySelectorAll('.codex-setup-status .chatgpt-auth-status').length"), 1)
     assert.equal(await js("document.querySelectorAll('.codex-setup-status .codex-environment-status').length"), 1)
@@ -537,8 +586,8 @@ if (!process.versions.electron) {
     await analyze(mixedPrompt)
     console.log('Task UI: mixed plan created')
     assert.equal(await js("document.querySelectorAll('.task-plan-card').length"), 4)
-    assert.match(await js("document.querySelector('.task-coordination-controls').textContent"), /已接入：DeepSeek/)
-    assert.match(await js("document.querySelector('.task-coordination-controls').textContent"), /DEEPSEEK_API_KEY/)
+    assert.match(await js("document.querySelector('.task-coordination-controls').textContent"), /已接入：Codex、DeepSeek/)
+    assert.match(await js("document.querySelector('.task-coordination-controls').textContent"), /个人执行账户已配置/)
     assert.equal(await js("[...document.querySelectorAll('.task-coordination-controls button')].find(button=>button.textContent.trim()==='启动自动协调').disabled"), true)
     assert.equal(await js("document.querySelector('.task-execution-mode select').value"), 'manual')
     assert.equal(await js("!!document.querySelector('.task-analysis-overview')"), true)
@@ -680,7 +729,7 @@ if (!process.versions.electron) {
     await wait(`document.querySelectorAll('.task-plan-card')[${deepSeekIndex}]?.classList.contains('is-review')`, 'DeepSeek result enters review')
     assert.equal(deepSeekDispatchCount, 1)
     assert.ok(deepSeekInspectCount >= 1)
-    assert.equal(await js("document.querySelector('.task-coordination-controls').textContent.includes('DEEPSEEK_API_KEY')"), true)
+    assert.equal(await js("document.querySelector('.task-coordination-controls').textContent.includes('个人执行账户已配置')"), true)
   }
 
   async function interruptedAndCorruptRecoveryScenario() {
@@ -716,11 +765,85 @@ if (!process.versions.electron) {
     await wait("!document.querySelector('.task-storage-notice')", 'corrupt session cleared explicitly')
   }
 
+  async function personalBatchScenario() {
+    personalConfigured = false
+    fixtureMode = 'manual'
+    await createWindow({ clearStorage: true })
+    await openTaskAnalysis()
+    await analyze('请撰写校园活动方案与宣传文案，最后汇总。')
+    await wait(`!!document.querySelector('[aria-label="整组任务执行方式"]')`, 'batch controls')
+    assert.equal(await js(`document.querySelector('[aria-label="整组任务执行方式"] > button').disabled`), true)
+    await js(`document.querySelector('[aria-label="整组任务执行方式"] summary').click()`)
+    await setValue('[aria-label="整组任务执行方式"] input[type=password]', 'fixture-only-secret')
+    await js(`document.querySelector('[aria-label="整组任务执行方式"] details button').click()`)
+    await wait(`!document.querySelector('[aria-label="整组任务执行方式"] > button').disabled`, 'personal account ready')
+    assert.equal(await js(`document.querySelector('[aria-label="整组任务执行方式"] input[type=password]').value`), '')
+    await click('将适合的任务统一设为 DeepSeek 自动执行')
+    await wait(`[...document.querySelectorAll('.task-execution-mode select')].some(e=>e.value==='api')`, 'batch configured')
+    assert.equal(await js(`JSON.stringify(localStorage).includes('fixture-only-secret')`), false)
+    console.log('Personal account UI: missing credentials blocked, connect clears password, batch sets API mode without dispatch')
+  }
+
+  async function codexQueueScenario() {
+    fixtureMode = 'manual'
+    await createWindow({ clearStorage: true })
+    await openTaskAnalysis()
+    await analyze('请撰写一份校园读书活动方案。')
+    await click('连接并允许使用本机 Codex')
+    await wait(`[...document.querySelectorAll('button')].some(b=>b.textContent==='将适合的任务统一设为 Codex 自动执行'&&!b.disabled)`, 'Codex connected')
+    await click('将适合的任务统一设为 Codex 自动执行')
+    await wait(`[...document.querySelectorAll('.task-execution-mode select')].some(e=>e.value==='local-agent')`, 'Codex mode')
+    await click('启动自动协调')
+    await wait(`!!document.querySelector('.task-coordination-confirm')`, 'Codex confirmation')
+    assert.equal(codexQueueCalls,0)
+    await click('确认并启动')
+    await wait(`!!document.querySelector('.task-plan-card.is-review')`, 'Codex result review')
+    assert.ok(codexQueueCalls>0)
+    assert.ok(await js(`document.querySelector('.task-plan-card.is-review').textContent.includes('Codex')`))
+    console.log('Codex queue UI passed: explicit connection, batch local-agent, confirmation, dispatch and result review')
+  }
+
+  async function planningConnectionsScenario() {
+    fixtureMode = 'manual'
+    personalConfigured = false
+    codexQueueConnected = false
+    await createWindow({ clearStorage: true })
+    await openTaskAnalysis()
+    await setValue('#task-planning-brain', 'codex')
+    await wait(`document.body.innerText.includes('尚未连接：现在开始分析将使用本地规则')`, 'upfront prerequisite')
+    const before = codexPlanCalls
+    await analyze('请撰写一份校园活动方案。')
+    assert.equal(codexPlanCalls, before)
+    assert.match(await js(`document.querySelector('.task-analysis-overview').textContent`), /计划选择：Codex.*实际使用：本地规则/)
+    await createWindow({ clearStorage: true })
+    await openTaskAnalysis()
+    await setValue('#task-planning-brain', 'codex')
+    await click('连接并允许使用本机 Codex')
+    await wait(`document.body.innerText.includes('连接已就绪')`, 'Codex before planning')
+    codexPlanBehavior = 'wait'
+    await setValue('#task-analysis-prompt', '请撰写一份校园活动方案。')
+    await click('开始分析')
+    await wait(`document.body.innerText.includes('Codex 正在生成测试方案')`, 'visible planning progress')
+    await click('停止分析')
+    await wait(`!document.querySelector('.task-plan-card') && document.body.innerText.includes('开始分析')`, 'stop planning')
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    assert.equal(codexPlanCancelled, true)
+    assert.equal(await js(`!!document.querySelector('.task-plan-card')`), false)
+    codexPlanBehavior = 'success'
+    await analyze('请撰写一份校园活动方案。')
+    assert.match(await js(`document.querySelector('.task-analysis-overview').textContent`), /任务拆解大脑：Codex/)
+    assert.equal(await js(`document.querySelector('.task-plan-card').textContent.includes('校园活动详细方案')`), true)
+    console.log('Upfront planning passed: Codex selection, unconnected local fallback without call, connection, visible progress, cancellation and successful plan')
+  }
+
   try {
     await manualFallbackScenario()
     await deepSeekCoordinationScenario()
     await automaticExecutionScenario()
     await interruptedAndCorruptRecoveryScenario()
+    await personalBatchScenario()
+    await codexQueueScenario()
+    await planningConnectionsScenario()
     assert.deepEqual(networkRequests, [], `Unexpected network requests: ${networkRequests.join(', ')}`)
     assert.ok(cancelledExecutions.length > 0, 'Interrupted execution should be cancelled during reload')
     console.log('Task analysis UI acceptance passed: manual fallback, DeepSeek bridge coordination, persistence, simulated Codex execution, artifacts, acceptance, report, interruption and corrupt-session recovery; zero network/model calls')

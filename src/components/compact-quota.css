@@ -1,0 +1,9 @@
+.device-ring-quotas{display:grid;grid-template-columns:1fr 1fr;gap:3cqw;width:94%;flex:none;margin:0 0 3cqw}
+.device-ring-item{display:flex;flex-direction:column;align-items:center;gap:1cqw;min-width:0;color:#55704c}
+.device-quota-ring{width:25cqw;height:25cqw;border-radius:50%;padding:3cqw;box-sizing:border-box}
+.device-quota-ring>div{height:100%;border-radius:50%;background:#f6f8ef;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.1}
+.device-quota-ring strong{font-size:7cqw}.device-quota-ring span{font-size:4.5cqw;font-weight:700}
+.device-reset-countdown{font-size:4cqw;font-weight:600;line-height:1.25;white-space:nowrap}
+.device-reset-date{font-size:3.9cqw;line-height:1.2;color:#71836a;white-space:nowrap}
+.device-ring-quotas>small{grid-column:1/-1;text-align:center}
+.device-screen.is-stale .device-quota-ring{opacity:.6}

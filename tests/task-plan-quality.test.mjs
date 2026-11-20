@@ -47,6 +47,17 @@ const input = {
   availableProviders: DEFAULT_PROVIDER_PROFILES,
 }
 
+test('remote brain retains capable worker choice and replaces an incapable provider', () => {
+  const remote = structuredClone(plan)
+  remote.tasks[0].recommendedProviderId = 'codex'
+  remote.tasks[1].recommendedProviderId = 'doubao'
+  const result = refreshTaskPlanRecommendations(remote, input, true)
+  assert.equal(result.tasks[0].recommendedProviderId, 'codex')
+  assert.match(result.tasks[0].providerRecommendation.reason, /主控 AI 推荐/)
+  assert.equal(result.tasks[1].recommendedProviderId, 'codex')
+  assert.equal(remote.tasks[1].recommendedProviderId, 'doubao')
+})
+
 test('remote task content remains stable while local worker recommendations are refreshed', () => {
   const refreshed = refreshTaskPlanRecommendations(plan, input)
   assert.deepEqual(refreshed.tasks.map(item => item.recommendedProviderId), [

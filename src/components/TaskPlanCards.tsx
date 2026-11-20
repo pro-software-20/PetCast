@@ -1,5 +1,9 @@
+import './task-workflow.css'
 import { TaskEvidencePanel } from './TaskEvidencePanel'
 import { DeliveryVersions } from './DeliveryVersions'
+import { DeepSeekConnectionSettings } from './DeepSeekConnectionSettings'
+import { CodexActivity } from './CodexActivity'
+import { prepareDeepSeekBatch } from '../orchestration/batchExecutionSetup'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceSnapshot } from '../../electron/workspaceProtocol'
 import type { PreparedCodexTaskExecution, TaskExecutionArtifactView } from '../../electron/taskExecutionProtocol'
@@ -346,6 +350,24 @@ export function TaskPlanCards({
   } | null>(null)
   const [executionProgress, setExecutionProgress] = useState<string | null>(null)
   const [executionBusy, setExecutionBusy] = useState(false)
+  const [deepSeekConfigured, setDeepSeekConfigured] = useState(false)
+  const [codexQueueConfigured, setCodexQueueConfigured] = useState(false)
+  const [codexQueueBusy, setCodexQueueBusy] = useState(false)
+  const [codexQueueMessage, setCodexQueueMessage] = useState('连接本机已登录的 Codex 后，可加入自动任务队列。')
+  const [batchNotice, setBatchNotice] = useState('')
+  const [executionChoice, setExecutionChoice] = useState<'codex' | 'deepseek'>('codex')
+  useEffect(() => {
+    let active = true
+    const check = () => {
+      void window.petcast?.readCodexQueueStatus?.().then(status => { if (active) setCodexQueueConfigured(status.configured) }).catch(() => { if (active) setCodexQueueConfigured(false) })
+      void window.petcast?.readDeepSeekConnection?.().then(status => {
+      if (active) setDeepSeekConfigured(status.configured)
+    }).catch(() => { if (active) setDeepSeekConfigured(false) }) }
+    check()
+    void window.petcast?.readCodexQueueStatus?.().then(status => { if (active) setCodexQueueConfigured(status.configured) }).catch(() => {})
+    window.addEventListener('petcast:execution-connection-changed', check)
+    return () => { active = false; window.removeEventListener('petcast:execution-connection-changed', check) }
+  }, [])
   const [artifactViews, setArtifactViews] = useState<Record<string, TaskExecutionArtifactView>>({})
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(() => findFocusTaskId(session))
   const cancelRequested = useRef(new Set<string>())
@@ -370,7 +392,9 @@ export function TaskPlanCards({
   const codexExecutionAccess = getCodexExecutionAccess(codexEnvironment)
   const connectedCoordinationProviders = providers.filter(provider => Boolean(coordinationAdapters?.get(provider.id)))
   const automaticTaskCount = session.plan.tasks.filter(task => task.executionMode !== 'manual').length
-  const coordinationAvailable = connectedCoordinationProviders.length > 0 && automaticTaskCount > 0
+  const needsDeepSeek = session.plan.tasks.some(task => task.executionMode === 'api' && session.runs.find(run => run.taskId === task.id)?.assignedProviderId === 'deepseek')
+  const needsCodexQueue = session.plan.tasks.some(task => task.executionMode === 'local-agent' && session.runs.find(run => run.taskId === task.id)?.assignedProviderId === 'codex')
+  const coordinationAvailable = connectedCoordinationProviders.length > 0 && automaticTaskCount > 0 && (!needsDeepSeek || deepSeekConfigured) && (!needsCodexQueue || codexQueueConfigured)
   const dispatchPreview = coordinationSnapshot.dispatchPreview
   const scheduling = useMemo(() => analyzeTaskScheduling(session), [session])
   const schedulingByTaskId = useMemo(
@@ -808,20 +832,57 @@ export function TaskPlanCards({
       </div>
       </header>
 
+      <section className="task-session-restore" aria-label="整组任务执行方式">
+        <strong>2 · 选择执行 AI</strong>
+        <p>连接账户 → 应用到任务 → 确认启动。支持纯文本任务，涉及文件操作的任务需单独设置。</p>
+        <label>执行 AI <select value={executionChoice} onChange={event => setExecutionChoice(event.target.value as 'codex' | 'deepseek')} disabled={coordinationSnapshot.status === 'running'}><option value="codex">Codex · 本机账户</option><option value="deepseek">DeepSeek · API 账户</option></select></label>
+        {executionChoice === 'codex' && <div>
+          <strong>Codex 本机自动执行 · {codexQueueConfigured ? '已连接' : '未连接'}</strong>
+          <p>使用你本机已登录的 Codex 额度。</p>
+          <button type="button" disabled={codexQueueBusy || !window.petcast?.connectCodexQueue} onClick={async () => {
+            setCodexQueueBusy(true)
+            try {
+              const result = await window.petcast!.connectCodexQueue()
+              setCodexQueueConfigured(result.configured)
+              setCodexQueueMessage(result.message)
+            } catch { setCodexQueueMessage('本机 Codex 连接失败，请重试。') }
+            finally { setCodexQueueBusy(false) }
+          }}>{codexQueueBusy ? '连接中…' : codexQueueConfigured ? '重新连接' : '连接 Codex'}</button>
+          <p role="status">{codexQueueMessage}</p>
+          <button type="button" disabled={!codexQueueConfigured || !coordinationAdapters?.get('codex') || coordinationSnapshot.status === 'running'} onClick={() => {
+            const batch = prepareDeepSeekBatch(sessionRef.current, 'codex')
+            sessionRef.current = batch.session
+            onSessionChange(batch.session, true)
+            setBatchNotice(`已设置 ${batch.configured.length} 个 Codex 自动任务；${batch.skipped.length} 个保留原方式。${batch.skipped.map(item => item.reason).join('；')}`)
+          }}>应用 Codex 到待执行任务</button>
+        </div>}
+        {executionChoice === 'deepseek' && <div><DeepSeekConnectionSettings />
+        <p>使用个人 API Key；调用将消耗账户余额。</p>
+        <button type="button" disabled={!deepSeekConfigured || !coordinationAdapters?.get('deepseek') || coordinationSnapshot.status === 'running'} onClick={() => {
+          const batch = prepareDeepSeekBatch(sessionRef.current)
+          sessionRef.current = batch.session
+          onSessionChange(batch.session, true)
+          setBatchNotice(`已设置 ${batch.configured.length} 个自动任务。${batch.skipped.map(item => `${session.plan.tasks.find(t => t.id === item.taskId)?.title}：${item.reason}`).join('；')}`)
+        }}>应用 DeepSeek 到待执行任务</button></div>}
+        {batchNotice && <p role="status">{batchNotice}</p>}
+        {!deepSeekConfigured && !codexQueueConfigured && <p>先连接本机 Codex 或填写个人 DeepSeek 账户；选择拆解大脑不会自动连接执行账户。</p>}
+      </section>
+
       <section className={`task-coordination-controls is-${coordinationSnapshot.status}`} aria-label="自动协调">
+        <CodexActivity kind="execution" since={Date.parse(session.createdAt)} taskIds={session.plan.tasks.map(task => task.id)} />
         <header>
           <div>
-            <strong>自动协调</strong>
+            <strong>3 · 执行进度</strong>
             <span role="status">{coordinationStatusLabels[coordinationSnapshot.status]}</span>
           </div>
           <small>
             已接入：{connectedCoordinationProviders.length
               ? connectedCoordinationProviders.map(provider => provider.displayName).join('、')
-              : '暂无 A 组执行适配器'}；自动任务：{automaticTaskCount}；活动任务：{coordinationSnapshot.activeTaskIds.length}
+              : '暂无可用执行服务'}；自动任务：{automaticTaskCount}；活动任务：{coordinationSnapshot.activeTaskIds.length}
           </small>
         </header>
         <p className="task-coordination-queue" role="status">
-          队列说明：当前可执行 {scheduling.runnableTaskIds.length} 个；关键路径任务 {scheduling.criticalPathTaskIds.length} 个；等待依赖 {scheduling.waitingTaskIds.length} 个。
+          待执行 {scheduling.runnableTaskIds.length} 个；等待前置任务 {scheduling.waitingTaskIds.length} 个。
         </p>
         {coordinationSnapshot.status === 'confirming' && (
           <div className="task-coordination-confirm" role="alert">
@@ -869,12 +930,12 @@ export function TaskPlanCards({
         )}
         {!connectedCoordinationProviders.length && (
           <p className="task-coordination-unavailable" role="status">
-            A 组执行适配器尚未接入；不会创建模拟执行或静默切换 Provider，人工流程仍可使用。
+            当前没有可用的自动执行服务，请检查桌面应用连接。
           </p>
         )}
-        {connectedCoordinationProviders.some(provider => provider.id === 'deepseek') && (
+        {needsDeepSeek && !deepSeekConfigured && (
           <p className="task-coordination-unavailable" role="status">
-            DeepSeek API 自动执行已接入桌面端。请在启动应用前仅在本机配置 <code>DEEPSEEK_API_KEY</code>；密钥不会显示或保存到任务记录中。未配置时会安全提示不可用，不会自动重试或切换执行 AI。
+            {deepSeekConfigured ? 'DeepSeek 个人执行账户已配置，启动前请检查任务队列。' : 'DeepSeek 执行接口已接入，但尚未连接个人账户，请先在上方配置。'}
           </p>
         )}
         {coordinationSnapshot.error && <p className="task-plan-error" role="alert">{coordinationSnapshot.error}</p>}
@@ -884,6 +945,7 @@ export function TaskPlanCards({
           </p>
         ))}
         <div className="task-coordination-actions">
+          {automaticTaskCount === 0 && <p role="status">还没有自动任务：请在上方设置整组执行方式，或修改单个任务的执行方式。</p>}
           {coordinationSnapshot.status === 'confirming' ? (
             <>
               <button type="button" className="is-primary" onClick={() => void onCoordinationStart?.()}>
@@ -1125,6 +1187,21 @@ export function TaskPlanCards({
                 <strong>{taskNextStep}</strong>
               </div>
 
+              <div className="task-run-actions" aria-label={`任务 ${index + 1} 停止操作`}>
+                {run.automaticExecution?.state === 'running'
+                  ? <button type="button" onClick={() => { onCoordinationPause?.(); cancelRunningExecution(run.automaticExecution!.executionId) }}>停止 Codex 执行</button>
+                  : coordinationRecord && ['queued', 'running', 'needs-input', 'unknown', 'dispatching'].includes(coordinationRecord.phase)
+                    ? <button type="button" onClick={() => { onCoordinationPause?.(); void onCoordinationCancelTask?.(task.id) }}>停止并取消执行</button>
+                    : !unresolvedCoordination && !['done', 'failed', 'cancelled'].includes(run.status) && !run.automaticExecution
+                      ? <button type="button" onClick={() => {
+                        onCoordinationPause?.()
+                        onCancelEvaluation?.(task.id)
+                        if (preparingExecution?.taskId === task.id) cancelPreparingExecution()
+                        if (preparedExecution?.taskId === task.id) cancelPreparedExecution()
+                        applyAction({ type: 'cancel', taskId: task.id, message: '用户已取消任务跟踪。若在外部 AI 手动执行，请同时在该软件中停止。' })
+                      }}>取消任务</button>
+                      : null}
+              </div>
               {expanded && <div id={taskPanelId} className="task-plan-card-body">
               <p className="task-plan-description">{task.description}</p>
               {run.statusMessage && <p className="task-run-message" role="status">{run.statusMessage}</p>}
@@ -1194,7 +1271,7 @@ export function TaskPlanCards({
                   )}
                 </select>
                 <small>
-                  {coordinationAdapterAvailable
+                  {availableAutomaticModes.length === 0 ? '当前任务分配给人工平台。请在上方连接 Codex 或 DeepSeek，并点击批量自动执行按钮；也可先修改本任务的执行 AI。' : coordinationAdapterAvailable
                     ? availableAutomaticModes.some(mode => !automaticModeReadiness[mode].ready)
                       ? '部分自动模式仍缺少交接文件确认或读取授权；补齐后才能启用。'
                       : '自动模式由统一协调器派发；切换执行 AI 后会恢复为人工执行。'

@@ -22,6 +22,16 @@ interface Window {
       input: import('../electron/taskPlanningProtocol').TaskPlanningIpcRequest,
     ) => Promise<import('../electron/taskPlanningProtocol').TaskPlanningServiceResult>
     cancelDeepSeekTaskPlan: (requestId: string) => void
+    readDeepSeekConnection: () => Promise<{ configured: boolean; model: string }>
+    connectCodexQueue: () => Promise<{ configured: boolean; message: string }>
+    readCodexQueueStatus: () => Promise<{ configured: boolean }>
+    readCodexActivity: () => Promise<Array<{ id: string; kind: 'planning' | 'execution' | 'connection'; taskId?: string; message: string; active: boolean; updatedAt: string }>>
+    planTaskWithCodex: (input: import('../electron/taskPlanningProtocol').TaskPlanningIpcRequest) => Promise<import('../electron/taskPlanningProtocol').TaskPlanningServiceResult>
+    cancelCodexTaskPlan: (id: string) => void
+    dispatchCodexQueue: (input: import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionDispatchInput) => Promise<import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionOutcome<import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionReceipt>>
+    inspectCodexQueue: (input: import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionReferenceInput) => Promise<import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionOutcome<import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionSnapshot>>
+    cancelCodexQueue: (input: import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionReferenceInput) => Promise<import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionOutcome<import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionSnapshot>>
+    configureDeepSeekConnection: (input: { apiKey: string; model: string }) => Promise<{ ok: boolean; message: string }>
     dispatchDeepSeekExecution: (
       input: import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionDispatchInput,
     ) => Promise<import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionOutcome<import('../electron/deepSeekExecutionProtocol').DeepSeekExecutionReceipt>>

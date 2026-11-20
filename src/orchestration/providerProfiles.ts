@@ -13,7 +13,7 @@ export const DEFAULT_PROVIDER_PROFILES: ProviderProfile[] = [
   {
     id: 'codex',
     displayName: 'Codex',
-    capabilities: ['coding', 'file-editing', 'testing'],
+    capabilities: ['planning', 'text-generation', 'coding', 'file-editing', 'testing'],
     executionModes: ['manual', 'local-agent'],
     quotaSupport: 'local-record',
   },

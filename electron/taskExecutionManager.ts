@@ -107,6 +107,7 @@ export class TaskExecutionManager {
   private readonly expiryTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly cleanupTimers = new Set<ReturnType<typeof setTimeout>>()
   private readonly pendingCleanup = new Map<string, TaskExecutionArtifact>()
+  private readonly rootCleanups = new Map<string, Promise<boolean>>()
   private runningId?: string
   private preparing?: PreparingExecution
   private disposed = false
@@ -172,12 +173,16 @@ export class TaskExecutionManager {
   }
 
   private async removeRoot(root: string): Promise<boolean> {
-    try {
-      await fs.rm(root, { recursive: true, force: true })
-      return true
-    } catch {
-      return false
-    }
+    const resolved = path.resolve(root)
+    // Only remove application-created staging directories, never a user workspace.
+    if (path.dirname(resolved) !== path.resolve(os.tmpdir()) || !path.basename(resolved).startsWith('petcast-codex-')) return false
+    const existing = this.rootCleanups.get(resolved)
+    if (existing) return existing
+    const cleanup = fs.rm(resolved, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+      .then(() => true, () => false)
+    this.rootCleanups.set(resolved, cleanup)
+    try { return await cleanup }
+    finally { if (this.rootCleanups.get(resolved) === cleanup) this.rootCleanups.delete(resolved) }
   }
 
   private scheduleDetachedCleanup(artifact: TaskExecutionArtifact, attempt = 0) {

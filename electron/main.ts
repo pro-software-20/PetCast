@@ -16,6 +16,7 @@ import { registerChatGptAuthIpc } from './chatGptAuthIpc.js'
 import { resolveAiServiceUrl } from './aiServiceConfig.js'
 import { registerCustomPetIpc } from './customPetIpc.js'
 import { registerDeepSeekExecutionIpc } from './deepSeekExecutionIpc.js'
+import { registerCodexQueueIpc } from './codexQueueIpc.js'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
 app.setAppUserModelId('io.github.pro-software-20.petcast')
@@ -235,6 +236,9 @@ if (ownsInstance) app.whenReady().then(async () => {
     app.getPath('userData'),
     rendererUrl,
     aiApiUrl,
+    (input, signal) => deepSeekExecutionManager.connectionStatus().configured
+      ? deepSeekExecutionManager.planWithPersonalAccount(input, signal)
+      : Promise.resolve({ ok: false, code: 'UPSTREAM_UNAVAILABLE' }),
   )
   const deepSeekExecutionManager = registerDeepSeekExecutionIpc({
     getWindow: () => mainWindow,
@@ -243,6 +247,7 @@ if (ownsInstance) app.whenReady().then(async () => {
     apiKey: process.env.DEEPSEEK_API_KEY,
     model: process.env.DEEPSEEK_MODEL,
   })
+  const codexQueue = registerCodexQueueIpc({ getWindow: () => mainWindow, rendererUrl, userData: app.getPath('userData'), identity: codexIdentity })
   registerWorkspaceIpc(() => mainWindow, app.getPath('userData'), rendererUrl, workspaceRegistry)
   const taskExecutionManager = registerTaskExecutionIpc({
     getWindow: () => mainWindow,
@@ -261,6 +266,7 @@ if (ownsInstance) app.whenReady().then(async () => {
     void Promise.all([
       taskExecutionManager.dispose(),
       deepSeekExecutionManager.dispose(),
+      codexQueue.dispose(),
     ]).finally(() => app.quit())
   })
   const savePath = path.join(app.getPath('userData'), 'petcast-save.json')

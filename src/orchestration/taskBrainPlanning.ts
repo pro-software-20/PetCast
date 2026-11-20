@@ -15,6 +15,7 @@ import type {
 export interface TaskBrainProviderSet {
   local: BrainProvider
   deepseek: BrainProvider
+  codex?: BrainProvider
 }
 
 const FALLBACK_CODES = new Set<BrainPlanningErrorCode>([
@@ -60,7 +61,8 @@ export async function createPlanWithTaskBrain(
   signal?: AbortSignal,
 ): Promise<BrainPlanningOutcome> {
   const selected = providers[requestedBrainId]
-  const primary = await safeCreatePlan(selected, input, signal)
+  const primary: BrainPlanningOutcome = selected ? await safeCreatePlan(selected, input, signal)
+    : { ok: false, code: 'NOT_CONFIGURED', message: '尚未连接所选 AI，使用本地规则。' }
   if (signal?.aborted) return { ok: false, code: 'CANCELLED', message: '任务拆解已取消。' }
 
   if (primary.ok) {

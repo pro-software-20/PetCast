@@ -44,6 +44,17 @@ export function registerDeepSeekExecutionIpc(options: RegisterDeepSeekExecutionI
     }
   }
 
+  ipcMain.handle('deepseek-execution:status', event => authorized(event)
+    ? manager.connectionStatus() : { configured: false, model: '' })
+  ipcMain.handle('deepseek-execution:configure', async (event, value: unknown) => {
+    if (!authorized(event) || !value || typeof value !== 'object') return { ok: false, message: '连接请求无效。' }
+    const input = value as Record<string, unknown>
+    if (Object.keys(input).some(key => !['apiKey', 'model'].includes(key)) || typeof input.apiKey !== 'string' || typeof input.model !== 'string') {
+      return { ok: false, message: '连接请求无效。' }
+    }
+    return manager.configureAccount(input.apiKey, input.model)
+  })
+
   ipcMain.handle('deepseek-execution:dispatch', async (
     event,
     value: unknown,

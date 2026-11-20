@@ -103,7 +103,7 @@ export type TaskPlanningServiceErrorCode =
   | 'INVALID_RESPONSE'
 
 export type TaskPlanningServiceResult =
-  | { ok: true; plan: TaskPlanningPlan; provider: 'deepseek' }
+  | { ok: true; plan: TaskPlanningPlan; provider: 'deepseek' | 'codex' }
   | { ok: false; code: TaskPlanningServiceErrorCode; retryAfterSeconds?: number }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
